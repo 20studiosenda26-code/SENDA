@@ -2,7 +2,7 @@ import { useStore } from '../store';
 import { Flame, Target, TrendingUp, Play, ArrowRight, CheckCircle2, Clock, AlertCircle, CalendarDays, GraduationCap, BookOpen } from 'lucide-react';
 
 export function HomeView() {
-  const { role, workers, currentWorkerId, brands, setView, config } = useStore();
+  const { role, workers, currentWorkerId, brands, setView, config, setSelectedVideo } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
   const goals = role === 'admin' ? config.goals.clipper : config.goals[role as 'clipper' | 'editor'];
 
@@ -24,9 +24,9 @@ export function HomeView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard icon={Target} label="Puntos hoy" value={worker?.pointsToday || 0} target={goals.daily} sub={`Meta: ${goals.daily}`} accent="accent" />
-        <StatCard icon={TrendingUp} label="Puntos del mes" value={worker?.pointsMonth || 0} target={goals.monthly} sub={`Meta: ${goals.monthly}`} accent="mint" />
-        <StatCard icon={Flame} label="Racha" value={worker?.streak || 0} target={worker?.bestStreak || 0} sub={`Mejor: ${worker?.bestStreak || 0}`} accent="amber" />
+        <StatCard icon={Target} label="Puntos hoy" value={worker?.pointsToday || 0} target={goals.daily} sub={`Meta: ${goals.daily}`} accent="accent" onClick={() => setView('tareas')} />
+        <StatCard icon={TrendingUp} label="Puntos del mes" value={worker?.pointsMonth || 0} target={goals.monthly} sub={`Meta: ${goals.monthly}`} accent="mint" onClick={() => setView('tareas')} />
+        <StatCard icon={Flame} label="Racha" value={worker?.streak || 0} target={worker?.bestStreak || 0} sub={`Mejor: ${worker?.bestStreak || 0}`} accent="amber" onClick={() => setView('tareas')} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -42,7 +42,11 @@ export function HomeView() {
           ) : (
             <div className="space-y-2">
               {inProgress.slice(0, 4).map(v => (
-                <div key={v.id} className="flex items-center gap-3 p-3 bg-surface-3 rounded-lg">
+                <button
+                  key={v.id}
+                  onClick={() => { setSelectedVideo(v); setView('tareas'); }}
+                  className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-2 border border-transparent hover:border-accent/40 rounded-lg text-left transition-colors"
+                >
                   <div className="w-10 h-10 rounded-lg bg-accent-dim flex items-center justify-center shrink-0">
                     <Play size={16} className="text-accent" />
                   </div>
@@ -51,7 +55,7 @@ export function HomeView() {
                     <p className="text-xs text-muted">QC: {v.qc.replace(/_/g, ' ')}</p>
                   </div>
                   <QcBadge status={v.qc} />
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -122,7 +126,7 @@ export function HomeView() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, target, sub, accent }: { icon: typeof Flame; label: string; value: number; target: number; sub: string; accent: string }) {
+function StatCard({ icon: Icon, label, value, target, sub, accent, onClick }: { icon: typeof Flame; label: string; value: number; target: number; sub: string; accent: string; onClick?: () => void }) {
   const colorMap: Record<string, { text: string; soft: string; fill: string; border: string }> = {
     accent: { text: 'text-accent', soft: 'bg-accent-dim', fill: 'bg-accent', border: 'border-accent/30' },
     mint: { text: 'text-mint', soft: 'bg-mint-dim', fill: 'bg-mint', border: 'border-mint/30' },
@@ -142,7 +146,11 @@ function StatCard({ icon: Icon, label, value, target, sub, accent }: { icon: typ
   ];
 
   return (
-    <div className={`bg-surface-2 border border-line rounded-xl p-5 ${isStreak ? 'min-h-[160px]' : ''}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left bg-surface-2 border border-line rounded-xl p-5 transition-colors ${isStreak ? 'min-h-[160px]' : ''} ${onClick ? 'hover:border-accent/50 hover:bg-surface-3 cursor-pointer' : ''}`}
+    >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colors.soft} ${colors.text}`}>
@@ -176,7 +184,7 @@ function StatCard({ icon: Icon, label, value, target, sub, accent }: { icon: typ
         </div>
       )}
       {isStreak && <p className="text-xs text-muted-2 mt-3">{value} días · {sub}</p>}
-    </div>
+    </button>
   );
 }
 
