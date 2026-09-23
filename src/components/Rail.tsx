@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import type { ViewKey, Role } from '../types';
-import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Shield, Settings, Moon, Sun } from 'lucide-react';
+import { useAuth } from '../lib/auth';
+import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Shield, Settings, Moon, Sun, LogOut } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 
 const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] = [
@@ -15,8 +16,10 @@ const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] =
   { key: 'configuracion', label: 'Config', icon: Settings, roles: ['admin'] },
 ];
 
-export function Rail() {
-  const { role, view, setView, theme, toggleTheme, setSelectedClassroomModuleId } = useStore();
+export function Rail({ onSignOut }: { onSignOut: () => void }) {
+  const { view, setView, theme, toggleTheme, setSelectedClassroomModuleId } = useStore();
+  const { user } = useAuth();
+  const role = user?.role || 'clipper';
   const items = NAV.filter(n => n.roles.includes(role));
 
   return (
@@ -49,6 +52,13 @@ export function Rail() {
         className="w-10 h-10 rounded-lg flex items-center justify-center text-muted hover:text-text hover:bg-surface-2 transition-colors"
       >
         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+      </button>
+      <button
+        onClick={onSignOut}
+        title="Cerrar sesión"
+        className="w-10 h-10 rounded-lg flex items-center justify-center text-muted hover:text-red-400 hover:bg-surface-2 transition-colors"
+      >
+        <LogOut size={20} />
       </button>
     </aside>
   );

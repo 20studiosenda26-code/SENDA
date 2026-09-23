@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import type { NotificationCategory, Role } from '../types';
-import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, DollarSign, MessageSquare, Info } from 'lucide-react';
+import { useAuth, type AuthUser } from '../lib/auth';
+import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, DollarSign, MessageSquare, Info, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import sendaLogo from '../assets/senda-logo.png';
 
@@ -45,15 +46,14 @@ const VIEW_TITLES: Record<string, string> = {
   configuracion: 'Configuración',
 };
 
-export function TopBar() {
-  const { role, setRole, view, notifications, deleteNotification, clearNotifications, workers, currentWorkerId, setCurrentWorkerId } = useStore();
+export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut: () => void }) {
+  const { view, notifications, deleteNotification, clearNotifications } = useStore();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const worker = workers.find(w => w.id === currentWorkerId);
-  // El admin ve todos los movimientos de todos; clíper y editor solo ven lo
-  // dirigido a su propio usuario (o difundido a todo su rol sin workerId).
+  const role = authUser.role;
+
   const roleNotifs = notifications
-    .filter(n => n.role === role && (role === 'admin' || !n.workerId || n.workerId === currentWorkerId))
+    .filter(n => n.role === role)
     .sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
 
   return (
@@ -66,18 +66,9 @@ export function TopBar() {
           <img src={sendaLogo} alt="Senda" className="w-6 h-6 object-contain" />
           <span className="font-display font-semibold text-sm">SENDA</span>
         </div>
-        <div className="flex bg-surface-2 rounded-lg p-0.5 border border-line">
-          {(['clipper', 'editor', 'admin'] as Role[]).map(r => (
-            <button
-              key={r}
-              onClick={() => setRole(r)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                role === r ? 'bg-accent text-on-accent' : 'text-muted hover:text-text'
-              }`}
-            >
-              {ROLE_LABELS[r]}
-            </button>
-          ))}
+
+        <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-1.5">
+          <span className="text-xs text-muted-2">{ROLE_LABELS[role]}</span>
         </div>
 
         <div className="relative">
@@ -146,10 +137,10 @@ export function TopBar() {
           >
             <div className="w-7 h-7 rounded-md bg-accent-dim flex items-center justify-center">
               <span className="text-sm font-semibold text-accent">
-                {worker?.name.charAt(0) || '?'}
+                {authUser.name.charAt(0) || '?'}
               </span>
             </div>
-            <span className="text-sm font-medium">{worker?.name || 'Usuario'}</span>
+            <span className="text-sm font-medium">{authUser.name}</span>
             <ChevronDown size={14} className="text-muted" />
           </button>
           {profileOpen && (
@@ -157,23 +148,15 @@ export function TopBar() {
               <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
               <div className="absolute right-0 mt-2 w-56 bg-surface-2 border border-line rounded-xl shadow-xl z-50 overflow-hidden">
                 <div className="px-4 py-3 border-b border-line">
-                  <p className="text-sm font-semibold">{worker?.name}</p>
-                  <p className="text-xs text-muted">{ROLE_LABELS[role]}</p>
+                  <p className="text-sm font-semibold">{authUser.name}</p>
+                  <p className="text-xs text-muted">{ROLE_LABELS[role]} · {authUser.email}</p>
                 </div>
-                <div className="py-1">
-                  {workers.map(w => (
-                    <button
-                      key={w.id}
-                      onClick={() => { setCurrentWorkerId(w.id); setProfileOpen(false); }}
-                      className={`w-full text-left px-4 py-2 text-sm hover:bg-surface-3 transition-colors flex items-center justify-between ${
-                        w.id === currentWorkerId ? 'text-accent' : 'text-text'
-                      }`}
-                    >
-                      {w.name}
-                      <span className="text-xs text-muted-2">{w.cargo}</span>
-                    </button>
-                  ))}
-                </div>
+                <button
+                  onClick={() => { setProfileOpen(false); onSignOut(); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-surface-3 transition-colors flex items-center gap-2"
+                >
+                  <LogOut size={14} /> Cerrar sesión
+                </button>
               </div>
             </>
           )}
