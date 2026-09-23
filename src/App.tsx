@@ -1,10 +1,10 @@
 import { StoreProvider, useStore } from './store';
 import { Rail } from './components/Rail';
 import { TopBar } from './components/TopBar';
+import { BrandBackground } from './components/BrandBackground';
 import { HomeView } from './views/HomeView';
 import { TasksView } from './views/TasksView';
 import { ChatView } from './views/ChatView';
-import { CarpetaView } from './views/CarpetaView';
 import { CalendarView } from './views/CalendarView';
 import { ClassroomView } from './views/ClassroomView';
 import { ContractsView } from './views/ContractsView';
@@ -25,7 +25,6 @@ function Shell() {
       case 'home': return <HomeView />;
       case 'tareas': return <TasksView />;
       case 'chat': return <ChatView />;
-      case 'carpeta': return <CarpetaView />;
       case 'calendario': return <CalendarView />;
       case 'classroom': return <ClassroomView />;
       case 'contratos': return <ContractsView />;
@@ -37,13 +36,16 @@ function Shell() {
   };
 
   return (
-    <div className="min-h-screen bg-ink text-text">
-      <Rail />
-      <div className="ml-16">
-        <TopBar />
-        <main className="min-h-[calc(100vh-4rem)]">
-          {renderView()}
-        </main>
+    <div className="min-h-screen bg-ink text-text relative">
+      <BrandBackground />
+      <div className="relative z-10">
+        <Rail />
+        <div className="ml-16">
+          <TopBar />
+          <main className="min-h-[calc(100vh-4rem)]">
+            {renderView()}
+          </main>
+        </div>
       </div>
     </div>
   );

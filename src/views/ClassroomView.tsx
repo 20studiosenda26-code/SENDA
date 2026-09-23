@@ -1,7 +1,10 @@
 import { CLASSROOM_MODULES } from '../data';
-import { GraduationCap, Play, CheckCircle2, Lock, BookOpen, Award } from 'lucide-react';
+import { useStore } from '../store';
+import { GraduationCap, Play, CheckCircle2, Lock, BookOpen, Award, ArrowLeft } from 'lucide-react';
 
 export function ClassroomView() {
+  const { selectedClassroomModuleId, setSelectedClassroomModuleId } = useStore();
+
   const colorMap: Record<string, string> = {
     accent: 'text-accent bg-accent-dim',
     mint: 'text-mint bg-mint-dim',
@@ -11,6 +14,40 @@ export function ClassroomView() {
 
   const totalLessons = CLASSROOM_MODULES.reduce((s, m) => s + m.lessons, 0);
   const doneLessons = CLASSROOM_MODULES.reduce((s, m) => s + m.done, 0);
+
+  const selectedModule = CLASSROOM_MODULES.find(m => m.id === selectedClassroomModuleId);
+
+  if (selectedModule) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto space-y-4">
+        <button
+          onClick={() => setSelectedClassroomModuleId(null)}
+          className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
+        >
+          <ArrowLeft size={16} /> Volver a Classroom
+        </button>
+
+        <div className="bg-surface-2 border border-line rounded-xl overflow-hidden">
+          <div className="bg-black aspect-video w-full">
+            <video
+              key={selectedModule.id}
+              src={selectedModule.videoUrl}
+              controls
+              autoPlay
+              className="w-full h-full"
+            />
+          </div>
+          <div className="p-5">
+            <p className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md mb-2 ${colorMap[selectedModule.color]}`}>
+              <BookOpen size={12} /> {selectedModule.title}
+            </p>
+            <h2 className="font-display text-xl font-semibold">{selectedModule.currentLesson}</h2>
+            <p className="text-sm text-muted mt-1">{selectedModule.desc}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -55,7 +92,10 @@ export function ClassroomView() {
                       <div className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-mint' : 'bg-accent'}`} style={{ width: `${pct}%` }} />
                     </div>
                     {!isLocked && (
-                      <button className={`text-sm font-medium flex items-center gap-1 ${isComplete ? 'text-mint' : 'text-accent hover:text-accent-strong'}`}>
+                      <button
+                        onClick={() => setSelectedClassroomModuleId(m.id)}
+                        className={`text-sm font-medium flex items-center gap-1 ${isComplete ? 'text-mint' : 'text-accent hover:text-accent-strong'}`}
+                      >
                         <Play size={14} /> {isComplete ? 'Repasar' : 'Continuar'}
                       </button>
                     )}

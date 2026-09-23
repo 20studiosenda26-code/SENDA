@@ -1,6 +1,6 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
-export type ViewKey = 'home' | 'tareas' | 'chat' | 'carpeta' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'administracion' | 'configuracion';
+export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'administracion' | 'configuracion';
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 
@@ -16,9 +16,12 @@ export interface Clip {
   id: string;
   name: string;
   note: string;
+  fileName?: string | null;
+  fileUrl?: string | null;
 }
 
 export interface Correction {
+  id: string;
   time: number;
   text: string;
 }
@@ -33,6 +36,7 @@ export interface Video {
   qc: QcStatus;
   editorQc: EditorQcStatus;
   duration: string | null;
+  durationSeconds: number;
   tierSnapshot: Tier | null;
   date: string;
   clips: Clip[];
@@ -40,6 +44,9 @@ export interface Video {
   finalUploaded: boolean;
   paid50: boolean;
   paid100: boolean;
+  briefFileName?: string | null;
+  briefFileUrl?: string | null;
+  sentByClipper?: boolean;
 }
 
 export interface Brand {
@@ -61,6 +68,21 @@ export interface Worker {
   bestStreak: number;
   streakLog: ('on' | 'off')[];
   dayClosedToday: boolean;
+  online: boolean;
+  phone?: string;
+  email?: string;
+  bankInfo?: string;
+  country?: string;
+  restDay?: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  day: number;
+  label: string;
+  color: string;
+  link?: string;
+  note?: string;
 }
 
 export interface NotificationItem {

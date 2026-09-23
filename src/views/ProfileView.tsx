@@ -1,9 +1,25 @@
 import { useStore } from '../store';
-import { Flame, TrendingUp, Target, Calendar, CheckCircle2, Clock, Award, Star } from 'lucide-react';
+import { Flame, TrendingUp, Target, Calendar, CheckCircle2, Clock, Award, Star, Phone, Mail, Landmark, Globe2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 export function ProfileView() {
-  const { workers, currentWorkerId, brands, config, role } = useStore();
+  const { workers, currentWorkerId, brands, config, role, updateWorkerProfile, toggleOnline } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
+
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [bankInfo, setBankInfo] = useState('');
+  const [country, setCountry] = useState('');
+
+  useEffect(() => {
+    if (worker) {
+      setPhone(worker.phone || '');
+      setEmail(worker.email || '');
+      setBankInfo(worker.bankInfo || '');
+      setCountry(worker.country || '');
+    }
+  }, [worker?.id]);
+
   if (!worker) return null;
 
   const myVideos = brands.flatMap(b => b.videos).filter(v =>
@@ -22,7 +38,18 @@ export function ProfileView() {
           <div className="flex-1">
             <h2 className="font-display text-2xl font-bold">{worker.name}</h2>
             <p className="text-muted">{worker.cargo} · Ingresó {worker.ingreso}</p>
-            <span className="inline-flex items-center gap-1 text-xs text-mint mt-1"><CheckCircle2 size={12} /> {worker.estado}</span>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="inline-flex items-center gap-1 text-xs text-mint"><CheckCircle2 size={12} /> {worker.estado}</span>
+              {role !== 'admin' && (
+                <button
+                  onClick={() => toggleOnline(worker.id)}
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium ${worker.online ? 'text-mint' : 'text-muted-2'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
+                  {worker.online ? 'En línea' : 'No en línea'}
+                </button>
+              )}
+            </div>
           </div>
           <div className="text-right">
             <div className="flex items-center gap-1 text-amber justify-end">
@@ -75,6 +102,36 @@ export function ProfileView() {
           </div>
         </div>
       </div>
+
+      {role !== 'admin' && (
+        <div className="bg-surface-2 border border-line rounded-xl p-5">
+          <h3 className="font-display text-base font-semibold mb-4">Información personal</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-xs text-muted space-y-1">
+              <span className="flex items-center gap-1.5"><Phone size={12} /> Celular</span>
+              <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+57 300 000 0000" className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
+            </label>
+            <label className="text-xs text-muted space-y-1">
+              <span className="flex items-center gap-1.5"><Mail size={12} /> Correo</span>
+              <input value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
+            </label>
+            <label className="text-xs text-muted space-y-1">
+              <span className="flex items-center gap-1.5"><Globe2 size={12} /> País de residencia</span>
+              <input value={country} onChange={e => setCountry(e.target.value)} placeholder="Colombia" className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
+            </label>
+            <label className="text-xs text-muted space-y-1">
+              <span className="flex items-center gap-1.5"><Landmark size={12} /> Información de cuenta bancaria</span>
+              <input value={bankInfo} onChange={e => setBankInfo(e.target.value)} placeholder="Banco, número de cuenta, tipo" className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
+            </label>
+          </div>
+          <button
+            onClick={() => updateWorkerProfile(worker.id, { phone, email, bankInfo, country })}
+            className="mt-3 bg-accent text-on-accent rounded-md px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
+          >
+            Guardar información
+          </button>
+        </div>
+      )}
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
         <h3 className="font-display text-base font-semibold mb-3">Videos completados ({completed.length})</h3>

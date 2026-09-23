@@ -1,12 +1,86 @@
 import { useStore } from '../store';
-import type { Video, QcStatus } from '../types';
-import { Play, Clock, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload } from 'lucide-react';
-import { useState } from 'react';
+import type { Video, QcStatus, Correction } from '../types';
+import { Play, Clock, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload, FileText, Download, Lock, Send } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+
+function fmtTime(t: number) {
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function VideoTimeline({
+  durationSeconds,
+  corrections,
+  editable,
+  onDragTime,
+  onTimelineClick,
+}: {
+  durationSeconds: number;
+  corrections: Correction[];
+  editable: boolean;
+  onDragTime: (correctionId: string, time: number) => void;
+  onTimelineClick?: (time: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  const timeFromClientX = useCallback((clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return Math.round(pct * durationSeconds);
+  }, [durationSeconds]);
+
+  useEffect(() => {
+    if (!draggingId) return;
+    const move = (e: MouseEvent) => onDragTime(draggingId, timeFromClientX(e.clientX));
+    const up = () => setDraggingId(null);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [draggingId, onDragTime, timeFromClientX]);
+
+  return (
+    <div className="pt-1">
+      <div
+        ref={trackRef}
+        onClick={e => {
+          if (!editable || !onTimelineClick) return;
+          onTimelineClick(timeFromClientX(e.clientX));
+        }}
+        className={`relative h-8 flex items-center ${editable ? 'cursor-pointer' : ''}`}
+      >
+        <div className="w-full h-[2px] bg-line rounded-full" />
+        {corrections.map(c => {
+          const pct = Math.min(100, Math.max(0, (c.time / Math.max(durationSeconds, 1)) * 100));
+          return (
+            <div
+              key={c.id}
+              onMouseDown={e => { if (!editable) return; e.stopPropagation(); setDraggingId(c.id); }}
+              title={`${fmtTime(c.time)} · ${c.text}`}
+              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[3px] h-6 bg-red-500 rounded-full ${editable ? 'cursor-ew-resize hover:w-1' : ''}`}
+              style={{ left: `${pct}%` }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-2 mt-1">
+        <span>0:00</span>
+        <span>{fmtTime(durationSeconds)}</span>
+      </div>
+    </div>
+  );
+}
 
 export function TasksView() {
-  const { brands, role, currentWorkerId, setQc, addClip, addCorrection, setSelectedVideo, selectedVideo } = useStore();
+  const { brands, role, currentWorkerId, setQc, addClip, addCorrection, updateCorrectionTime, uploadBrief, sendVideo, setSelectedVideo, selectedVideo } = useStore();
   const allVideos = brands.flatMap(b => b.videos).filter(v =>
-    role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId
+    role === 'admin' ? true : role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId
   );
   const grouped = {
     sin_iniciar: allVideos.filter(v => v.qc === 'sin_iniciar'),
@@ -16,7 +90,19 @@ export function TasksView() {
   };
 
   if (selectedVideo) {
-    return <VideoDetail video={selectedVideo} onClose={() => setSelectedVideo(null)} onSetQc={setQc} onAddClip={addClip} onAddCorrection={addCorrection} role={role} />;
+    return (
+      <VideoDetail
+        video={selectedVideo}
+        onClose={() => setSelectedVideo(null)}
+        onSetQc={setQc}
+        onAddClip={addClip}
+        onAddCorrection={addCorrection}
+        onUpdateCorrectionTime={updateCorrectionTime}
+        onUploadBrief={uploadBrief}
+        onSendVideo={sendVideo}
+        role={role}
+      />
+    );
   }
 
   const columns: { key: QcStatus | 'revision' | 'aprobado'; label: string; color: string }[] = [
@@ -65,32 +151,84 @@ export function TasksView() {
   );
 }
 
-function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role }: {
+function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, onUpdateCorrectionTime, onUploadBrief, onSendVideo, role }: {
   video: Video;
   onClose: () => void;
   onSetQc: (id: string, s: QcStatus) => void;
-  onAddClip: (id: string, name: string, note: string) => void;
+  onAddClip: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
   onAddCorrection: (id: string, time: number, text: string) => void;
+  onUpdateCorrectionTime: (id: string, correctionId: string, time: number) => void;
+  onUploadBrief: (id: string, fileName: string, fileUrl: string) => void;
+  onSendVideo: (id: string) => void;
   role: string;
 }) {
   const [showClipForm, setShowClipForm] = useState(false);
   const [showCorrForm, setShowCorrForm] = useState(false);
   const [clipName, setClipName] = useState('');
   const [clipNote, setClipNote] = useState('');
+  const [clipFileName, setClipFileName] = useState('');
+  const [clipFileUrl, setClipFileUrl] = useState('');
   const [corrTime, setCorrTime] = useState('');
   const [corrText, setCorrText] = useState('');
+  const briefInputRef = useRef<HTMLInputElement>(null);
 
+  const isAdmin = role === 'admin';
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
+
+  const handleClipFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setClipFileName(f.name);
+      setClipFileUrl(URL.createObjectURL(f));
+    }
+  };
+
+  const handleBriefFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) onUploadBrief(video.id, f.name, URL.createObjectURL(f));
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center gap-3">
-        <button onClick={onClose} className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text transition-colors">
-          <X size={18} />
-        </button>
-        <div>
-          <h2 className="font-display text-2xl font-bold">{video.name}</h2>
-          <p className="text-sm text-muted">{video.clipperName} → {video.editorName} · {video.date}</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <button onClick={onClose} className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text transition-colors">
+            <X size={18} />
+          </button>
+          <div>
+            <h2 className="font-display text-2xl font-bold">{video.name}</h2>
+            <p className="text-sm text-muted">{video.clipperName} → {video.editorName} · {video.date}</p>
+          </div>
+        </div>
+
+        {/* Brief / trabajo asignado */}
+        <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2">
+          <FileText size={16} className="text-accent shrink-0" />
+          <div className="text-xs">
+            <p className="font-medium">Brief / Trabajo asignado</p>
+            <p className="text-muted-2 truncate max-w-[160px]">{video.briefFileName || 'Sin archivo'}</p>
+          </div>
+          {isAdmin ? (
+            <>
+              <input ref={briefInputRef} type="file" className="hidden" onChange={handleBriefFile} />
+              <button
+                onClick={() => briefInputRef.current?.click()}
+                className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:bg-accent-strong transition-colors flex items-center gap-1"
+              >
+                <Upload size={12} /> Subir
+              </button>
+            </>
+          ) : (
+            <a
+              href={video.briefFileUrl || undefined}
+              download={video.briefFileName || undefined}
+              className={`text-xs rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1 transition-colors ${
+                video.briefFileUrl ? 'bg-accent text-on-accent hover:bg-accent-strong' : 'bg-surface-3 text-muted-2 pointer-events-none'
+              }`}
+            >
+              <Download size={12} /> Descargar
+            </a>
+          )}
         </div>
       </div>
 
@@ -103,6 +241,23 @@ function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role
               {video.duration && <p className="text-xs text-muted-2 mt-1">{video.duration}</p>}
             </div>
           </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium">Marcador de tiempo del error</p>
+              {!isAdmin && (
+                <span className="text-[10px] text-muted-2 flex items-center gap-1"><Lock size={10} /> Solo lectura</span>
+              )}
+            </div>
+            <VideoTimeline
+              durationSeconds={video.durationSeconds || 60}
+              corrections={video.corrections}
+              editable={isAdmin}
+              onDragTime={(correctionId, time) => onUpdateCorrectionTime(video.id, correctionId, time)}
+              onTimelineClick={time => { setCorrTime(String(time)); setShowCorrForm(true); }}
+            />
+          </div>
+
           <div>
             <p className="text-sm font-medium mb-2">Estado de QC</p>
             <div className="flex flex-wrap gap-2">
@@ -119,7 +274,7 @@ function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role
               ))}
             </div>
           </div>
-          {role === 'admin' && (
+          {isAdmin && (
             <div className="flex gap-2">
               <span className={`text-xs px-2 py-1 rounded ${video.paid50 ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted'}`}>
                 Pago 50%: {video.paid50 ? 'Liberado' : 'Pendiente'}
@@ -135,35 +290,66 @@ function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role
           <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display text-base font-semibold flex items-center gap-2">
-                <Film size={16} className="text-accent" /> Clips marcados
+                <Film size={16} className="text-accent" /> Clips generados
               </h3>
-              <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
-                <Plus size={14} /> Agregar
-              </button>
+              {!isAdmin && (
+                <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
+                  <Plus size={14} /> Agregar
+                </button>
+              )}
             </div>
             {showClipForm && (
               <div className="mb-3 space-y-2 p-3 bg-surface-3 rounded-lg">
                 <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                <button onClick={() => { if (clipName) { onAddClip(video.id, clipName, clipNote); setClipName(''); setClipNote(''); setShowClipForm(false); } }} className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors">
+                <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
+                  <Upload size={14} />
+                  {clipFileName || 'Subir archivo de video (cualquier formato)'}
+                  <input type="file" className="hidden" onChange={handleClipFile} />
+                </label>
+                <button
+                  onClick={() => {
+                    if (clipName) {
+                      onAddClip(video.id, clipName, clipNote, clipFileName || undefined, clipFileUrl || undefined);
+                      setClipName(''); setClipNote(''); setClipFileName(''); setClipFileUrl(''); setShowClipForm(false);
+                    }
+                  }}
+                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
+                >
                   Guardar clip
                 </button>
               </div>
             )}
             {video.clips.length === 0 ? (
-              <p className="text-sm text-muted text-center py-4">Sin clips marcados</p>
+              <p className="text-sm text-muted text-center py-4">Sin clips generados</p>
             ) : (
               <div className="space-y-2">
                 {video.clips.map(c => (
                   <div key={c.id} className="flex items-start gap-2 p-2 bg-surface-3 rounded-lg">
                     <CheckCircle2 size={14} className="text-mint mt-0.5 shrink-0" />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{c.name}</p>
                       {c.note && <p className="text-xs text-muted">{c.note}</p>}
+                      {c.fileName && (
+                        <a href={c.fileUrl || undefined} download={c.fileName} className="text-xs text-accent flex items-center gap-1 mt-0.5">
+                          <Download size={11} /> {c.fileName}
+                        </a>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
+            )}
+            {!isAdmin && video.clips.length > 0 && (
+              <button
+                onClick={() => onSendVideo(video.id)}
+                disabled={video.sentByClipper}
+                className={`w-full mt-3 rounded-md py-2.5 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                  video.sentByClipper ? 'bg-mint-dim text-mint cursor-default' : 'bg-accent text-on-accent hover:bg-accent-strong'
+                }`}
+              >
+                {video.sentByClipper ? <><CheckCircle2 size={16} /> Video enviado</> : <><Send size={16} /> Enviar video</>}
+              </button>
             )}
           </div>
 
@@ -172,11 +358,13 @@ function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role
               <h3 className="font-display text-base font-semibold flex items-center gap-2">
                 <MessageSquare size={16} className="text-amber" /> Correcciones
               </h3>
-              <button onClick={() => setShowCorrForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
-                <Plus size={14} /> Agregar
-              </button>
+              {isAdmin && (
+                <button onClick={() => setShowCorrForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
+                  <Plus size={14} /> Agregar
+                </button>
+              )}
             </div>
-            {showCorrForm && (
+            {isAdmin && showCorrForm && (
               <div className="mb-3 space-y-2 p-3 bg-surface-3 rounded-lg">
                 <input value={corrTime} onChange={e => setCorrTime(e.target.value)} placeholder="Tiempo (seg)" type="number" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
                 <input value={corrText} onChange={e => setCorrText(e.target.value)} placeholder="Descripción" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
@@ -189,20 +377,23 @@ function VideoDetail({ video, onClose, onSetQc, onAddClip, onAddCorrection, role
               <p className="text-sm text-muted text-center py-4">Sin correcciones</p>
             ) : (
               <div className="space-y-2">
-                {video.corrections.map((c, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-surface-3 rounded-lg">
+                {video.corrections.map(c => (
+                  <div key={c.id} className="flex items-start gap-2 p-2 bg-surface-3 rounded-lg">
                     <AlertCircle size={14} className="text-amber mt-0.5 shrink-0" />
                     <div>
-                      <span className="text-xs text-amber font-mono">{c.time}s</span>
+                      <span className="text-xs text-amber font-mono">{fmtTime(c.time)}</span>
                       <p className="text-sm">{c.text}</p>
                     </div>
                   </div>
                 ))}
               </div>
             )}
+            {!isAdmin && (
+              <p className="text-[10px] text-muted-2 flex items-center gap-1 mt-3"><Lock size={10} /> Solo el admin puede dejar o editar correcciones</p>
+            )}
           </div>
 
-          {role === 'admin' && (
+          {isAdmin && (
             <div className="flex gap-2">
               <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Aprobar Senda

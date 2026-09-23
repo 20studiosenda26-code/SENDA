@@ -2,6 +2,7 @@ import { useStore } from '../store';
 import type { Role } from '../types';
 import { Bell, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import sendaLogo from '../assets/senda-logo.png';
 
 const ROLE_LABELS: Record<Role, string> = {
   clipper: 'Clipper',
@@ -13,7 +14,6 @@ const VIEW_TITLES: Record<string, string> = {
   home: 'Inicio',
   tareas: 'Tareas',
   chat: 'Chat',
-  carpeta: 'Carpeta',
   calendario: 'Calendario',
   classroom: 'Classroom',
   contratos: 'Contratos',
@@ -31,8 +31,14 @@ export function TopBar() {
 
   return (
     <header className="sticky top-0 z-40 h-16 bg-surface/80 backdrop-blur-md border-b border-line flex items-center justify-between px-6">
-      <h1 className="font-display text-xl font-semibold">{VIEW_TITLES[view] || 'Senda'}</h1>
       <div className="flex items-center gap-3">
+        <h1 className="font-display text-xl font-semibold">{VIEW_TITLES[view] || 'Senda'}</h1>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-2 bg-surface-2 border border-line rounded-lg pl-1.5 pr-3 py-1">
+          <img src={sendaLogo} alt="Senda" className="w-6 h-6 object-contain" />
+          <span className="font-display font-semibold text-sm">SENDA</span>
+        </div>
         <div className="flex bg-surface-2 rounded-lg p-0.5 border border-line">
           {(['clipper', 'editor', 'admin'] as Role[]).map(r => (
             <button

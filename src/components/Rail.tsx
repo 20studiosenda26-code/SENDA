@@ -1,12 +1,12 @@
 import { useStore } from '../store';
 import type { ViewKey, Role } from '../types';
-import { Home, CheckSquare, MessageSquare, FolderOpen, Calendar, GraduationCap, FileText, User, Shield, Settings, Moon, Sun } from 'lucide-react';
+import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Shield, Settings, Moon, Sun } from 'lucide-react';
+import sendaLogo from '../assets/senda-logo.png';
 
 const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] = [
   { key: 'home', label: 'Inicio', icon: Home, roles: ['clipper', 'editor', 'admin'] },
-  { key: 'tareas', label: 'Tareas', icon: CheckSquare, roles: ['clipper', 'editor'] },
+  { key: 'tareas', label: 'Tareas', icon: CheckSquare, roles: ['clipper', 'editor', 'admin'] },
   { key: 'chat', label: 'Chat', icon: MessageSquare, roles: ['clipper', 'editor', 'admin'] },
-  { key: 'carpeta', label: 'Carpeta', icon: FolderOpen, roles: ['clipper', 'editor', 'admin'] },
   { key: 'calendario', label: 'Calendario', icon: Calendar, roles: ['clipper', 'editor', 'admin'] },
   { key: 'classroom', label: 'Classroom', icon: GraduationCap, roles: ['clipper', 'editor'] },
   { key: 'contratos', label: 'Contratos', icon: FileText, roles: ['clipper', 'editor'] },
@@ -16,13 +16,13 @@ const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] =
 ];
 
 export function Rail() {
-  const { role, view, setView, theme, toggleTheme } = useStore();
+  const { role, view, setView, theme, toggleTheme, setSelectedClassroomModuleId } = useStore();
   const items = NAV.filter(n => n.roles.includes(role));
 
   return (
     <aside className="fixed left-0 top-0 h-full w-16 bg-surface border-r border-line flex flex-col items-center py-4 gap-1 z-50">
-      <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center mb-3 shrink-0">
-        <span className="font-display font-bold text-on-accent text-lg">S</span>
+      <div className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center mb-3 shrink-0 overflow-hidden p-1">
+        <img src={sendaLogo} alt="Senda" className="w-full h-full object-contain" />
       </div>
       <nav className="flex-1 flex flex-col gap-1 overflow-y-auto">
         {items.map(item => {
@@ -31,7 +31,7 @@ export function Rail() {
           return (
             <button
               key={item.key}
-              onClick={() => setView(item.key)}
+              onClick={() => { if (item.key === 'classroom') setSelectedClassroomModuleId(null); setView(item.key); }}
               title={item.label}
               className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150 group relative ${
                 active ? 'bg-accent-dim text-accent' : 'text-muted hover:text-text hover:bg-surface-2'
