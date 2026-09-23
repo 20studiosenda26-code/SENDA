@@ -131,7 +131,7 @@ export function HomeView() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {CLASSROOM_MODULES.slice(0, 3).map(m => {
-            const progress = Math.round((m.done / m.lessons) * 100);
+            const totalLessons = m.lessons.length;
             const shortTitle = m.title.replace(/^Módulo \d+ · /, '');
             return (
               <button
@@ -146,10 +146,7 @@ export function HomeView() {
                   <ArrowRight size={14} className="text-muted-2 group-hover:text-accent transition-colors mt-1" />
                 </div>
                 <p className="text-sm font-medium mt-3">{shortTitle}</p>
-                <p className="text-xs text-muted mt-1">{m.done} de {m.lessons} lecciones</p>
-                <div className="h-1.5 bg-surface-2 rounded-full overflow-hidden mt-3">
-                  <div className={`h-full rounded-full ${m.color === 'mint' ? 'bg-mint' : m.color === 'amber' ? 'bg-amber' : 'bg-accent'}`} style={{ width: `${progress}%` }} />
-                </div>
+                <p className="text-xs text-muted mt-1">{totalLessons} lecciones</p>
               </button>
             );
           })}
