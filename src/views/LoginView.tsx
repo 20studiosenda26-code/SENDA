@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { sendaLogo } from '../assets/senda-logo.png';
 import { Mail, Lock, LogIn, AlertCircle, Loader2 } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 

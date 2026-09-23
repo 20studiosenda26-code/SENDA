@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabaseClient';
-import { UserPlus, X, Users, Mail, Shield, Trash2, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { UserPlus, X, Users, Shield, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import type { Role } from '../types';
 import type { AuthUser } from '../lib/auth';
 
@@ -16,28 +16,26 @@ export function UserManagement() {
   const [formRole, setFormRole] = useState<Role>('clipper');
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const loadUsers = async () => {
-    if (!supabase || loaded) return;
+  const loadUsers = useCallback(async () => {
+    if (!supabase) return;
     setLoading(true);
     const { data } = await supabase.from('profiles').select('id, name, role').order('created_at', { ascending: false });
     if (data) {
-      const { data: authData } = await supabase.auth.admin.listUsers();
-      const emailMap = new Map<string, string>();
-      if (authData?.users) {
-        for (const u of authData.users) emailMap.set(u.id, u.email || '');
-      }
       setUsers(data.map(p => ({
         id: p.id,
-        email: emailMap.get(p.id) || '',
+        email: '',
         name: p.name,
         role: p.role as Role,
       })));
     }
-    setLoaded(true);
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers, reloadKey]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,17 +71,14 @@ export function UserManagement() {
         setFormEmail('');
         setFormPassword('');
         setFormRole('clipper');
-        setLoaded(false);
-        loadUsers();
+        setReloadKey(k => k + 1);
         setTimeout(() => setFormSuccess(null), 3000);
       }
-    } catch (err) {
+    } catch {
       setFormError('Error de conexión');
     }
     setLoading(false);
   };
-
-  loadUsers();
 
   return (
     <div className="bg-surface-2 border border-line rounded-xl p-5">

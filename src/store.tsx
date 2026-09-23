@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef, ty
 import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES } from './data';
 import { loadShared, saveShared, isSupabaseConfigured } from './lib/supabaseClient';
+import { useAuth } from './lib/auth';
 
 // --- Persistencia ---
 // Las tareas/videos (con sus clips, imágenes principales, notas, estados de
@@ -78,7 +79,6 @@ function applyNotificationReset(list: NotificationItem[]): NotificationItem[] {
 
 interface Store {
   role: Role;
-  setRole: (r: Role) => void;
   theme: ThemeMode;
   toggleTheme: () => void;
   view: ViewKey;
@@ -137,7 +137,8 @@ export function useStore() {
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<Role>('clipper');
+  const { user } = useAuth();
+  const role: Role = user?.role || 'clipper';
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [view, setView] = useState<ViewKey>('home');
   const [brands, setBrands] = useState<Brand[]>(() => loadState('brands', INITIAL_BRANDS));
@@ -520,7 +521,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const store: Store = {
-    role, setRole, theme, toggleTheme, view, setView,
+    role, theme, toggleTheme, view, setView,
     brands, workers, notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,
