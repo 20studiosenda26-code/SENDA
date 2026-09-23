@@ -4,6 +4,7 @@ export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
+export type ClipStatus = 'pending' | 'approved' | 'rejected';
 
 export interface Tier {
   key: string;
@@ -13,12 +14,34 @@ export interface Tier {
   editorPay: number;
 }
 
+export interface ClipVersion {
+  fileName: string | null;
+  fileUrl: string | null;
+  replacedAt: string;
+}
+
 export interface Clip {
   id: string;
   name: string;
   note: string;
   fileName?: string | null;
   fileUrl?: string | null;
+  /** Estado de revisión del clip por parte del Admin. */
+  status?: ClipStatus;
+  /** Motivo escrito por el Admin cuando el clip se rechaza. */
+  rejectionReason?: string | null;
+  /** Nota interna del Admin asociada al clip (no necesariamente un rechazo). */
+  adminNote?: string | null;
+  /** Quién revisó el clip (por ahora siempre "Admin", no hay login de admins individuales). */
+  reviewedBy?: string | null;
+  /** Fecha/hora ISO de la última revisión (aprobación o rechazo). */
+  reviewedAt?: string | null;
+  /** Momento (en segundos) señalado por el Admin dentro del video del clip. */
+  markerTime?: number | null;
+  /** Número de versión actual (1 = original, sube con cada resubida). */
+  version?: number;
+  /** Historial de versiones anteriores, si el Clipper resubió el video. */
+  previousVersions?: ClipVersion[];
 }
 
 export interface Correction {

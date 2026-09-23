@@ -1,9 +1,10 @@
 import { useStore } from '../store';
-import type { Video, QcStatus, Correction, MainImageStatus } from '../types';
+import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip } from '../types';
+import { uploadSharedFile } from '../lib/supabaseClient';
 import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
-  ThumbsUp, ThumbsDown,
+  ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -13,16 +14,16 @@ function fmtTime(t: number) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// Convierte un archivo subido a data URL (base64) para que quede guardado
-// de forma persistente en la plataforma (localStorage) y sobreviva a
-// recargas de página, en vez de perderse como pasa con un blob URL.
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+function clipStatusLabel(status?: ClipStatus | null) {
+  if (status === 'approved') return 'Aceptado';
+  if (status === 'rejected') return 'Rechazado';
+  return 'Pendiente de revisión';
+}
+
+function clipStatusClasses(status?: ClipStatus | null) {
+  if (status === 'approved') return 'bg-mint-dim text-mint';
+  if (status === 'rejected') return 'bg-red-500/10 text-red-400';
+  return 'bg-amber-dim text-amber';
 }
 
 function isImageFile(name?: string | null) {
@@ -100,7 +101,8 @@ function VideoTimeline({
 
 export function TasksView() {
   const {
-    brands, role, currentWorkerId, setQc, addClip, addCorrection, updateCorrectionTime,
+    brands, role, currentWorkerId, setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
+    addCorrection, updateCorrectionTime,
     uploadBrief, addFinalVideo, uploadMainImage, setMainImageStatus, sendVideo,
     setSelectedVideo, selectedVideo,
   } = useStore();
@@ -121,6 +123,10 @@ export function TasksView() {
         onClose={() => setSelectedVideo(null)}
         onSetQc={setQc}
         onAddClip={addClip}
+        onReplaceClip={replaceClip}
+        onSetClipStatus={setClipStatus}
+        onSetClipMarkerTime={setClipMarkerTime}
+        onAcceptAllClips={acceptAllClips}
         onAddCorrection={addCorrection}
         onUpdateCorrectionTime={updateCorrectionTime}
         onUploadBrief={uploadBrief}
@@ -180,13 +186,18 @@ export function TasksView() {
 }
 
 function VideoDetail({
-  video, onClose, onSetQc, onAddClip, onAddCorrection, onUpdateCorrectionTime,
+  video, onClose, onSetQc, onAddClip, onReplaceClip, onSetClipStatus, onSetClipMarkerTime, onAcceptAllClips,
+  onAddCorrection, onUpdateCorrectionTime,
   onUploadBrief, onAddFinalVideo, onUploadMainImage, onSetMainImageStatus, onSendVideo, role,
 }: {
   video: Video;
   onClose: () => void;
   onSetQc: (id: string, s: QcStatus) => void;
   onAddClip: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
+  onReplaceClip: (id: string, clipId: string, fileName: string, fileUrl: string) => void;
+  onSetClipStatus: (id: string, clipId: string, status: ClipStatus, reason?: string) => void;
+  onSetClipMarkerTime: (id: string, clipId: string, time: number) => void;
+  onAcceptAllClips: (id: string) => void;
   onAddCorrection: (id: string, time: number, text: string) => void;
   onUpdateCorrectionTime: (id: string, correctionId: string, time: number) => void;
   onUploadBrief: (id: string, fileName: string, fileUrl: string) => void;
@@ -211,8 +222,16 @@ function VideoDetail({
   const [corrText, setCorrText] = useState('');
   const [mainImageComment, setMainImageComment] = useState('');
   const [previewOpenId, setPreviewOpenId] = useState<string | null>(null);
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectBox, setShowRejectBox] = useState(false);
+  const [confirmAcceptAll, setConfirmAcceptAll] = useState(false);
+  const [uploadingClipId, setUploadingClipId] = useState<string | null>(null);
+  const [uploadingNewClip, setUploadingNewClip] = useState(false);
   const briefInputRef = useRef<HTMLInputElement>(null);
   const mainImageInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const playerRef = useRef<HTMLVideoElement>(null);
 
   const isAdmin = role === 'admin';
   const isClipper = role === 'clipper';
@@ -220,37 +239,69 @@ function VideoDetail({
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
   const mainImageApproved = video.mainImageStatus === 'aprobada';
 
+  // Clip que se está mostrando en el reproductor integrado de la página.
+  // Por defecto, si solo hay un clip, se elige automáticamente.
+  const activeClip: Clip | null =
+    video.clips.find(c => c.id === activeClipId) ||
+    (video.clips.length === 1 ? video.clips[0] : null);
+
+  useEffect(() => {
+    setShowRejectBox(false);
+    setRejectReason('');
+  }, [activeClip?.id]);
+
   const handleClipFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
-      const dataUrl = await fileToDataUrl(f);
-      setClipFileName(f.name);
-      setClipFileUrl(dataUrl);
+      setUploadingNewClip(true);
+      try {
+        const url = await uploadSharedFile(f, `clips/${video.id}`);
+        setClipFileName(f.name);
+        setClipFileUrl(url);
+      } finally {
+        setUploadingNewClip(false);
+      }
+    }
+  };
+
+  // El Clipper reemplaza el archivo de un clip existente (equivocación o
+  // corrección tras un rechazo). No crea un clip duplicado: reemplaza el
+  // archivo del mismo clip y vuelve a quedar pendiente de revisión.
+  const handleReplaceClipFile = async (clipId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setUploadingClipId(clipId);
+      try {
+        const url = await uploadSharedFile(f, `clips/${video.id}`);
+        onReplaceClip(video.id, clipId, f.name, url);
+      } finally {
+        setUploadingClipId(null);
+      }
     }
   };
 
   const handleFinalFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
-      const dataUrl = await fileToDataUrl(f);
+      const url = await uploadSharedFile(f, `finals/${video.id}`);
       setFinalFileName(f.name);
-      setFinalFileUrl(dataUrl);
+      setFinalFileUrl(url);
     }
   };
 
   const handleBriefFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
-      const dataUrl = await fileToDataUrl(f);
-      onUploadBrief(video.id, f.name, dataUrl);
+      const url = await uploadSharedFile(f, `briefs/${video.id}`);
+      onUploadBrief(video.id, f.name, url);
     }
   };
 
   const handleMainImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
-      const dataUrl = await fileToDataUrl(f);
-      onUploadMainImage(video.id, f.name, dataUrl);
+      const url = await uploadSharedFile(f, `main-images/${video.id}`);
+      onUploadMainImage(video.id, f.name, url);
     }
   };
 
@@ -357,15 +408,145 @@ function VideoDetail({
         </div>
       </div>
 
+      {/* Imagen principal: vista previa independiente del clip/video. No se
+          mezcla con el reproductor de clips para evitar errores de asociación. */}
+      {(isClipper || isAdmin) && video.mainImageFileUrl && (
+        <div className="bg-surface-2 border border-line rounded-xl p-4">
+          <p className="text-sm font-medium mb-2 flex items-center gap-2">
+            <ImageIcon size={14} className="text-violet" /> Vista previa · Imagen principal
+          </p>
+          <div className="bg-surface-3 rounded-lg overflow-hidden max-h-72 flex items-center justify-center">
+            <img
+              src={video.mainImageFileUrl}
+              alt={video.mainImageFileName || 'Imagen principal'}
+              className="w-full max-h-72 object-contain"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
-          <div className="aspect-video bg-surface-3 rounded-lg flex items-center justify-center">
-            <div className="text-center">
-              <Film size={40} className="text-muted-2 mx-auto mb-2" />
-              <p className="text-sm text-muted">Vista previa del video</p>
-              {video.duration && <p className="text-xs text-muted-2 mt-1">{video.duration}</p>}
-            </div>
+          {/* Reproductor de clip integrado: al hacer clic sobre un clip en la
+              lista de la derecha, se reproduce aquí mismo (sin modal, sin
+              ojito, sin ventana externa). */}
+          <div className="aspect-video bg-surface-3 rounded-lg flex items-center justify-center overflow-hidden">
+            {activeClip?.fileUrl ? (
+              isImageFile(activeClip.fileName) ? (
+                <img src={activeClip.fileUrl} alt={activeClip.name} className="w-full h-full object-contain" />
+              ) : (
+                <video
+                  key={activeClip.id}
+                  ref={playerRef}
+                  src={activeClip.fileUrl}
+                  controls
+                  autoPlay
+                  className="w-full h-full object-contain"
+                />
+              )
+            ) : (
+              <div className="text-center">
+                <Film size={40} className="text-muted-2 mx-auto mb-2" />
+                <p className="text-sm text-muted">
+                  {video.clips.length > 0 ? 'Selecciona un clip para reproducirlo aquí' : 'Vista previa del video'}
+                </p>
+                {video.duration && <p className="text-xs text-muted-2 mt-1">{video.duration}</p>}
+              </div>
+            )}
           </div>
+
+          {activeClip && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-medium truncate">Clip activo: {activeClip.name}</p>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${clipStatusClasses(activeClip.status)}`}>
+                  {clipStatusLabel(activeClip.status)}
+                </span>
+              </div>
+
+              {/* Marcador de tiempo del error, asociado directamente a este clip */}
+              <div className="flex items-center gap-2 mt-1">
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      const t = Math.floor(playerRef.current?.currentTime || 0);
+                      onSetClipMarkerTime(video.id, activeClip.id, t);
+                    }}
+                    className="text-[11px] text-amber bg-amber-dim/40 border border-amber/20 rounded-md px-2 py-1 flex items-center gap-1 hover:bg-amber-dim/60 transition-colors shrink-0"
+                  >
+                    <Flag size={11} /> Marcar momento actual
+                  </button>
+                )}
+                <p className="text-xs text-muted-2">
+                  {activeClip.markerTime != null
+                    ? <>Momento señalado: <span className="text-amber font-mono">{fmtTime(activeClip.markerTime)}</span></>
+                    : 'Sin momento señalado'}
+                </p>
+              </div>
+
+              {/* Aprobar / Rechazar: solo Admin, controles compactos */}
+              {isAdmin && (
+                <div className="mt-3 pt-3 border-t border-line">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => { onSetClipStatus(video.id, activeClip.id, 'approved'); setShowRejectBox(false); }}
+                      title="Aceptar clip"
+                      className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-colors ${
+                        activeClip.status === 'approved'
+                          ? 'bg-mint text-on-accent border-mint'
+                          : 'bg-mint-dim text-mint border-mint/30 hover:bg-mint/20'
+                      }`}
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      onClick={() => setShowRejectBox(s => !s)}
+                      title="Rechazar clip"
+                      className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-colors ${
+                        activeClip.status === 'rejected'
+                          ? 'bg-red-500 text-white border-red-500'
+                          : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                      }`}
+                    >
+                      <X size={18} />
+                    </button>
+                    {activeClip.status && (
+                      <span className={`text-xs px-2 py-1 rounded ${clipStatusClasses(activeClip.status)}`}>
+                        {clipStatusLabel(activeClip.status)}
+                      </span>
+                    )}
+                  </div>
+                  {showRejectBox && (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Motivo del rechazo (obligatorio)"
+                        rows={2}
+                        className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent resize-none"
+                      />
+                      <button
+                        onClick={() => {
+                          if (rejectReason.trim()) {
+                            onSetClipStatus(video.id, activeClip.id, 'rejected', rejectReason.trim());
+                            setRejectReason('');
+                            setShowRejectBox(false);
+                          }
+                        }}
+                        disabled={!rejectReason.trim()}
+                        className="text-xs bg-red-500 text-white rounded-md px-3 py-1.5 font-medium hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Confirmar rechazo
+                      </button>
+                    </div>
+                  )}
+                  {activeClip.status === 'rejected' && activeClip.rejectionReason && (
+                    <p className="text-xs text-red-400 mt-2">Motivo: {activeClip.rejectionReason}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -439,7 +620,29 @@ function VideoDetail({
                   <Plus size={14} /> Agregar
                 </button>
               )}
+              {isAdmin && video.clips.some(c => c.fileUrl && c.status !== 'approved') && (
+                <button onClick={() => setConfirmAcceptAll(true)} className="text-xs bg-mint-dim text-mint rounded-md px-2.5 py-1.5 font-medium hover:bg-mint/20 transition-colors flex items-center gap-1">
+                  <Check size={12} /> Aceptar todos los clips
+                </button>
+              )}
             </div>
+
+            {confirmAcceptAll && (
+              <div className="mb-3 p-3 bg-surface-3 border border-line rounded-lg">
+                <p className="text-sm mb-2">¿Aceptar todos los clips de esta tarea?</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-surface-2 border border-line text-muted rounded-md py-1.5 text-xs font-medium hover:text-text transition-colors">
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => { onAcceptAllClips(video.id); setConfirmAcceptAll(false); }}
+                    className="flex-1 bg-mint text-on-accent rounded-md py-1.5 text-xs font-medium hover:opacity-90 transition-colors"
+                  >
+                    Aceptar todos
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isClipper && !mainImageApproved && (
               <p className="text-xs text-amber bg-amber-dim/40 border border-amber/20 rounded-lg px-3 py-2 mb-3">
@@ -452,9 +655,9 @@ function VideoDetail({
                 <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
                 <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
-                  <Upload size={14} />
-                  {clipFileName || 'Subir archivo de video (cualquier formato)'}
-                  <input type="file" className="hidden" onChange={handleClipFile} />
+                  {uploadingNewClip ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {clipFileName || (uploadingNewClip ? 'Subiendo...' : 'Subir archivo de video (cualquier formato)')}
+                  <input type="file" className="hidden" onChange={handleClipFile} disabled={uploadingNewClip} />
                 </label>
                 <button
                   onClick={() => {
@@ -463,7 +666,8 @@ function VideoDetail({
                       setClipName(''); setClipNote(''); setClipFileName(''); setClipFileUrl(''); setShowClipForm(false);
                     }
                   }}
-                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
+                  disabled={uploadingNewClip || !clipName}
+                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Guardar clip
                 </button>
@@ -474,36 +678,61 @@ function VideoDetail({
             ) : (
               <div className="space-y-2">
                 {video.clips.map(c => (
-                  <div key={c.id} className="p-2 bg-surface-3 rounded-lg">
+                  <div
+                    key={c.id}
+                    onClick={() => c.fileUrl && setActiveClipId(c.id)}
+                    className={`p-2 rounded-lg border transition-colors ${
+                      c.fileUrl ? 'cursor-pointer' : ''
+                    } ${
+                      activeClip?.id === c.id ? 'bg-accent-dim border-accent/40' : 'bg-surface-3 border-transparent hover:border-line'
+                    }`}
+                  >
                     <div className="flex items-start gap-2">
-                      <CheckCircle2 size={14} className="text-mint mt-0.5 shrink-0" />
+                      <Play size={14} className={`mt-0.5 shrink-0 ${activeClip?.id === c.id ? 'text-accent' : 'text-muted-2'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">{c.name}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium">{c.name}</p>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${clipStatusClasses(c.status)}`}>
+                            {clipStatusLabel(c.status)}
+                          </span>
+                          {(c.version || 1) > 1 && (
+                            <span className="text-[10px] text-muted-2">v{c.version}</span>
+                          )}
+                        </div>
                         {c.note && <p className="text-xs text-muted">{c.note}</p>}
+                        {c.status === 'rejected' && c.rejectionReason && (
+                          <p className="text-xs text-red-400 mt-0.5">Motivo: {c.rejectionReason}</p>
+                        )}
                         {c.fileName && (
-                          <a href={c.fileUrl || undefined} download={c.fileName} className="text-xs text-accent flex items-center gap-1 mt-0.5">
+                          <a
+                            href={c.fileUrl || undefined}
+                            download={c.fileName}
+                            onClick={e => e.stopPropagation()}
+                            className="text-xs text-accent flex items-center gap-1 mt-0.5"
+                          >
                             <Download size={11} /> {c.fileName}
                           </a>
                         )}
                       </div>
-                      {c.fileUrl && (
-                        <button
-                          onClick={() => setPreviewOpenId(id => (id === c.id ? null : c.id))}
-                          className="text-[11px] text-muted hover:text-accent flex items-center gap-1 shrink-0 px-2 py-1 rounded-md bg-surface-2 border border-line"
-                        >
-                          <Eye size={12} /> {previewOpenId === c.id ? 'Ocultar' : 'Ver'}
-                        </button>
+                      {isClipper && (
+                        <div onClick={e => e.stopPropagation()} className="shrink-0">
+                          <input
+                            ref={el => { replaceInputRefs.current[c.id] = el; }}
+                            type="file"
+                            className="hidden"
+                            onChange={e => handleReplaceClipFile(c.id, e)}
+                          />
+                          <button
+                            onClick={() => replaceInputRefs.current[c.id]?.click()}
+                            disabled={uploadingClipId === c.id}
+                            className="text-[11px] text-muted hover:text-accent flex items-center gap-1 px-2 py-1 rounded-md bg-surface-2 border border-line disabled:opacity-50"
+                          >
+                            {uploadingClipId === c.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                            {c.fileUrl ? 'Reemplazar' : 'Subir'}
+                          </button>
+                        </div>
                       )}
                     </div>
-                    {previewOpenId === c.id && c.fileUrl && (
-                      <div className="mt-2 rounded-md overflow-hidden bg-black">
-                        {isImageFile(c.fileName) ? (
-                          <img src={c.fileUrl} alt={c.name} className="w-full max-h-64 object-contain" />
-                        ) : (
-                          <video src={c.fileUrl} controls className="w-full max-h-64" />
-                        )}
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>

@@ -1,11 +1,23 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry } from './types';
+import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES } from './data';
+import { loadShared, saveShared, isSupabaseConfigured } from './lib/supabaseClient';
 
-// --- Persistencia local: todo lo que se sube (briefs, clips, imagenes, videos
-// finales, correcciones, notas) queda guardado en la plataforma (localStorage)
-// y sobrevive a recargas de página, para que cualquiera con acceso lo vea. ---
+// --- Persistencia ---
+// Las tareas/videos (con sus clips, imágenes principales, notas, estados de
+// aprobación/rechazo) y las notificaciones son la información que Clipper y
+// Admin comparten entre sí, y por eso viven en Supabase (tabla `platform_kv`,
+// ver supabase/migrations): un mismo dato se ve igual desde cualquier
+// dispositivo, navegador o sesión. El resto de la plataforma (equipo, chat,
+// calendario, academia) no fue parte de esta corrección y sigue igual que
+// antes, guardado en localStorage.
+//
+// Si Supabase todavía no está configurado (faltan las variables de entorno),
+// la app no se rompe: sigue guardando en localStorage como respaldo, tal
+// como funcionaba antes, hasta que se configure la conexión.
 const STORAGE_PREFIX = 'senda_platform_';
+const SHARED_KEYS = ['brands', 'notifications'] as const;
+type SharedKey = typeof SHARED_KEYS[number];
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -23,6 +35,14 @@ function saveState<T>(key: string, value: T) {
   } catch {
     // almacenamiento lleno o no disponible: se ignora silenciosamente
   }
+}
+
+// Guarda un dato compartido (brands/notifications): siempre en localStorage
+// como respaldo instantáneo, y además en Supabase cuando está configurado,
+// que es la fuente real compartida entre dispositivos.
+function persistShared<T>(key: SharedKey, value: T) {
+  saveState(key, value);
+  if (isSupabaseConfigured) void saveShared(key, value);
 }
 
 // --- Notificaciones ---
@@ -87,6 +107,10 @@ interface Store {
   setSelectedClassroomModuleId: (id: string | null) => void;
   setQc: (videoId: string, status: QcStatus) => void;
   addClip: (videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
+  replaceClip: (videoId: string, clipId: string, fileName: string, fileUrl: string) => void;
+  setClipStatus: (videoId: string, clipId: string, status: ClipStatus, reason?: string) => void;
+  setClipMarkerTime: (videoId: string, clipId: string, time: number) => void;
+  acceptAllClips: (videoId: string) => void;
   addCorrection: (videoId: string, time: number, text: string) => void;
   updateCorrectionTime: (videoId: string, correctionId: string, time: number) => void;
   uploadBrief: (videoId: string, fileName: string, fileUrl: string) => void;
@@ -133,15 +157,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Guarda automáticamente cualquier cambio (archivos subidos, notas,
   // correcciones, imágenes, videos finales) para que quede visible para
   // quien corresponda incluso después de recargar la página.
-  useEffect(() => { saveState('brands', brands); }, [brands]);
+  useEffect(() => { persistShared('brands', brands); }, [brands]);
   useEffect(() => { saveState('workers', workers); }, [workers]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { saveState('calendarEvents', calendarEvents); }, [calendarEvents]);
-  useEffect(() => { saveState('notifications', notifications); }, [notifications]);
+  useEffect(() => { persistShared('notifications', notifications); }, [notifications]);
   useEffect(() => { saveState('emailLog', emailLog); }, [emailLog]);
   useEffect(() => { saveState('classroomModules', classroomModules); }, [classroomModules]);
   useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
+
+  // Al abrir la plataforma (o entrar desde otro dispositivo/navegador),
+  // se trae la versión real y compartida de tareas/clips/imágenes y
+  // notificaciones desde Supabase, para que se vea lo mismo en todos lados.
+  // Si Supabase no está configurado, se queda con lo que ya se cargó de
+  // localStorage arriba (comportamiento anterior).
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    (async () => {
+      const remoteBrands = await loadShared<Brand[]>('brands');
+      if (active && remoteBrands) setBrands(remoteBrands);
+      const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
+      if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+    })();
+    return () => { active = false; };
+  }, []);
 
   // Revisa cada minuto si ya pasaron 24 horas para reiniciar las
   // notificaciones de clíper/editor mientras la app sigue abierta.
@@ -236,9 +277,91 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addClip = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
     updateVideo(videoId, v => ({
       ...v,
-      clips: [...v.clips, { id: `clip-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null }],
+      clips: [...v.clips, {
+        id: `clip-${Date.now()}`, name, note,
+        fileName: fileName || null, fileUrl: fileUrl || null,
+        status: 'pending', rejectionReason: null, adminNote: null,
+        reviewedBy: null, reviewedAt: null, markerTime: null,
+        version: 1, previousVersions: [],
+      }],
     }));
   }, [updateVideo]);
+
+  // El Clipper reemplaza el archivo de un clip que ya subió (por ejemplo,
+  // tras un rechazo). Se conserva el mismo clip (mismo id), se guarda la
+  // versión anterior en el historial y vuelve a quedar "pending" para que
+  // el Admin lo revise de nuevo.
+  const replaceClip = useCallback((videoId: string, clipId: string, fileName: string, fileUrl: string) => {
+    updateVideo(videoId, v => ({
+      ...v,
+      clips: v.clips.map(c => c.id === clipId ? {
+        ...c,
+        fileName, fileUrl,
+        status: 'pending' as ClipStatus,
+        rejectionReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        markerTime: null,
+        version: (c.version || 1) + 1,
+        previousVersions: [
+          ...(c.previousVersions || []),
+          { fileName: c.fileName || null, fileUrl: c.fileUrl || null, replacedAt: new Date().toISOString() },
+        ],
+      } : c),
+    }));
+  }, [updateVideo]);
+
+  // El Admin marca un momento concreto (en segundos) dentro del video del
+  // clip que está revisando.
+  const setClipMarkerTime = useCallback((videoId: string, clipId: string, time: number) => {
+    updateVideo(videoId, v => ({
+      ...v,
+      clips: v.clips.map(c => c.id === clipId ? { ...c, markerTime: time } : c),
+    }));
+  }, [updateVideo]);
+
+  // El Admin aprueba o rechaza un clip puntual, con motivo opcional (obligatorio
+  // en la interfaz cuando se rechaza). Notifica al Clipper correspondiente.
+  const setClipStatus = useCallback((videoId: string, clipId: string, status: ClipStatus, reason?: string) => {
+    updateVideo(videoId, v => ({
+      ...v,
+      clips: v.clips.map(c => c.id === clipId ? {
+        ...c,
+        status,
+        rejectionReason: status === 'rejected' ? (reason || '') : null,
+        reviewedBy: 'Admin',
+        reviewedAt: new Date().toISOString(),
+      } : c),
+    }));
+    const v = findVideo(videoId);
+    const clip = v?.clips.find(c => c.id === clipId);
+    if (v) {
+      if (status === 'approved') {
+        pushNotification('clipper', 'qc_clip', `Clip aceptado: tu clip "${clip?.name || ''}" de "${v.name}" fue aceptado.`, v.clipperId);
+      } else if (status === 'rejected') {
+        pushNotification('clipper', 'qc_clip', `Clip rechazado: tu clip "${clip?.name || ''}" de "${v.name}" fue rechazado. Motivo: ${reason || 'Sin motivo especificado'}`, v.clipperId);
+      }
+    }
+  }, [updateVideo, findVideo, pushNotification]);
+
+  // El Admin acepta de una vez todos los clips pendientes de esta tarea
+  // (y solo de esta tarea). Notifica al Clipper una sola vez.
+  const acceptAllClips = useCallback((videoId: string) => {
+    const v = findVideo(videoId);
+    const clipsToApprove = v ? v.clips.filter(c => c.fileUrl && c.status !== 'approved') : [];
+    updateVideo(videoId, vid => ({
+      ...vid,
+      clips: vid.clips.map(c => c.fileUrl ? {
+        ...c, status: 'approved' as ClipStatus, rejectionReason: null, reviewedBy: 'Admin', reviewedAt: new Date().toISOString(),
+      } : c),
+    }));
+    if (v && clipsToApprove.length > 0) {
+      const text = clipsToApprove.length === 1
+        ? `Clip aceptado: tu clip correspondiente al video "${v.name}" fue aceptado.`
+        : `Clips aceptados: tus clips correspondientes al video "${v.name}" fueron aceptados.`;
+      pushNotification('clipper', 'qc_clip', text, v.clipperId);
+    }
+  }, [updateVideo, findVideo, pushNotification]);
 
   const addCorrection = useCallback((videoId: string, time: number, text: string) => {
     updateVideo(videoId, v => ({
@@ -403,7 +526,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     currentWorkerId, setCurrentWorkerId,
     selectedVideo, setSelectedVideo,
     selectedClassroomModuleId, setSelectedClassroomModuleId,
-    setQc, addClip, addCorrection, updateCorrectionTime, uploadBrief, addFinalVideo,
+    setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
+    addCorrection, updateCorrectionTime, uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,
     sendChat, closeDay, togglePaid50, approveFinal, toggleOnline,
     calendarEvents, addCalendarEvent, updateWorkerProfile,
