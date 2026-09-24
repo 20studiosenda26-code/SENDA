@@ -1,8 +1,36 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry } from './types';
+import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES } from './data';
-import { loadShared, saveShared, isSupabaseConfigured } from './lib/supabaseClient';
+import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
+
+// --- Perfil "admin" liviano, usado para armar grupos de chat (el Admin
+// necesita ver/incluir a los administradores además de clíper/editores). ---
+export interface AdminProfile { id: string; name: string; }
+
+function workerFromProfileRow(p: Record<string, unknown>): Worker {
+  return {
+    id: p.id as string,
+    name: (p.name as string) || '',
+    role: (p.role as 'clipper' | 'editor'),
+    cargo: (p.cargo as string) || ((p.role as string) === 'clipper' ? 'Clipper' : 'Editor(a)'),
+    ingreso: (p.created_at as string) ? String(p.created_at).slice(0, 10) : '',
+    estado: (p.estado as string) || 'Activo',
+    pointsToday: (p.points_today as number) || 0,
+    pointsMonth: (p.points_month as number) || 0,
+    streak: (p.streak as number) || 0,
+    bestStreak: (p.best_streak as number) || 0,
+    streakLog: (Array.isArray(p.streak_log) ? p.streak_log : []) as ('on' | 'off')[],
+    dayClosedToday: !!p.day_closed_today,
+    online: !!p.online,
+    phone: (p.phone as string) || '',
+    email: (p.contact_email as string) || '',
+    bankInfo: (p.bank_info as string) || '',
+    country: (p.country as string) || '',
+    restDay: (p.rest_day as string) || '',
+    emailNotifications: !!p.email_notifications,
+  };
+}
 
 // --- Persistencia ---
 // Las tareas/videos (con sus clips, imágenes principales, notas, estados de
@@ -17,8 +45,7 @@ import { useAuth } from './lib/auth';
 // la app no se rompe: sigue guardando en localStorage como respaldo, tal
 // como funcionaba antes, hasta que se configure la conexión.
 const STORAGE_PREFIX = 'senda_platform_';
-const SHARED_KEYS = ['brands', 'notifications'] as const;
-type SharedKey = typeof SHARED_KEYS[number];
+type SharedKey = 'brands' | 'notifications';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -126,6 +153,25 @@ interface Store {
   calendarEvents: CalendarEvent[];
   addCalendarEvent: (e: Omit<CalendarEvent, 'id'>) => void;
   updateWorkerProfile: (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => void;
+
+  // --- Contratos ---
+  contracts: Contract[];
+  contractSignedUploads: ContractSignedUpload[];
+  uploadContract: (title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => void;
+  deleteContract: (contractId: string) => void;
+  uploadSignedContract: (contractId: string, fileName: string, fileUrl: string) => void;
+
+  // --- Chat (grupos + privados) ---
+  chatGroups: ChatGroup[];
+  chatMessages: ChatMsg[];
+  adminProfiles: AdminProfile[];
+  createChatGroup: (name: string, memberIds: string[]) => Promise<void>;
+  sendChatGroupMessage: (groupId: string, text: string, fileName?: string, fileUrl?: string) => Promise<void>;
+  ensureOwnAdminDm: () => Promise<string | null>;
+  startAdminDm: (workerId: string) => Promise<string | null>;
+
+  // --- Notificaciones permanentes (para la pestaña "Notificaciones" del chat) ---
+  notificationsArchive: NotificationItem[];
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -149,11 +195,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [paidHistory, setPaidHistory] = useState<PaidHistoryEntry[]>(() => loadState('paidHistory', INITIAL_PAID_HISTORY));
   const [config] = useState<Config>(CONFIG);
   const [currentWorkerId, setCurrentWorkerId] = useState('w1');
+
+  // El "trabajador actual" siempre debe ser la persona que inició sesión
+  // (no un usuario de ejemplo fijo). Así el nombre, cargo, puntos y demás
+  // datos que se muestran en Perfil/Inicio/Tareas corresponden siempre a
+  // la cuenta con la que se entró, sea quien sea.
+  useEffect(() => {
+    if (user?.id) setCurrentWorkerId(user.id);
+  }, [user?.id]);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [selectedClassroomModuleId, setSelectedClassroomModuleId] = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => loadState('calendarEvents', CALENDAR_EVENTS));
   const [classroomModules, setClassroomModules] = useState<ClassroomModule[]>(() => loadState('classroomModules', CLASSROOM_MODULES));
   const [lessonCompletions, setLessonCompletions] = useState<Record<string, string[]>>(() => loadState('lessonCompletions', {} as Record<string, string[]>));
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contractSignedUploads, setContractSignedUploads] = useState<ContractSignedUpload[]>([]);
+  const [chatGroups, setChatGroups] = useState<ChatGroup[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [adminProfiles, setAdminProfiles] = useState<AdminProfile[]>([]);
+  const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
 
   // Guarda automáticamente cualquier cambio (archivos subidos, notas,
   // correcciones, imágenes, videos finales) para que quede visible para
@@ -185,6 +245,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, []);
 
+  // --- Todo en vivo: cuando algo cambia en Supabase (en cualquier sesión,
+  // dispositivo o navegador), se refleja automáticamente aquí, sin que
+  // nadie tenga que recargar la página. ---
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const unsub = subscribeToTable('platform_kv', () => {
+      void (async () => {
+        const remoteBrands = await loadShared<Brand[]>('brands');
+        if (remoteBrands) setBrands(remoteBrands);
+        const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
+        if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+      })();
+    });
+    return unsub;
+  }, []);
+
   // Revisa cada minuto si ya pasaron 24 horas para reiniciar las
   // notificaciones de clíper/editor mientras la app sigue abierta.
   useEffect(() => {
@@ -193,6 +269,141 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, 60 * 1000);
     return () => clearInterval(id);
   }, []);
+
+  // --- Trabajadores reales: se cargan desde `profiles` (usuarios de verdad
+  // registrados por el Admin), con toda su información (nombre, cargo,
+  // puntos, teléfono, banco, etc.) y se mantienen sincronizados en vivo. ---
+  const loadWorkersFromProfiles = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.from('profiles').select('*');
+    if (!data) return;
+    const clipperEditor = data.filter((p: Record<string, unknown>) => p.role === 'clipper' || p.role === 'editor');
+    setWorkers(clipperEditor.map(workerFromProfileRow));
+    setAdminProfiles(
+      data
+        .filter((p: Record<string, unknown>) => p.role === 'admin')
+        .map((p: Record<string, unknown>) => ({ id: p.id as string, name: (p.name as string) || '' }))
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    void loadWorkersFromProfiles();
+    const unsub = subscribeToTable('profiles', () => { void loadWorkersFromProfiles(); });
+    return unsub;
+  }, [loadWorkersFromProfiles]);
+
+  // --- Contratos: carga inicial + tiempo real ---
+  const loadContracts = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.from('contracts').select('*').order('created_at', { ascending: false });
+    if (data) {
+      setContracts(data.map((c: Record<string, unknown>) => ({
+        id: c.id as string, title: c.title as string, role: c.role as 'clipper' | 'editor',
+        workerId: (c.worker_id as string) || null, fileName: c.file_name as string, fileUrl: c.file_url as string,
+        uploadedBy: (c.uploaded_by as string) || null, createdAt: c.created_at as string,
+      })));
+    }
+    const { data: signed } = await supabase.from('contract_signed_uploads').select('*');
+    if (signed) {
+      setContractSignedUploads(signed.map((s: Record<string, unknown>) => ({
+        id: s.id as string, contractId: s.contract_id as string, workerId: s.worker_id as string,
+        fileName: s.file_name as string, fileUrl: s.file_url as string, uploadedAt: s.uploaded_at as string,
+      })));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) return;
+    void loadContracts();
+    const unsub1 = subscribeToTable('contracts', () => { void loadContracts(); });
+    const unsub2 = subscribeToTable('contract_signed_uploads', () => { void loadContracts(); });
+    return () => { unsub1(); unsub2(); };
+  }, [loadContracts, user]);
+
+  // --- Chat: grupos, miembros y mensajes, con tiempo real ---
+  const loadChat = useCallback(async () => {
+    if (!supabase || !user) return;
+    const { data: groups } = await supabase.from('chat_groups').select('*').order('created_at', { ascending: true });
+    const { data: members } = await supabase.from('chat_group_members').select('*');
+    if (groups && members) {
+      const byGroup: Record<string, string[]> = {};
+      for (const m of members as Record<string, unknown>[]) {
+        const gid = m.group_id as string;
+        (byGroup[gid] = byGroup[gid] || []).push(m.user_id as string);
+      }
+      setChatGroups(groups.map((g: Record<string, unknown>) => ({
+        id: g.id as string, name: g.name as string, isDm: !!g.is_dm,
+        createdBy: (g.created_by as string) || null, createdAt: g.created_at as string,
+        memberIds: byGroup[g.id as string] || [],
+      })));
+    }
+    const { data: msgs } = await supabase.from('chat_messages').select('*, profiles(name)').order('created_at', { ascending: true });
+    if (msgs) {
+      setChatMessages(msgs.map((m: Record<string, unknown>) => ({
+        id: m.id as string, groupId: m.group_id as string, senderId: m.sender_id as string,
+        senderName: ((m.profiles as { name?: string } | null)?.name) || '',
+        text: (m.text as string) || '', fileName: (m.file_name as string) || null, fileUrl: (m.file_url as string) || null,
+        createdAt: m.created_at as string,
+      })));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) return;
+    void loadChat();
+    const unsub1 = subscribeToTable('chat_groups', () => { void loadChat(); });
+    const unsub2 = subscribeToTable('chat_group_members', () => { void loadChat(); });
+    const unsub3 = subscribeToTable('chat_messages', () => { void loadChat(); });
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, [loadChat, user]);
+
+  // Cada persona (clíper/editor) siempre debe tener un chat privado con el
+  // Admin listo, sin que nadie tenga que crearlo a mano.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !user || role === 'admin') return;
+    (async () => {
+      const already = chatGroups.some(g => g.isDm && g.memberIds.includes(user.id));
+      if (already) return;
+      const { data: existing } = await supabase!
+        .from('chat_groups')
+        .select('id, chat_group_members!inner(user_id)')
+        .eq('is_dm', true)
+        .eq('chat_group_members.user_id', user.id)
+        .maybeSingle();
+      if (existing) return;
+      const { data: newGroup } = await supabase!
+        .from('chat_groups')
+        .insert({ name: `Admin · ${user.name}`, is_dm: true, created_by: user.id })
+        .select('id')
+        .single();
+      if (newGroup) {
+        const { data: admins } = await supabase!.from('profiles').select('id').eq('role', 'admin');
+        const rows = [{ group_id: newGroup.id, user_id: user.id }, ...((admins || []).map((a: { id: string }) => ({ group_id: newGroup.id, user_id: a.id })))];
+        await supabase!.from('chat_group_members').upsert(rows);
+        void loadChat();
+      }
+    })();
+  }, [user, role, chatGroups, loadChat]);
+
+  // --- Notificaciones permanentes (pestaña "Notificaciones" del chat) ---
+  const loadNotificationsArchive = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.from('notifications_log').select('*').order('created_at', { ascending: false }).limit(500);
+    if (data) {
+      setNotificationsArchive(data.map((n: Record<string, unknown>) => ({
+        id: n.id as string, role: n.role as Role, workerId: (n.worker_id as string) || null,
+        category: n.category as NotificationCategory, text: n.text as string, t: n.created_at as string,
+      })));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) return;
+    void loadNotificationsArchive();
+    const unsub = subscribeToTable('notifications_log', () => { void loadNotificationsArchive(); });
+    return unsub;
+  }, [loadNotificationsArchive, user]);
 
   // Referencia siempre actualizada a `workers`, para poder leer el correo y
   // la preferencia de notificaciones dentro de callbacks sin generar
@@ -217,6 +428,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       t: new Date().toISOString(),
     };
     setNotifications(prev => [item, ...prev]);
+    setNotificationsArchive(prev => [item, ...prev]);
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('notifications_log').insert({
+        id: item.id, role: item.role, worker_id: item.workerId, category: item.category, text: item.text,
+      });
+    }
 
     if (workerId) {
       const w = workersRef.current.find(x => x.id === workerId);
@@ -462,7 +679,77 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateWorkerProfile = useCallback((workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => {
     setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...fields } : w));
+    if (isSupabaseConfigured && supabase) {
+      const dbFields: Record<string, unknown> = {};
+      if (fields.phone !== undefined) dbFields.phone = fields.phone;
+      if (fields.email !== undefined) dbFields.contact_email = fields.email;
+      if (fields.bankInfo !== undefined) dbFields.bank_info = fields.bankInfo;
+      if (fields.country !== undefined) dbFields.country = fields.country;
+      if (fields.emailNotifications !== undefined) dbFields.email_notifications = fields.emailNotifications;
+      void supabase.from('profiles').update(dbFields).eq('id', workerId);
+    }
   }, []);
+
+  // --- Contratos ---
+  const uploadContract = useCallback((title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    void supabase.from('contracts').insert({
+      title, role, worker_id: workerId, file_name: fileName, file_url: fileUrl, uploaded_by: user?.id || null,
+    }).then(() => loadContracts());
+  }, [user, loadContracts]);
+
+  const deleteContract = useCallback((contractId: string) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    void supabase.from('contracts').delete().eq('id', contractId).then(() => loadContracts());
+  }, [loadContracts]);
+
+  const uploadSignedContract = useCallback((contractId: string, fileName: string, fileUrl: string) => {
+    if (!isSupabaseConfigured || !supabase || !user) return;
+    void supabase.from('contract_signed_uploads').upsert({
+      contract_id: contractId, worker_id: user.id, file_name: fileName, file_url: fileUrl, uploaded_at: new Date().toISOString(),
+    }, { onConflict: 'contract_id,worker_id' }).then(() => loadContracts());
+  }, [user, loadContracts]);
+
+  // --- Chat ---
+  const createChatGroup = useCallback(async (name: string, memberIds: string[]) => {
+    if (!isSupabaseConfigured || !supabase || !user) return;
+    const { data: group } = await supabase.from('chat_groups').insert({ name, is_dm: false, created_by: user.id }).select('id').single();
+    if (!group) return;
+    const allIds = Array.from(new Set([user.id, ...memberIds]));
+    await supabase.from('chat_group_members').upsert(allIds.map(uid => ({ group_id: group.id, user_id: uid })));
+    void loadChat();
+  }, [user, loadChat]);
+
+  const sendChatGroupMessage = useCallback(async (groupId: string, text: string, fileName?: string, fileUrl?: string) => {
+    if (!isSupabaseConfigured || !supabase || !user) return;
+    await supabase.from('chat_messages').insert({
+      group_id: groupId, sender_id: user.id, text, file_name: fileName || null, file_url: fileUrl || null,
+    });
+    void loadChat();
+  }, [user, loadChat]);
+
+  const ensureOwnAdminDm = useCallback(async (): Promise<string | null> => {
+    if (!isSupabaseConfigured || !supabase || !user) return null;
+    const existing = chatGroups.find(g => g.isDm && g.memberIds.includes(user.id));
+    return existing ? existing.id : null;
+  }, [user, chatGroups]);
+
+  const startAdminDm = useCallback(async (workerId: string): Promise<string | null> => {
+    if (!isSupabaseConfigured || !supabase || !user) return null;
+    const existing = chatGroups.find(g => g.isDm && g.memberIds.includes(workerId));
+    if (existing) return existing.id;
+    const targetWorker = workersRef.current.find(w => w.id === workerId);
+    const { data: newGroup } = await supabase.from('chat_groups').insert({
+      name: `Admin · ${targetWorker?.name || 'Usuario'}`, is_dm: true, created_by: user.id,
+    }).select('id').single();
+    if (!newGroup) return null;
+    await supabase.from('chat_group_members').upsert([
+      { group_id: newGroup.id, user_id: workerId },
+      { group_id: newGroup.id, user_id: user.id },
+    ]);
+    void loadChat();
+    return newGroup.id as string;
+  }, [user, chatGroups, loadChat]);
 
   const approveFinal = useCallback((videoId: string) => {
     const v = findVideo(videoId);
@@ -534,6 +821,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     calendarEvents, addCalendarEvent, updateWorkerProfile,
     classroomModules, addClassroomModule, deleteClassroomModule, addClassroomLesson, deleteClassroomLesson,
     lessonCompletions, markLessonComplete,
+    contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
+    chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
+    notificationsArchive,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

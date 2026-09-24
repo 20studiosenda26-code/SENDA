@@ -237,7 +237,6 @@ function VideoDetail({
   const isClipper = role === 'clipper';
   const isEditor = role === 'editor';
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
-  const mainImageApproved = video.mainImageStatus === 'aprobada';
 
   // Clip que se está mostrando en el reproductor integrado de la página.
   // Por defecto, si solo hay un clip, se elige automáticamente.
@@ -615,7 +614,7 @@ function VideoDetail({
               <h3 className="font-display text-base font-semibold flex items-center gap-2">
                 <Film size={16} className="text-accent" /> {isEditor ? 'Clips enviados' : 'Clips generados'}
               </h3>
-              {isClipper && mainImageApproved && (
+              {isClipper && (
                 <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
                   <Plus size={14} /> Agregar
                 </button>
@@ -644,7 +643,7 @@ function VideoDetail({
               </div>
             )}
 
-            {isClipper && !mainImageApproved && (
+            {isClipper && (
               <p className="text-xs text-amber bg-amber-dim/40 border border-amber/20 rounded-lg px-3 py-2 mb-3">
                 Debes subir la imagen principal arriba y esperar a que el administrador la apruebe antes de generar y subir clips.
               </p>
@@ -827,6 +826,8 @@ function VideoDetail({
             </div>
           )}
 
+          {/* El clíper ya ve las correcciones en el marcador de tiempo de arriba (línea del video), por eso esta lista aparte solo se muestra a editor y admin. */}
+          {!isClipper && (
           <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display text-base font-semibold flex items-center gap-2">
@@ -866,6 +867,7 @@ function VideoDetail({
               <p className="text-[10px] text-muted-2 flex items-center gap-1 mt-3"><Lock size={10} /> Solo el admin puede dejar o editar correcciones. Quedan guardadas hasta que el video se apruebe por completo.</p>
             )}
           </div>
+          )}
 
           {isAdmin && (
             <div className="flex gap-2">

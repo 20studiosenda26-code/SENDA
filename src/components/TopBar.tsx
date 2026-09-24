@@ -1,6 +1,6 @@
 import { useStore } from '../store';
 import type { NotificationCategory, Role } from '../types';
-import { useAuth, type AuthUser } from '../lib/auth';
+import { type AuthUser } from '../lib/auth';
 import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, DollarSign, MessageSquare, Info, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import sendaLogo from '../assets/senda-logo.png';
@@ -109,13 +109,15 @@ export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut:
                           <p className="text-sm text-text">{n.text}</p>
                           <p className="text-xs text-muted-2 mt-0.5">{timeAgo(n.t)}</p>
                         </div>
-                        <button
-                          onClick={() => deleteNotification(n.id)}
-                          className="text-muted-2 hover:text-red-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Eliminar notificación"
-                        >
-                          <X size={14} />
-                        </button>
+                        {role === 'admin' && (
+                          <button
+                            onClick={() => deleteNotification(n.id)}
+                            className="text-muted-2 hover:text-red-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Eliminar notificación"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}

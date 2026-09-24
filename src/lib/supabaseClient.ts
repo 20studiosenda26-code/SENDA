@@ -97,3 +97,19 @@ export async function saveShared<T>(key: string, value: T): Promise<void> {
     // localStorage sigue funcionando mientras se resuelve la conexión.
   }
 }
+
+// --- Tiempo real ---
+// Se suscribe a los cambios (insert/update/delete) de una tabla y ejecuta
+// `onChange` cada vez que algo cambia en cualquier sesión/dispositivo, para
+// que la plataforma se actualice sola sin necesidad de recargar la página.
+// Devuelve una función para cancelar la suscripción.
+export function subscribeToTable(table: string, onChange: () => void): () => void {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`realtime:${table}:${Math.random().toString(36).slice(2, 8)}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange())
+    .subscribe();
+  return () => {
+    void supabase!.removeChannel(channel);
+  };
+}

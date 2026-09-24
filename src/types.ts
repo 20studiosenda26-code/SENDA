@@ -186,3 +186,46 @@ export interface Config {
     editor: { daily: number; monthly: number };
   };
 }
+
+// --- Contratos ---
+export interface Contract {
+  id: string;
+  title: string;
+  role: 'clipper' | 'editor';
+  /** Si es null, es una plantilla general para todo el rol. Si no, es solo para esa persona. */
+  workerId: string | null;
+  fileName: string;
+  fileUrl: string;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+export interface ContractSignedUpload {
+  id: string;
+  contractId: string;
+  workerId: string;
+  fileName: string;
+  fileUrl: string;
+  uploadedAt: string;
+}
+
+// --- Chat (grupos + privados) ---
+export interface ChatGroup {
+  id: string;
+  name: string;
+  isDm: boolean;
+  createdBy: string | null;
+  createdAt: string;
+  memberIds: string[];
+}
+
+export interface ChatMsg {
+  id: string;
+  groupId: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  fileName?: string | null;
+  fileUrl?: string | null;
+  createdAt: string;
+}
