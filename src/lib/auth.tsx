@@ -96,7 +96,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchProfile]);
 
   const signOut = useCallback(async () => {
-    if (supabase) await supabase.auth.signOut();
+    if (supabase) {
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession();
+        if (s?.user?.id) {
+          await supabase.from('profiles').update({ online: false }).eq('id', s.user.id);
+        }
+      } catch {
+        // si falla, no bloquea el cierre de sesión
+      }
+      await supabase.auth.signOut();
+    }
     setUser(null);
     setSession(null);
   }, []);

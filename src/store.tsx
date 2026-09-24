@@ -152,6 +152,8 @@ interface Store {
   toggleOnline: (workerId: string) => void;
   calendarEvents: CalendarEvent[];
   addCalendarEvent: (e: Omit<CalendarEvent, 'id'>) => void;
+  updateCalendarEvent: (id: string, patch: Partial<Omit<CalendarEvent, 'id'>>) => void;
+  deleteCalendarEvent: (id: string) => void;
   updateWorkerProfile: (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => void;
 
   // --- Contratos ---
@@ -288,10 +290,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
+    // Se vuelve a cargar cada vez que cambia la sesión (login/logout), no
+    // solo al montar la app: si esto se ejecuta antes de que la sesión de
+    // Supabase termine de restaurarse, la consulta a `profiles` (protegida
+    // por RLS) puede no traer nada, y sin este re-disparo el perfil de
+    // quien inició sesión (sobre todo cliper/editor) se quedaba "vacío"
+    // hasta que algo más disparara una recarga.
     void loadWorkersFromProfiles();
     const unsub = subscribeToTable('profiles', () => { void loadWorkersFromProfiles(); });
     return unsub;
-  }, [loadWorkersFromProfiles]);
+  }, [loadWorkersFromProfiles, user?.id]);
+
+  // --- Estado "en línea" automático ---
+  // Al iniciar sesión, el cliper/editor debe verse "En línea" de inmediato
+  // (antes había que activarlo a mano). Al cerrar sesión o cerrar la
+  // pestaña, se marca "No en línea" para que el admin siempre vea el
+  // estado real del equipo.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !user?.id || role === 'admin') return;
+    const workerId = user.id;
+    setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, online: true } : w));
+    void supabase.from('profiles').update({ online: true }).eq('id', workerId);
+
+    const markOffline = () => {
+      if (!supabase) return;
+      void supabase.from('profiles').update({ online: false }).eq('id', workerId);
+    };
+    window.addEventListener('beforeunload', markOffline);
+    return () => {
+      window.removeEventListener('beforeunload', markOffline);
+    };
+  }, [user?.id, role]);
 
   // --- Contratos: carga inicial + tiempo real ---
   const loadContracts = useCallback(async () => {
@@ -670,11 +699,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [updateVideo, findVideo, pushNotification]);
 
   const toggleOnline = useCallback((workerId: string) => {
-    setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, online: !w.online } : w));
+    setWorkers(prev => {
+      const current = prev.find(w => w.id === workerId);
+      const next = current ? !current.online : true;
+      if (isSupabaseConfigured && supabase) {
+        void supabase.from('profiles').update({ online: next }).eq('id', workerId);
+      }
+      return prev.map(w => w.id === workerId ? { ...w, online: next } : w);
+    });
   }, []);
 
   const addCalendarEvent = useCallback((e: Omit<CalendarEvent, 'id'>) => {
     setCalendarEvents(prev => [...prev, { ...e, id: `ev-${Date.now()}` }]);
+  }, []);
+
+  const updateCalendarEvent = useCallback((id: string, patch: Partial<Omit<CalendarEvent, 'id'>>) => {
+    setCalendarEvents(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+  }, []);
+
+  const deleteCalendarEvent = useCallback((id: string) => {
+    setCalendarEvents(prev => prev.filter(e => e.id !== id));
   }, []);
 
   const updateWorkerProfile = useCallback((workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => {
@@ -818,7 +862,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addCorrection, updateCorrectionTime, uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,
     sendChat, closeDay, togglePaid50, approveFinal, toggleOnline,
-    calendarEvents, addCalendarEvent, updateWorkerProfile,
+    calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent, updateWorkerProfile,
     classroomModules, addClassroomModule, deleteClassroomModule, addClassroomLesson, deleteClassroomLesson,
     lessonCompletions, markLessonComplete,
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
