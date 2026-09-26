@@ -1,4 +1,4 @@
-import type { Brand, Worker, NotificationItem, Config, PaidHistoryEntry, ChatMessage, CalendarEvent, ClassroomModule } from './types';
+import type { Brand, Worker, NotificationItem, Config, PaidHistoryEntry, ChatMessage, CalendarEvent, ClassroomModule, Order } from './types';
 
 export const TIERS = [
   { key: 'corto', label: 'Corto (<30s)', points: 1, clipperPay: 2, editorPay: 3 },
@@ -120,6 +120,13 @@ export const CLASSROOM_MODULES: ClassroomModule[] = [
       { id: 'm4-l3', title: 'Lección 3 · Flujo de trabajo en Senda', videoUrl: SAMPLE_VIDEO },
     ],
   },
+];
+
+// --- Pedidos / Proyectos disponibles (panel de Admin) ---
+export const INITIAL_ORDERS: Order[] = [
+  { id: 'ord1', brand: 'Avon', videoCount: 25, deliveryDate: '2026-09-26', deliveryTime: '20:00', status: 'sin_asignar', assignedWorkerIds: [], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 3600 * 1000).toISOString() },
+  { id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00', status: 'aprobado_senda', assignedWorkerIds: ['w1', 'w2'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
+  { id: 'ord3', brand: 'Vortex Labs', videoCount: 8, deliveryDate: '2026-09-25', deliveryTime: '17:00', status: 'finalizado', assignedWorkerIds: ['w3', 'w4'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString() },
 ];
 
 export const CONTRACTS = [

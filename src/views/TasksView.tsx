@@ -7,6 +7,7 @@ import {
   ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { AdminTasksRoot } from './AdminTasksPanels';
 
 function fmtTime(t: number) {
   const m = Math.floor(t / 60);
@@ -99,7 +100,11 @@ function VideoTimeline({
   );
 }
 
-export function TasksView() {
+// El tablero clásico (Sin iniciar / Pendiente / Revisión-Correcciones /
+// Aprobado) se deja intacto tal cual funcionaba antes. Clíper y editor lo
+// ven directamente; el Admin lo ve dentro de la carpeta "Proyectos
+// iniciados" (ver AdminTasksPanels.tsx).
+export function TasksBoard() {
   const {
     brands, role, currentWorkerId, setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
     addCorrection, updateCorrectionTime,
@@ -183,6 +188,17 @@ export function TasksView() {
       </div>
     </div>
   );
+}
+
+// El Admin ve las Tareas totalmente distinto al resto: 3 carpetas
+// (Proyectos disponibles / Proyectos iniciados / Asignar proyectos) en vez
+// del tablero directo. Si hay un video seleccionado (por ejemplo, viniendo
+// del acceso rápido de QC en Inicio), se abre igual sin importar la carpeta.
+export function TasksView() {
+  const { role, selectedVideo } = useStore();
+  if (role !== 'admin') return <TasksBoard />;
+  if (selectedVideo) return <TasksBoard />;
+  return <AdminTasksRoot />;
 }
 
 function VideoDetail({

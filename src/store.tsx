@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg } from './types';
-import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES } from './data';
+import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
+import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 
@@ -45,7 +45,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 // la app no se rompe: sigue guardando en localStorage como respaldo, tal
 // como funcionaba antes, hasta que se configure la conexión.
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications';
+type SharedKey = 'brands' | 'notifications' | 'orders';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -174,6 +174,13 @@ interface Store {
 
   // --- Notificaciones permanentes (para la pestaña "Notificaciones" del chat) ---
   notificationsArchive: NotificationItem[];
+
+  // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
+  orders: Order[];
+  addOrder: (o: Omit<Order, 'id' | 'createdAt'>) => void;
+  updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
+  deleteOrder: (id: string) => void;
+  assignProject: (brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -216,11 +223,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
   const [adminProfiles, setAdminProfiles] = useState<AdminProfile[]>([]);
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
 
   // Guarda automáticamente cualquier cambio (archivos subidos, notas,
   // correcciones, imágenes, videos finales) para que quede visible para
   // quien corresponda incluso después de recargar la página.
   useEffect(() => { persistShared('brands', brands); }, [brands]);
+  useEffect(() => { persistShared('orders', orders); }, [orders]);
   useEffect(() => { saveState('workers', workers); }, [workers]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
@@ -243,6 +252,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteBrands) setBrands(remoteBrands);
       const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
       if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+      const remoteOrders = await loadShared<Order[]>('orders');
+      if (active && remoteOrders) setOrders(remoteOrders);
     })();
     return () => { active = false; };
   }, []);
@@ -258,6 +269,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteBrands) setBrands(remoteBrands);
         const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
         if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+        const remoteOrders = await loadShared<Order[]>('orders');
+        if (remoteOrders) setOrders(remoteOrders);
       })();
     });
     return unsub;
@@ -851,6 +864,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // --- Pedidos / Proyectos (Inicio y Tareas del Admin) ---
+  const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
+    setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
+  }, []);
+
+  const updateOrder = useCallback((id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => {
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
+  }, []);
+
+  const deleteOrder = useCallback((id: string) => {
+    setOrders(prev => prev.filter(o => o.id !== id));
+  }, []);
+
+  // El Admin arma un pedido nuevo (marca + brief + fecha/hora de entrega) y
+  // lo asigna a uno o varios clíper/editores disponibles. Queda visible en
+  // "Proyectos disponibles" y cada persona asignada recibe la notificación
+  // de trabajo asignado de inmediato.
+  const assignProject = useCallback((brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => {
+    addOrder({
+      brand, videoCount: workerIds.length || 1, deliveryDate, deliveryTime,
+      status: 'sin_asignar' as OrderStatus, assignedWorkerIds: workerIds,
+      briefFileName: briefFileName || null, briefFileUrl: briefFileUrl || null,
+    });
+    for (const workerId of workerIds) {
+      const w = workersRef.current.find(x => x.id === workerId);
+      const roleFor: Role = w?.role === 'editor' ? 'editor' : 'clipper';
+      pushNotification(roleFor, 'trabajo_asignado', `Nuevo trabajo asignado: "${brand}" · entrega ${deliveryDate} ${deliveryTime}`, workerId);
+    }
+    pushNotification('admin', 'trabajo_asignado', `Pedido de "${brand}" asignado a ${workerIds.length} persona(s)`);
+  }, [addOrder, pushNotification]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers, notifications, deleteNotification, clearNotifications, emailLog,
@@ -868,6 +912,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
     notificationsArchive,
+    orders, addOrder, updateOrder, deleteOrder, assignProject,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

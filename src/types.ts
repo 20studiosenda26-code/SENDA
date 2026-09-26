@@ -209,6 +209,22 @@ export interface ContractSignedUpload {
   uploadedAt: string;
 }
 
+// --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
+export type OrderStatus = 'aprobado_senda' | 'aprobado_cliente' | 'sin_asignar' | 'finalizado' | 'incompleto';
+
+export interface Order {
+  id: string;
+  brand: string;
+  videoCount: number;
+  deliveryDate: string;
+  deliveryTime: string;
+  status: OrderStatus;
+  assignedWorkerIds: string[];
+  briefFileName?: string | null;
+  briefFileUrl?: string | null;
+  createdAt: string;
+}
+
 // --- Chat (grupos + privados) ---
 export interface ChatGroup {
   id: string;
