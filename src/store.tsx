@@ -180,6 +180,7 @@ interface Store {
   addOrder: (o: Omit<Order, 'id' | 'createdAt'>) => void;
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
   deleteOrder: (id: string) => void;
+  assignClipper: (videoId: string, workerId: string) => void;
   assignProject: (brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => void;
 }
 
@@ -864,7 +865,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // --- Pedidos / Proyectos (Inicio y Tareas del Admin) ---
+  // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
+  const assignClipper = useCallback((videoId: string, workerId: string) => {
+    setBrands(prev => prev.map(b => ({
+      ...b,
+      videos: b.videos.map(v => v.id === videoId ? {
+        ...v,
+        clipperId: workerId,
+        clipperName: workers.find(w => w.id === workerId)?.name || 'Desconocido',
+        qc: 'pendiente'
+      } : v),
+    })));
+
+    const v = brands.flatMap(b => b.videos).find(vid => vid.id === videoId);
+    const w = workers.find(wrk => wrk.id === workerId);
+    if (v && w) {
+      pushNotification('clipper', 'trabajo_asignado', `Nuevo trabajo asignado: "${v.name}"`, workerId);
+      pushNotification('admin', 'trabajo_asignado', `El proyecto "${v.name}" ha sido asignado a ${w.name}`);
+    }
+  }, [brands, workers, pushNotification]);
+
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
     setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
   }, []);
@@ -912,7 +932,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
     notificationsArchive,
-    orders, addOrder, updateOrder, deleteOrder, assignProject,
+    orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
