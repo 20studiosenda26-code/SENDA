@@ -1,8 +1,8 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
 export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'administracion' | 'configuracion';
-export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
-export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
+export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_rste' | 'aprobado_cliente';
+export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_rste' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
 export type ClipStatus = 'pending' | 'approved' | 'rejected';
 
@@ -103,7 +103,7 @@ export interface Worker {
   bankInfo?: string;
   country?: string;
   restDay?: string;
-  /** Si el trabajador activó recibir notificaciones de Senda en su correo */
+  /** Si el trabajador activó recibir notificaciones de Rste en su correo */
   emailNotifications?: boolean;
 }
 
@@ -210,7 +210,7 @@ export interface ContractSignedUpload {
 }
 
 // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
-export type OrderStatus = 'aprobado_senda' | 'aprobado_cliente' | 'sin_asignar' | 'finalizado' | 'incompleto';
+export type OrderStatus = 'aprobado_rste' | 'aprobado_cliente' | 'sin_asignar' | 'finalizado' | 'incompleto';
 
 export interface Order {
   id: string;

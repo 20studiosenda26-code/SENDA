@@ -242,7 +242,7 @@ function QcBadge({ status }: { status: string }) {
     revision: { color: 'text-accent bg-accent-dim', icon: AlertCircle },
     correcciones: { color: 'text-amber bg-amber-dim', icon: AlertCircle },
     aprobado: { color: 'text-mint bg-mint-dim', icon: CheckCircle2 },
-    aprobado_senda: { color: 'text-mint bg-mint-dim', icon: CheckCircle2 },
+    aprobado_rste: { color: 'text-mint bg-mint-dim', icon: CheckCircle2 },
     aprobado_cliente: { color: 'text-mint bg-mint-dim', icon: CheckCircle2 },
     sin_iniciar: { color: 'text-muted-2 bg-surface-3', icon: Clock },
   };

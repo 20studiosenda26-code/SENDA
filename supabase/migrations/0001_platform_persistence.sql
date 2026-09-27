@@ -29,17 +29,17 @@ create policy "platform_kv_update" on public.platform_kv for update using (true)
 -- 2) Bucket público para los archivos (clips, imágenes principales, briefs,
 --    videos finales), en vez de guardarlos como base64 dentro del navegador.
 insert into storage.buckets (id, name, public)
-values ('senda-media', 'senda-media', true)
+values ('rste-media', 'rste-media', true)
 on conflict (id) do nothing;
 
-drop policy if exists "senda_media_public_read" on storage.objects;
-create policy "senda_media_public_read" on storage.objects
-  for select using (bucket_id = 'senda-media');
+drop policy if exists "rste_media_public_read" on storage.objects;
+create policy "rste_media_public_read" on storage.objects
+  for select using (bucket_id = 'rste-media');
 
-drop policy if exists "senda_media_public_upload" on storage.objects;
-create policy "senda_media_public_upload" on storage.objects
-  for insert with check (bucket_id = 'senda-media');
+drop policy if exists "rste_media_public_upload" on storage.objects;
+create policy "rste_media_public_upload" on storage.objects
+  for insert with check (bucket_id = 'rste-media');
 
-drop policy if exists "senda_media_public_update" on storage.objects;
-create policy "senda_media_public_update" on storage.objects
-  for update using (bucket_id = 'senda-media');
+drop policy if exists "rste_media_public_update" on storage.objects;
+create policy "rste_media_public_update" on storage.objects
+  for update using (bucket_id = 'rste-media');

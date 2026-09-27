@@ -177,7 +177,7 @@ export function ClassroomView() {
             <GraduationCap size={28} className="text-accent" />
           </div>
           <div className="flex-1">
-            <h2 className="font-display text-xl font-semibold">Academia Senda</h2>
+            <h2 className="font-display text-xl font-semibold">Academia Rste</h2>
             {isAdmin ? (
               <p className="text-sm text-muted">{classroomModules.length} módulos · {totalLessons} clases subidas</p>
             ) : (

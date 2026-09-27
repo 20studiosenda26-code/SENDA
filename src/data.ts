@@ -20,7 +20,7 @@ export const INITIAL_BRANDS: Brand[] = [
     id: 'br1',
     name: 'Nexora',
     videos: [
-      { id: 'v1', name: 'Nexora · Demo Reel', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'aprobado_senda', editorQc: 'aprobado_senda', duration: '00:45', durationSeconds: 45, tierSnapshot: TIERS[1], date: '2026-09-20', clips: [], finalVideos: [], corrections: [], finalUploaded: false, paid50: true, paid100: false, briefFileName: 'brief-nexora-demo.pdf', briefFileUrl: null, sentByClipper: true, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
+      { id: 'v1', name: 'Nexora · Demo Reel', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'aprobado_rste', editorQc: 'aprobado_rste', duration: '00:45', durationSeconds: 45, tierSnapshot: TIERS[1], date: '2026-09-20', clips: [], finalVideos: [], corrections: [], finalUploaded: false, paid50: true, paid100: false, briefFileName: 'brief-nexora-demo.pdf', briefFileUrl: null, sentByClipper: true, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
       { id: 'v2', name: 'Nexora · Tutorial', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'revision', editorQc: 'pendiente', duration: null, durationSeconds: 90, tierSnapshot: null, date: '2026-09-21', clips: [], finalVideos: [], corrections: [{ id: 'cr1', time: 8, text: 'El logo tapa el texto en este punto' }], finalUploaded: false, paid50: false, paid100: false, briefFileName: null, briefFileUrl: null, sentByClipper: false, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
     ],
   },
@@ -49,7 +49,7 @@ export const INITIAL_WORKERS: Worker[] = [
 ];
 
 export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
-  { id: 'n1', role: 'clipper', workerId: 'w1', category: 'qc_clip', text: 'Tu clip de Nexora · Tutorial fue aprobado por Senda', t: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
+  { id: 'n1', role: 'clipper', workerId: 'w1', category: 'qc_clip', text: 'Tu clip de Nexora · Tutorial fue aprobado por Rste', t: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
   { id: 'n2', role: 'clipper', workerId: 'w1', category: 'racha', text: 'Racha de 4 días activa', t: new Date(Date.now() - 5 * 3600 * 1000).toISOString() },
   { id: 'n3', role: 'editor', workerId: 'w2', category: 'clips_enviados', text: 'Nexora · Demo Reel lista para tu edición', t: new Date(Date.now() - 3600 * 1000).toISOString() },
   { id: 'n4', role: 'editor', workerId: 'w4', category: 'qc_video', text: 'Vortex · Launch aprobado por el cliente', t: new Date(Date.now() - 3 * 3600 * 1000).toISOString() },
@@ -113,11 +113,11 @@ export const CLASSROOM_MODULES: ClassroomModule[] = [
     ],
   },
   {
-    id: 'm4', title: 'Módulo 4 · Entrega y QC', desc: 'Formatos de exportación, checklist de calidad y flujo de Senda.', color: 'violet',
+    id: 'm4', title: 'Módulo 4 · Entrega y QC', desc: 'Formatos de exportación, checklist de calidad y flujo de Rste.', color: 'violet',
     lessons: [
       { id: 'm4-l1', title: 'Lección 1 · Formatos de exportación', videoUrl: SAMPLE_VIDEO },
       { id: 'm4-l2', title: 'Lección 2 · Checklist de calidad', videoUrl: SAMPLE_VIDEO },
-      { id: 'm4-l3', title: 'Lección 3 · Flujo de trabajo en Senda', videoUrl: SAMPLE_VIDEO },
+      { id: 'm4-l3', title: 'Lección 3 · Flujo de trabajo en Rste', videoUrl: SAMPLE_VIDEO },
     ],
   },
 ];
@@ -125,7 +125,7 @@ export const CLASSROOM_MODULES: ClassroomModule[] = [
 // --- Pedidos / Proyectos disponibles (panel de Admin) ---
 export const INITIAL_ORDERS: Order[] = [
   { id: 'ord1', brand: 'Avon', videoCount: 25, deliveryDate: '2026-09-26', deliveryTime: '20:00', status: 'sin_asignar', assignedWorkerIds: [], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 3600 * 1000).toISOString() },
-  { id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00', status: 'aprobado_senda', assignedWorkerIds: ['w1', 'w2'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
+  { id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00', status: 'aprobado_rste', assignedWorkerIds: ['w1', 'w2'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
   { id: 'ord3', brand: 'Vortex Labs', videoCount: 8, deliveryDate: '2026-09-25', deliveryTime: '17:00', status: 'finalizado', assignedWorkerIds: ['w3', 'w4'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString() },
 ];
 

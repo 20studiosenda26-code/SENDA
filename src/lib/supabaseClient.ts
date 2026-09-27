@@ -24,7 +24,7 @@ if (!isSupabaseConfigured && typeof window !== 'undefined') {
   );
 }
 
-const MEDIA_BUCKET = 'senda-media';
+const MEDIA_BUCKET = 'rste-media';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

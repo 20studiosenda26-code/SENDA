@@ -7,10 +7,10 @@ import {
 } from 'lucide-react';
 import { TasksBoard } from './TasksView';
 
-const ORDER_STATUS_OPTIONS: OrderStatus[] = ['aprobado_senda', 'aprobado_cliente', 'sin_asignar', 'finalizado', 'incompleto'];
+const ORDER_STATUS_OPTIONS: OrderStatus[] = ['aprobado_rste', 'aprobado_cliente', 'sin_asignar', 'finalizado', 'incompleto'];
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  aprobado_senda: 'Aprobado Senda',
+  aprobado_rste: 'Aprobado Rste',
   aprobado_cliente: 'Aprobado cliente',
   sin_asignar: 'Sin asignar',
   finalizado: 'Pedido finalizado',
@@ -18,7 +18,7 @@ const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 const ORDER_STATUS_DOT: Record<OrderStatus, string> = {
-  aprobado_senda: 'bg-mint',
+  aprobado_rste: 'bg-mint',
   aprobado_cliente: 'bg-accent',
   sin_asignar: 'bg-amber',
   finalizado: 'bg-emerald-400',

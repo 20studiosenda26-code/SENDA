@@ -16,7 +16,7 @@ activarlo:
 
    Esto crea `platform_kv`, `profiles`, `contracts`, `contract_signed_uploads`,
    `chat_groups`, `chat_group_members`, `chat_messages`, `notifications_log`,
-   el bucket público `senda-media`, y activa Supabase Realtime en todas esas
+   el bucket público `rste-media`, y activa Supabase Realtime en todas esas
    tablas para que la plataforma funcione en vivo (sin recargar la página).
 3. En "Project Settings → API", copiar el "Project URL" y la "anon public key".
 4. Crear un archivo `.env` (a partir de `.env.example`) con:

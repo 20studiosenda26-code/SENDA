@@ -100,8 +100,6 @@ function VideoTimeline({
   );
 }
 
-// --- UI Helpers for Assignment ---
-
 function UrgencyBadge({ level }: { level: 'critical' | 'high' | 'low' }) {
   const styles = {
     critical: 'bg-red-500/20 text-red-400 border-red-500/50 animate-pulse',
@@ -241,7 +239,7 @@ export function TasksView() {
             <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mx-auto mb-4 text-muted">
               <CheckCircle2 size={32} />
             </div>
-            <h3 className="text-xl font-semibold text-white">Todo asignando</h3>
+            <h3 className="text-xl font-semibold text-white">Todo asignado</h3>
             <p className="text-muted">No hay proyectos pendientes de asignación en este momento.</p>
           </div>
         )}
@@ -433,7 +431,7 @@ function VideoDetail({
   const isAdmin = role === 'admin';
   const isClipper = role === 'clipper';
   const isEditor = role === 'editor';
-  const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
+  const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_rste', 'aprobado_cliente'];
 
   const activeClip: Clip | null =
     video.clips.find(c => c.id === activeClipId) ||
@@ -774,8 +772,8 @@ function VideoDetail({
           </div>
           {isAdmin && (
             <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Senda
+              <button onClick={() => onSetQc(video.id, 'aprobado_rste')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
+                <CheckCircle2 size={16} /> Aprobar Rste
               </button>
               <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Aprobar Cliente
@@ -990,8 +988,7 @@ function VideoDetail({
                           {isImageFile(fv.fileName) ? (
                             <img src={fv.fileUrl} alt={fv.name} className="w-full max-h-64 object-contain" />
                           ) : (
-                            <video src={fv.// la lectura terminó aquí pero la lógica es la misma que la anterior
-                            video src={fv.fileUrl} controls className="w-full max-h-64" />
+                            <video src={fv.fileUrl} controls className="w-full max-h-64" />
                           )}
                         </div>
                       )}
@@ -1044,8 +1041,8 @@ function VideoDetail({
           )}
           {isAdmin && (
             <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Senda
+              <button onClick={() => onSetQc(video.id, 'aprobado_rste')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
+                <CheckCircle2 size={16} /> Aprobar Rste
               </button>
               <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Aprobar Cliente

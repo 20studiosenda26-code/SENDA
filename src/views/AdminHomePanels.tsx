@@ -20,7 +20,7 @@ const WORKER_LOAD_LABEL: Record<WorkerLoad, string> = {
 };
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  aprobado_senda: 'Aprobado Senda',
+  aprobado_rste: 'Aprobado Rste',
   aprobado_cliente: 'Aprobado cliente',
   sin_asignar: 'Sin asignar',
   finalizado: 'Pedido finalizado',
@@ -28,7 +28,7 @@ const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 const ORDER_STATUS_CLASSES: Record<OrderStatus, string> = {
-  aprobado_senda: 'bg-mint-dim text-mint',
+  aprobado_rste: 'bg-mint-dim text-mint',
   aprobado_cliente: 'bg-accent-dim text-accent',
   sin_asignar: 'bg-amber-dim text-amber',
   finalizado: 'bg-emerald-500/10 text-emerald-400',
@@ -115,7 +115,7 @@ export function AdminHomePanels() {
     [allVideos]
   );
   const pendingFinalVideos = useMemo(
-    () => allVideos.filter(v => v.finalVideos.length > 0 && v.qc !== 'aprobado_senda' && v.qc !== 'aprobado_cliente'),
+    () => allVideos.filter(v => v.finalVideos.length > 0 && v.qc !== 'aprobado_rste' && v.qc !== 'aprobado_cliente'),
     [allVideos]
   );
 

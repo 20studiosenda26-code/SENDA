@@ -44,7 +44,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 // Si Supabase todavía no está configurado (faltan las variables de entorno),
 // la app no se rompe: sigue guardando en localStorage como respaldo, tal
 // como funcionaba antes, hasta que se configure la conexión.
-const STORAGE_PREFIX = 'senda_platform_';
+const STORAGE_PREFIX = 'rste_platform_';
 type SharedKey = 'brands' | 'notifications' | 'orders';
 
 function loadState<T>(key: string, fallback: T): T {
@@ -181,6 +181,7 @@ interface Store {
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
   deleteOrder: (id: string) => void;
   assignClipper: (videoId: string, workerId: string) => void;
+  assignEditor: (videoId: string, workerId: string) => void;
   assignProject: (brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => void;
 }
 
@@ -834,7 +835,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
-  // --- Classroom (Academia Senda) ---
+  // --- Classroom (Academia Rste) ---
   const addClassroomModule = useCallback((title: string, desc: string, color: string) => {
     setClassroomModules(prev => [...prev, { id: `mod-${Date.now()}`, title, desc, color, lessons: [] }]);
   }, []);
@@ -885,6 +886,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [brands, workers, pushNotification]);
 
+  const assignEditor = useCallback((videoId: string, workerId: string) => {
+    setBrands(prev => prev.map(b => ({
+      ...b,
+      videos: b.videos.map(v => v.id === videoId ? {
+        ...v,
+        editorId: workerId,
+        editorName: workers.find(w => w.id === workerId)?.name || 'Desconocido',
+      } : v),
+    })));
+
+    const v = brands.flatMap(b => b.videos).find(vid => vid.id === videoId);
+    const w = workers.find(wrk => wrk.id === workerId);
+    if (v && w) {
+      pushNotification('editor', 'trabajo_asignado', `Nuevo trabajo asignado para edición: "${v.name}"`, workerId);
+      pushNotification('admin', 'trabajo_asignado', `El proyecto "${v.name}" ha sido asignado al editor ${w.name}`);
+    }
+  }, [brands, workers, pushNotification]);
+
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
     setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
   }, []);
@@ -932,7 +951,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
     notificationsArchive,
-    orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper,
+    orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper, assignEditor,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

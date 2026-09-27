@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { Mail, Lock, LogIn, AlertCircle, Loader2 } from 'lucide-react';
-import sendaLogo from '../assets/senda-logo.png';
+import rsteLogo from '../assets/rste-logo.png';
 
 export function LoginView() {
   const { signIn } = useAuth();
@@ -24,7 +24,7 @@ export function LoginView() {
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-line flex items-center justify-center overflow-hidden p-2 mb-4">
-            <img src={sendaLogo} alt="Senda" className="w-full h-full object-contain" />
+            <img src={rsteLogo} alt="Rste" className="w-full h-full object-contain" />
           </div>
           <h1 className="font-display text-3xl font-bold">SENDA</h1>
           <p className="text-muted mt-2 text-sm">Plataforma de gestión de clips y edición</p>

@@ -1,5 +1,5 @@
 // Fondo de marca "v3" aprobado: fragmentos de rama tipo circuito
-// (inspirados/diseccionados del logo de Senda) regados con muy baja
+// (inspirados/diseccionados del logo de Rste) regados con muy baja
 // opacidad en los bordes/esquinas, más un resplandor de color sutil.
 // No es la imagen del logo puesta de fondo; son trazos dibujados con el
 // mismo lenguaje visual: líneas blancas gruesas de esquinas redondeadas,
