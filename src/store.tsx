@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
-import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
+import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 
@@ -44,7 +44,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 // Si Supabase todavía no está configurado (faltan las variables de entorno),
 // la app no se rompe: sigue guardando en localStorage como respaldo, tal
 // como funcionaba antes, hasta que se configure la conexión.
-const STORAGE_PREFIX = 'rste_platform_';
+const STORAGE_PREFIX = 'senda_platform_';
 type SharedKey = 'brands' | 'notifications' | 'orders';
 
 function loadState<T>(key: string, fallback: T): T {
@@ -181,8 +181,14 @@ interface Store {
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
   deleteOrder: (id: string) => void;
   assignClipper: (videoId: string, workerId: string) => void;
-  assignEditor: (videoId: string, workerId: string) => void;
   assignProject: (brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => void;
+  workerCapacities: Record<string, number>;
+  getWorkerCapacity: (workerId: string) => number;
+  setWorkerCapacity: (workerId: string, capacity: number) => void;
+  getWorkerWorkload: (workerId: string) => number;
+  assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<void>;
+  assignOrderClipper: (orderId: string, clipperId: string) => Promise<void>;
+  assignOrderEditor: (orderId: string, editorId: string) => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -226,6 +232,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [adminProfiles, setAdminProfiles] = useState<AdminProfile[]>([]);
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
+  // Volumen máximo de proyectos activos configurado por el Admin para cada
+  // clíper/editor. Vive aparte de `workers` porque cuando Supabase está
+  // configurado, `workers` se recarga desde la tabla `profiles` (que no
+  // tiene esta columna) y no debe borrar lo que el Admin configuró aquí.
+  const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
 
   // Guarda automáticamente cualquier cambio (archivos subidos, notas,
   // correcciones, imágenes, videos finales) para que quede visible para
@@ -240,6 +251,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('emailLog', emailLog); }, [emailLog]);
   useEffect(() => { saveState('classroomModules', classroomModules); }, [classroomModules]);
   useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
+  useEffect(() => { saveState('workerCapacities', workerCapacities); }, [workerCapacities]);
 
   // Al abrir la plataforma (o entrar desde otro dispositivo/navegador),
   // se trae la versión real y compartida de tareas/clips/imágenes y
@@ -456,6 +468,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { workersRef.current = workers; }, [workers]);
   const brandsRef = useRef<Brand[]>(brands);
   useEffect(() => { brandsRef.current = brands; }, [brands]);
+  const ordersRef = useRef<Order[]>(orders);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
   const findVideo = useCallback((videoId: string): Video | null => {
     return brandsRef.current.flatMap(b => b.videos).find(v => v.id === videoId) || null;
   }, []);
@@ -835,7 +849,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
-  // --- Classroom (Academia Rste) ---
+  // --- Classroom (Academia Senda) ---
   const addClassroomModule = useCallback((title: string, desc: string, color: string) => {
     setClassroomModules(prev => [...prev, { id: `mod-${Date.now()}`, title, desc, color, lessons: [] }]);
   }, []);
@@ -886,24 +900,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [brands, workers, pushNotification]);
 
-  const assignEditor = useCallback((videoId: string, workerId: string) => {
-    setBrands(prev => prev.map(b => ({
-      ...b,
-      videos: b.videos.map(v => v.id === videoId ? {
-        ...v,
-        editorId: workerId,
-        editorName: workers.find(w => w.id === workerId)?.name || 'Desconocido',
-      } : v),
-    })));
-
-    const v = brands.flatMap(b => b.videos).find(vid => vid.id === videoId);
-    const w = workers.find(wrk => wrk.id === workerId);
-    if (v && w) {
-      pushNotification('editor', 'trabajo_asignado', `Nuevo trabajo asignado para edición: "${v.name}"`, workerId);
-      pushNotification('admin', 'trabajo_asignado', `El proyecto "${v.name}" ha sido asignado al editor ${w.name}`);
-    }
-  }, [brands, workers, pushNotification]);
-
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
     setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
   }, []);
@@ -934,6 +930,114 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pushNotification('admin', 'trabajo_asignado', `Pedido de "${brand}" asignado a ${workerIds.length} persona(s)`);
   }, [addOrder, pushNotification]);
 
+  // Volumen máximo de proyectos activos configurado por el Admin para un
+  // clíper/editor puntual. Si nunca se configuró, se usa el valor por
+  // defecto (ver DEFAULT_DAILY_CAPACITY en data.ts).
+  const getWorkerCapacity = useCallback((workerId: string): number => {
+    return workerCapacities[workerId] ?? DEFAULT_DAILY_CAPACITY;
+  }, [workerCapacities]);
+
+  const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
+    setWorkerCapacities(prev => ({ ...prev, [workerId]: Math.max(1, Math.round(capacity) || 1) }));
+  }, []);
+
+  // Cuántos proyectos activos (no finalizados) tiene hoy un clíper/editor.
+  // Esto es lo que decide el orden en el que aparecen al momento de
+  // asignar: primero el que menos carga tiene.
+  const getWorkerWorkload = useCallback((workerId: string): number => {
+    return ordersRef.current.filter(o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId)).length;
+  }, []);
+
+  // Paso 2 del flujo de "Proyectos disponibles": ya con el brief, el avatar,
+  // las referencias y las notas del cliente a la vista, el Admin elige un
+  // clíper y un editor (ambos ordenados por volumen de trabajo) y confirma
+  // con "Asignar trabajo". A partir de ahí: (1) el pedido queda marcado como
+  // asignado, (2) cada persona recibe la notificación en la app y, si activó
+  // el correo, también por email (pushNotification ya hace ambas cosas), y
+  // (3) además les llega un mensaje del Admin en Mensajes con el detalle de
+  // entrega, aprovechando el chat privado Admin↔persona que ya existe.
+  const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return;
+    const clipper = workersRef.current.find(w => w.id === clipperId);
+    const editor = workersRef.current.find(w => w.id === editorId);
+
+    updateOrder(orderId, {
+      clipperId, editorId,
+      assignedWorkerIds: [clipperId, editorId],
+      status: 'asignado' as OrderStatus,
+    });
+
+    const when = order.deliveryDate
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      : 'sin fecha de entrega definida todavía';
+    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
+
+    if (clipper) pushNotification('clipper', 'trabajo_asignado', msg, clipperId);
+    if (editor) pushNotification('editor', 'trabajo_asignado', msg, editorId);
+    pushNotification('admin', 'trabajo_asignado', `Proyecto "${order.brand}" asignado a ${clipper?.name || 'un clíper'} (clíper) y ${editor?.name || 'una editora'} (editor(a)).`);
+
+    if (isSupabaseConfigured) {
+      try {
+        for (const workerId of [clipperId, editorId]) {
+          const groupId = await startAdminDm(workerId);
+          if (groupId) await sendChatGroupMessage(groupId, msg);
+        }
+      } catch {
+        // Si el mensaje de chat falla (p.ej. sin conexión), la notificación
+        // y el correo ya quedaron registrados arriba, así que no se pierde.
+      }
+    }
+  }, [updateOrder, pushNotification, startAdminDm, sendChatGroupMessage]);
+
+  // --- Asignación por pasos: el Admin puede asignar primero solo el
+  // clíper y, más tarde (en otro momento), asignar el editor(a) al mismo
+  // proyecto, sin tener que elegir ambos a la vez. El pedido pasa a
+  // "asignado" recién cuando ambos roles quedan cubiertos; mientras tanto
+  // sigue mostrando la opción de completar el rol que falte. ---
+  const notifyPersonAssigned = useCallback(async (order: Order, role: 'clipper' | 'editor', workerId: string) => {
+    const worker = workersRef.current.find(w => w.id === workerId);
+    if (!worker) return;
+    const when = order.deliveryDate
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      : 'sin fecha de entrega definida todavía';
+    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
+    pushNotification(role, 'trabajo_asignado', msg, workerId);
+    pushNotification('admin', 'trabajo_asignado', `Proyecto "${order.brand}" asignado a ${worker.name} (${role === 'clipper' ? 'clíper' : 'editor(a)'}).`);
+    if (isSupabaseConfigured) {
+      try {
+        const groupId = await startAdminDm(workerId);
+        if (groupId) await sendChatGroupMessage(groupId, msg);
+      } catch {
+        // Si el mensaje de chat falla, la notificación y el correo ya quedaron registrados arriba.
+      }
+    }
+  }, [pushNotification, startAdminDm, sendChatGroupMessage]);
+
+  const assignOrderClipper = useCallback(async (orderId: string, clipperId: string) => {
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return;
+    const nowFull = !!order.editorId;
+    updateOrder(orderId, {
+      clipperId,
+      assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []), clipperId])),
+      status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+    });
+    await notifyPersonAssigned(order, 'clipper', clipperId);
+  }, [updateOrder, notifyPersonAssigned]);
+
+  const assignOrderEditor = useCallback(async (orderId: string, editorId: string) => {
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return;
+    const nowFull = !!order.clipperId;
+    updateOrder(orderId, {
+      editorId,
+      assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []), editorId])),
+      status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+    });
+    await notifyPersonAssigned(order, 'editor', editorId);
+  }, [updateOrder, notifyPersonAssigned]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers, notifications, deleteNotification, clearNotifications, emailLog,
@@ -951,7 +1055,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
     notificationsArchive,
-    orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper, assignEditor,
+    orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper,
+    workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
+    assignOrderClipper, assignOrderEditor,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

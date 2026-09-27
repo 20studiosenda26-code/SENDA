@@ -1,28 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Paleta de marca: tomada directamente del logo de Senda (el árbol-circuito
+   blanco/cian sobre negro). El cian de acento y los grises casi-negros de
+   fondo están calibrados sobre los tonos reales del logo, no elegidos al
+   azar, para que la plataforma se sienta como una extensión del isotipo. */
 :root {
-  --ink: #0A0B0D;
-  --surface: #15171B;
-  --surface-2: #1C1F24;
-  --surface-3: #242830;
+  --ink: #08090B;
+  --surface: #131519;
+  --surface-2: #1A1D22;
+  --surface-3: #22262D;
   --line: #2A2E36;
   --text: #F1F3F5;
   --muted: #8B93A0;
   --muted-2: #5C6470;
-  --accent: #31D8E8;
-  --accent-strong: #20B8C7;
-  --accent-dim: #12333A;
-  --on-accent: #04141A;
+  --accent: #35D6E4;
+  --accent-strong: #22B4C2;
+  --accent-dim: #0F2E33;
+  --on-accent: #03151A;
   --mint: #6FE7C8;
   --mint-dim: #16332C;
   --amber: #FFC857;
   --amber-dim: #332A14;
-  --violet: #C9A8FF;
-  --violet-dim: #2A2440;
+  --violet: #7FD9E8;
+  --violet-dim: #123138;
 }
 
 [data-theme="light"] {
@@ -40,7 +44,7 @@
   --on-accent: #FFFFFF;
   --mint-dim: #DCF5EC;
   --amber-dim: #FFF1D6;
-  --violet-dim: #EFE6FF;
+  --violet-dim: #E4F7FA;
 }
 
 * {
@@ -56,9 +60,30 @@ body {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
+/* Vista de fondo con profundidad sutil: un leve viñeteado hacia las
+   esquinas + una malla de puntos finísima (lenguaje "circuito") detrás de
+   todo el contenido, casi imperceptible pero que le da textura al negro
+   plano. Vive en <body> para no interferir con BrandBackground (que ya
+   dibuja las ramas de marca por encima). */
+[data-theme="dark"] body {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(241,243,245,0.05) 1px, transparent 0),
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(53,214,228,0.06), transparent 60%);
+  background-size: 26px 26px, 100% 100%;
+  background-attachment: fixed;
+}
+
 h1, h2, h3, .display {
   font-family: 'Space Grotesk', sans-serif;
   letter-spacing: -0.01em;
+}
+
+/* Detalles "técnicos" (badges de estado, ids, contadores, timestamps):
+   una mono discreta que reforza el lenguaje de circuito del logo sin
+   volver la interfaz fría — se usa con moderación, solo en metadatos. */
+.font-tech {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  letter-spacing: 0.01em;
 }
 
 ::-webkit-scrollbar {
@@ -68,4 +93,7 @@ h1, h2, h3, .display {
 ::-webkit-scrollbar-thumb {
   background: var(--surface-3);
   border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line);
 }

@@ -3,7 +3,7 @@ import type { NotificationCategory, Role } from '../types';
 import { type AuthUser } from '../lib/auth';
 import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, DollarSign, MessageSquare, Info, LogOut } from 'lucide-react';
 import { useState } from 'react';
-import rsteLogo from '../assets/rste-logo.png';
+import sendaLogo from '../assets/senda-logo.png';
 
 const CATEGORY_ICON: Record<NotificationCategory, typeof Bell> = {
   trabajo_asignado: Briefcase,
@@ -59,11 +59,11 @@ export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut:
   return (
     <header className="sticky top-0 z-40 h-16 bg-surface/80 backdrop-blur-md border-b border-line flex items-center justify-between px-6">
       <div className="flex items-center gap-3">
-        <h1 className="font-display text-xl font-semibold">{VIEW_TITLES[view] || 'Rste'}</h1>
+        <h1 className="font-display text-xl font-semibold">{VIEW_TITLES[view] || 'Senda'}</h1>
       </div>
       <div className="flex items-center gap-3">
         <div className="hidden sm:flex items-center gap-2 bg-surface-2 border border-line rounded-lg pl-1.5 pr-3 py-1">
-          <img src={rsteLogo} alt="Rste" className="w-6 h-6 object-contain" />
+          <img src={sendaLogo} alt="Senda" className="w-6 h-6 object-contain" />
           <span className="font-display font-semibold text-sm">SENDA</span>
         </div>
 

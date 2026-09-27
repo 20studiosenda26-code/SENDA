@@ -2,7 +2,7 @@ import { useStore } from '../store';
 import type { ViewKey, Role } from '../types';
 import { useAuth } from '../lib/auth';
 import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Shield, Settings, Moon, Sun, LogOut } from 'lucide-react';
-import rsteLogo from '../assets/rste-logo.png';
+import sendaLogo from '../assets/senda-logo.png';
 
 const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] = [
   { key: 'home', label: 'Inicio', icon: Home, roles: ['clipper', 'editor', 'admin'] },
@@ -24,8 +24,8 @@ export function Rail({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <aside className="fixed left-0 top-0 h-full w-16 bg-surface border-r border-line flex flex-col items-center py-4 gap-1 z-50">
-      <div className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center mb-3 shrink-0 overflow-hidden p-1">
-        <img src={rsteLogo} alt="Rste" className="w-full h-full object-contain" />
+      <div className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center mb-3 shrink-0 overflow-hidden p-1.5 shadow-[0_0_0_1px_rgba(53,214,228,0.06),0_0_16px_-4px_rgba(53,214,228,0.35)]">
+        <img src={sendaLogo} alt="Senda" className="w-full h-full object-contain" />
       </div>
       <nav className="flex-1 flex flex-col gap-1 overflow-y-auto">
         {items.map(item => {

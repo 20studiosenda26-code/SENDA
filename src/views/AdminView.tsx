@@ -95,7 +95,7 @@ export function AdminView() {
             <p className="text-sm text-muted text-center py-4">Todo al día</p>
           ) : (
             <div className="space-y-2">
-              {allVideos.filter(v => v.qc === 'aprobado_rste' || v.qc === 'aprobado_cliente').map(v => (
+              {allVideos.filter(v => v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente').map(v => (
                 <div key={v.id} className="flex items-center gap-3 p-3 bg-surface-3 rounded-lg">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{v.name}</p>

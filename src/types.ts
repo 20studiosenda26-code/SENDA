@@ -1,8 +1,8 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
 export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'administracion' | 'configuracion';
-export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_rste' | 'aprobado_cliente';
-export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_rste' | 'aprobado_cliente';
+export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
+export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
 export type ClipStatus = 'pending' | 'approved' | 'rejected';
 
@@ -103,8 +103,10 @@ export interface Worker {
   bankInfo?: string;
   country?: string;
   restDay?: string;
-  /** Si el trabajador activó recibir notificaciones de Rste en su correo */
+  /** Si el trabajador activó recibir notificaciones de Senda en su correo */
   emailNotifications?: boolean;
+  /** Volumen máximo de videos/proyectos activos que puede tener a la vez (configurado por el Admin). */
+  dailyCapacity?: number;
 }
 
 export interface CalendarEvent {
@@ -210,7 +212,14 @@ export interface ContractSignedUpload {
 }
 
 // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
-export type OrderStatus = 'aprobado_rste' | 'aprobado_cliente' | 'sin_asignar' | 'finalizado' | 'incompleto';
+export type OrderStatus = 'aprobado_senda' | 'aprobado_cliente' | 'sin_asignar' | 'asignado' | 'finalizado' | 'incompleto';
+
+/** Archivo de referencia dejado por el cliente para un proyecto (imagen, video, link, etc.). */
+export interface OrderReference {
+  id: string;
+  name: string;
+  url: string;
+}
 
 export interface Order {
   id: string;
@@ -220,8 +229,19 @@ export interface Order {
   deliveryTime: string;
   status: OrderStatus;
   assignedWorkerIds: string[];
+  /** Clíper asignado a este proyecto (paso 1 de la asignación). */
+  clipperId?: string | null;
+  /** Editor(a) asignado a este proyecto (paso 2 de la asignación). */
+  editorId?: string | null;
   briefFileName?: string | null;
   briefFileUrl?: string | null;
+  /** Avatar/personaje elegido por el cliente para el proyecto. */
+  avatarName?: string | null;
+  avatarFileUrl?: string | null;
+  /** Referencias que el cliente dejó para este proyecto, si las hay. */
+  references?: OrderReference[];
+  /** Notas escritas por el cliente para este proyecto, si las hay. */
+  clientNotes?: string | null;
   createdAt: string;
 }
 

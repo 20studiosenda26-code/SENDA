@@ -8,6 +8,7 @@ import {
   Clock, UserPlus, ChevronRight, Zap, LayoutDashboard, User, ArrowRight, Info
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { AdminTasksRoot } from './AdminTasksPanels';
 
 function fmtTime(t: number) {
   const m = Math.floor(t / 60);
@@ -100,6 +101,8 @@ function VideoTimeline({
   );
 }
 
+// --- UI Helpers for Assignment ---
+
 function UrgencyBadge({ level }: { level: 'critical' | 'high' | 'low' }) {
   const styles = {
     critical: 'bg-red-500/20 text-red-400 border-red-500/50 animate-pulse',
@@ -178,6 +181,14 @@ export function TasksView() {
     );
   }
 
+  // El Admin gestiona los pedidos de clientes (brief, avatar, referencias,
+  // notas y asignación de clíper + editor(a) por volumen de trabajo) desde
+  // su propio panel de carpetas; el resto de este componente (más abajo)
+  // sigue siendo la vista de clíper/editor.
+  if (role === 'admin') {
+    return <AdminTasksRoot />;
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-8 relative">
       <div className="flex justify-between items-end">
@@ -239,7 +250,7 @@ export function TasksView() {
             <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mx-auto mb-4 text-muted">
               <CheckCircle2 size={32} />
             </div>
-            <h3 className="text-xl font-semibold text-white">Todo asignado</h3>
+            <h3 className="text-xl font-semibold text-white">Todo asignando</h3>
             <p className="text-muted">No hay proyectos pendientes de asignación en este momento.</p>
           </div>
         )}
@@ -431,7 +442,7 @@ function VideoDetail({
   const isAdmin = role === 'admin';
   const isClipper = role === 'clipper';
   const isEditor = role === 'editor';
-  const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_rste', 'aprobado_cliente'];
+  const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
   const activeClip: Clip | null =
     video.clips.find(c => c.id === activeClipId) ||
@@ -772,8 +783,8 @@ function VideoDetail({
           </div>
           {isAdmin && (
             <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_rste')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Rste
+              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
+                <CheckCircle2 size={16} /> Aprobar Senda
               </button>
               <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Aprobar Cliente
@@ -1041,8 +1052,8 @@ function VideoDetail({
           )}
           {isAdmin && (
             <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_rste')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Rste
+              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
+                <CheckCircle2 size={16} /> Aprobar Senda
               </button>
               <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Aprobar Cliente
@@ -1051,6 +1062,84 @@ function VideoDetail({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// --- Tablero de "Proyectos iniciados": todos los videos (de todas las
+// marcas) con su estado de QC, para que el Admin vea de un vistazo en qué
+// va cada uno y entre al detalle completo (clips, correcciones, aprobación). ---
+const BOARD_QC_LABEL: Record<QcStatus, string> = {
+  sin_iniciar: 'Sin iniciar',
+  pendiente: 'Pendiente',
+  revision: 'En revisión',
+  correcciones: 'Correcciones',
+  aprobado: 'Aprobado',
+  aprobado_senda: 'Aprobado Senda',
+  aprobado_cliente: 'Aprobado cliente',
+};
+
+const BOARD_QC_CLASSES: Record<QcStatus, string> = {
+  sin_iniciar: 'bg-surface-3 text-muted-2',
+  pendiente: 'bg-amber-dim text-amber',
+  revision: 'bg-accent-dim text-accent',
+  correcciones: 'bg-red-500/10 text-red-400',
+  aprobado: 'bg-mint-dim text-mint',
+  aprobado_senda: 'bg-mint-dim text-mint',
+  aprobado_cliente: 'bg-mint-dim text-mint',
+};
+
+export function TasksBoard() {
+  const { brands, setSelectedVideo } = useStore();
+  const [filter, setFilter] = useState<'todos' | QcStatus>('todos');
+
+  const allVideos = useMemo(
+    () => brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))),
+    [brands],
+  );
+  const filtered = useMemo(
+    () => (filter === 'todos' ? allVideos : allVideos.filter(v => v.qc === filter)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [allVideos, filter],
+  );
+
+  const filterOptions: ('todos' | QcStatus)[] = ['todos', 'sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto space-y-4">
+      <div className="flex flex-wrap gap-1.5">
+        {filterOptions.map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+              filter === f ? 'bg-accent text-on-accent border-accent' : 'bg-surface-2 text-muted border-line hover:border-accent/40'
+            }`}
+          >
+            {f === 'todos' ? 'Todos' : BOARD_QC_LABEL[f]}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted text-center py-10">No hay videos en este estado</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map(v => (
+            <button
+              key={v.id}
+              onClick={() => setSelectedVideo(v)}
+              className="w-full flex items-center gap-3 p-3.5 bg-surface-2 border border-line rounded-xl hover:border-accent/40 hover:bg-surface-3 transition-colors text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{v.name}</p>
+                <p className="text-xs text-muted-2 truncate">{v.brandName} · {v.clipperName} + {v.editorName} · {v.date}</p>
+              </div>
+              <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${BOARD_QC_CLASSES[v.qc]}`}>{BOARD_QC_LABEL[v.qc]}</span>
+              <ChevronRight size={15} className="text-muted-2 shrink-0" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

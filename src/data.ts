@@ -20,7 +20,7 @@ export const INITIAL_BRANDS: Brand[] = [
     id: 'br1',
     name: 'Nexora',
     videos: [
-      { id: 'v1', name: 'Nexora · Demo Reel', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'aprobado_rste', editorQc: 'aprobado_rste', duration: '00:45', durationSeconds: 45, tierSnapshot: TIERS[1], date: '2026-09-20', clips: [], finalVideos: [], corrections: [], finalUploaded: false, paid50: true, paid100: false, briefFileName: 'brief-nexora-demo.pdf', briefFileUrl: null, sentByClipper: true, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
+      { id: 'v1', name: 'Nexora · Demo Reel', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'aprobado_senda', editorQc: 'aprobado_senda', duration: '00:45', durationSeconds: 45, tierSnapshot: TIERS[1], date: '2026-09-20', clips: [], finalVideos: [], corrections: [], finalUploaded: false, paid50: true, paid100: false, briefFileName: 'brief-nexora-demo.pdf', briefFileUrl: null, sentByClipper: true, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
       { id: 'v2', name: 'Nexora · Tutorial', clipperName: 'Mateo R.', editorName: 'Lucía P.', clipperId: 'w1', editorId: 'w2', qc: 'revision', editorQc: 'pendiente', duration: null, durationSeconds: 90, tierSnapshot: null, date: '2026-09-21', clips: [], finalVideos: [], corrections: [{ id: 'cr1', time: 8, text: 'El logo tapa el texto en este punto' }], finalUploaded: false, paid50: false, paid100: false, briefFileName: null, briefFileUrl: null, sentByClipper: false, mainImageFileName: null, mainImageFileUrl: null, mainImageStatus: null, mainImageComment: null },
     ],
   },
@@ -41,15 +41,18 @@ export const INITIAL_BRANDS: Brand[] = [
   },
 ];
 
+/** Volumen máximo de proyectos activos por defecto para un clíper/editor nuevo. */
+export const DEFAULT_DAILY_CAPACITY = 10;
+
 export const INITIAL_WORKERS: Worker[] = [
-  { id: 'w1', name: 'Mateo R.', role: 'clipper', cargo: 'Clipper', ingreso: '2026-06-01', estado: 'Activo', pointsToday: 3, pointsMonth: 45, streak: 4, bestStreak: 7, streakLog: ['on','on','on','on','off'], dayClosedToday: false, online: true, phone: '', email: '', bankInfo: '', country: '', restDay: 'Lunes', emailNotifications: false },
-  { id: 'w2', name: 'Lucía P.', role: 'editor', cargo: 'Editora', ingreso: '2026-05-15', estado: 'Activo', pointsToday: 2, pointsMonth: 38, streak: 3, bestStreak: 5, streakLog: ['on','on','on','off','off'], dayClosedToday: false, online: false, phone: '', email: '', bankInfo: '', country: '', restDay: 'Martes', emailNotifications: false },
-  { id: 'w3', name: 'Sofía M.', role: 'clipper', cargo: 'Clipper', ingreso: '2026-07-01', estado: 'Activo', pointsToday: 5, pointsMonth: 52, streak: 6, bestStreak: 9, streakLog: ['on','on','on','on','on'], dayClosedToday: true, online: true, phone: '', email: '', bankInfo: '', country: '', restDay: 'Miércoles', emailNotifications: false },
-  { id: 'w4', name: 'Diego T.', role: 'editor', cargo: 'Editor', ingreso: '2026-04-20', estado: 'Activo', pointsToday: 4, pointsMonth: 61, streak: 2, bestStreak: 4, streakLog: ['on','on','off','off','off'], dayClosedToday: false, online: false, phone: '', email: '', bankInfo: '', country: '', restDay: 'Jueves', emailNotifications: false },
+  { id: 'w1', name: 'Mateo R.', role: 'clipper', cargo: 'Clipper', ingreso: '2026-06-01', estado: 'Activo', pointsToday: 3, pointsMonth: 45, streak: 4, bestStreak: 7, streakLog: ['on','on','on','on','off'], dayClosedToday: false, online: true, phone: '', email: '', bankInfo: '', country: '', restDay: 'Lunes', emailNotifications: false, dailyCapacity: 10 },
+  { id: 'w2', name: 'Lucía P.', role: 'editor', cargo: 'Editora', ingreso: '2026-05-15', estado: 'Activo', pointsToday: 2, pointsMonth: 38, streak: 3, bestStreak: 5, streakLog: ['on','on','on','off','off'], dayClosedToday: false, online: false, phone: '', email: '', bankInfo: '', country: '', restDay: 'Martes', emailNotifications: false, dailyCapacity: 10 },
+  { id: 'w3', name: 'Sofía M.', role: 'clipper', cargo: 'Clipper', ingreso: '2026-07-01', estado: 'Activo', pointsToday: 5, pointsMonth: 52, streak: 6, bestStreak: 9, streakLog: ['on','on','on','on','on'], dayClosedToday: true, online: true, phone: '', email: '', bankInfo: '', country: '', restDay: 'Miércoles', emailNotifications: false, dailyCapacity: 8 },
+  { id: 'w4', name: 'Diego T.', role: 'editor', cargo: 'Editor', ingreso: '2026-04-20', estado: 'Activo', pointsToday: 4, pointsMonth: 61, streak: 2, bestStreak: 4, streakLog: ['on','on','off','off','off'], dayClosedToday: false, online: false, phone: '', email: '', bankInfo: '', country: '', restDay: 'Jueves', emailNotifications: false, dailyCapacity: 10 },
 ];
 
 export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
-  { id: 'n1', role: 'clipper', workerId: 'w1', category: 'qc_clip', text: 'Tu clip de Nexora · Tutorial fue aprobado por Rste', t: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
+  { id: 'n1', role: 'clipper', workerId: 'w1', category: 'qc_clip', text: 'Tu clip de Nexora · Tutorial fue aprobado por Senda', t: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
   { id: 'n2', role: 'clipper', workerId: 'w1', category: 'racha', text: 'Racha de 4 días activa', t: new Date(Date.now() - 5 * 3600 * 1000).toISOString() },
   { id: 'n3', role: 'editor', workerId: 'w2', category: 'clips_enviados', text: 'Nexora · Demo Reel lista para tu edición', t: new Date(Date.now() - 3600 * 1000).toISOString() },
   { id: 'n4', role: 'editor', workerId: 'w4', category: 'qc_video', text: 'Vortex · Launch aprobado por el cliente', t: new Date(Date.now() - 3 * 3600 * 1000).toISOString() },
@@ -113,20 +116,97 @@ export const CLASSROOM_MODULES: ClassroomModule[] = [
     ],
   },
   {
-    id: 'm4', title: 'Módulo 4 · Entrega y QC', desc: 'Formatos de exportación, checklist de calidad y flujo de Rste.', color: 'violet',
+    id: 'm4', title: 'Módulo 4 · Entrega y QC', desc: 'Formatos de exportación, checklist de calidad y flujo de Senda.', color: 'violet',
     lessons: [
       { id: 'm4-l1', title: 'Lección 1 · Formatos de exportación', videoUrl: SAMPLE_VIDEO },
       { id: 'm4-l2', title: 'Lección 2 · Checklist de calidad', videoUrl: SAMPLE_VIDEO },
-      { id: 'm4-l3', title: 'Lección 3 · Flujo de trabajo en Rste', videoUrl: SAMPLE_VIDEO },
+      { id: 'm4-l3', title: 'Lección 3 · Flujo de trabajo en Senda', videoUrl: SAMPLE_VIDEO },
     ],
   },
 ];
 
 // --- Pedidos / Proyectos disponibles (panel de Admin) ---
+// 5 proyectos "borrador" sin asignar (lo que el Admin ve primero en la lista,
+// ordenados por hora de entrega) + 2 proyectos ya en curso, usados solo para
+// que la carga de trabajo de cada clíper/editor se vea distinta al ordenar
+// por volumen en el paso de asignación.
 export const INITIAL_ORDERS: Order[] = [
-  { id: 'ord1', brand: 'Avon', videoCount: 25, deliveryDate: '2026-09-26', deliveryTime: '20:00', status: 'sin_asignar', assignedWorkerIds: [], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 3600 * 1000).toISOString() },
-  { id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00', status: 'aprobado_rste', assignedWorkerIds: ['w1', 'w2'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
-  { id: 'ord3', brand: 'Vortex Labs', videoCount: 8, deliveryDate: '2026-09-25', deliveryTime: '17:00', status: 'finalizado', assignedWorkerIds: ['w3', 'w4'], briefFileName: null, briefFileUrl: null, createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString() },
+  {
+    id: 'ord1', brand: 'Avon', videoCount: 25, deliveryDate: '2026-09-26', deliveryTime: '20:00',
+    status: 'sin_asignar', assignedWorkerIds: [], clipperId: null, editorId: null,
+    briefFileName: 'brief-avon-septiembre.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Valeria" (versión clara, tono cercano)', avatarFileUrl: null,
+    references: [
+      { id: 'ref1', name: 'Referencia de guion — TikTok viral', url: '#' },
+      { id: 'ref2', name: 'Paleta de color de marca.png', url: '#' },
+    ],
+    clientNotes: 'Evitar mencionar la competencia. El cierre siempre debe llevar el código de descuento hablado, no solo en texto.',
+    createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord3', brand: 'Vortex Labs', videoCount: 8, deliveryDate: '2026-09-27', deliveryTime: '09:00',
+    status: 'sin_asignar', assignedWorkerIds: [], clipperId: null, editorId: null,
+    briefFileName: 'brief-vortex-launch.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Nova" (versión oscura)', avatarFileUrl: null,
+    references: [],
+    clientNotes: null,
+    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord5', brand: 'Lumen Skincare', videoCount: 12, deliveryDate: '2026-09-27', deliveryTime: '18:30',
+    status: 'sin_asignar', assignedWorkerIds: [], clipperId: null, editorId: null,
+    briefFileName: 'brief-lumen-rutina-noche.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Camila" (piel luminosa)', avatarFileUrl: null,
+    references: [{ id: 'ref3', name: 'Video de referencia — unboxing', url: '#' }],
+    clientNotes: 'El producto estrella (sérum) debe salir en cámara antes del segundo 5.',
+    createdAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord6', brand: 'Kaia Beauty', videoCount: 6, deliveryDate: '2026-09-29', deliveryTime: '15:00',
+    status: 'sin_asignar', assignedWorkerIds: [], clipperId: null, editorId: null,
+    briefFileName: null, briefFileUrl: null,
+    avatarName: null, avatarFileUrl: null,
+    references: [],
+    clientNotes: 'Brief todavía no lo sube el cliente, queda pendiente antes de asignar.',
+    createdAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord7', brand: 'Orbit Fit', videoCount: 15, deliveryDate: '2026-09-30', deliveryTime: '12:00',
+    status: 'sin_asignar', assignedWorkerIds: [], clipperId: null, editorId: null,
+    briefFileName: 'brief-orbit-reto-30-dias.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Max" (energético)', avatarFileUrl: null,
+    references: [
+      { id: 'ref4', name: 'Reel de referencia — reto fitness', url: '#' },
+      { id: 'ref5', name: 'Logo y tipografía.zip', url: '#' },
+    ],
+    clientNotes: null,
+    createdAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
+  },
+  // --- En curso (ya asignados), solo para variar la carga de trabajo ---
+  {
+    id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00',
+    status: 'asignado', assignedWorkerIds: ['w1', 'w2'], clipperId: 'w1', editorId: 'w2',
+    briefFileName: 'brief-nexora-demo.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Nexa" (tech, neutro)', avatarFileUrl: null,
+    references: [], clientNotes: null,
+    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord8', brand: 'Auralis', videoCount: 9, deliveryDate: '2026-09-27', deliveryTime: '20:00',
+    status: 'asignado', assignedWorkerIds: ['w1', 'w4'], clipperId: 'w1', editorId: 'w4',
+    briefFileName: 'brief-auralis-caso-de-estudio.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Auri" (elegante)', avatarFileUrl: null,
+    references: [], clientNotes: null,
+    createdAt: new Date(Date.now() - 7 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'ord4', brand: 'Vela Home', videoCount: 8, deliveryDate: '2026-09-25', deliveryTime: '17:00',
+    status: 'finalizado', assignedWorkerIds: ['w3', 'w4'], clipperId: 'w3', editorId: 'w4',
+    briefFileName: 'brief-vela-home.pdf', briefFileUrl: null,
+    avatarName: 'Avatar "Home" (cálido)', avatarFileUrl: null,
+    references: [], clientNotes: null,
+    createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+  },
 ];
 
 export const CONTRACTS = [

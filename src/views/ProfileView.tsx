@@ -167,7 +167,7 @@ export function ProfileView() {
             <span className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${emailNotifOn ? 'bg-mint' : 'bg-surface-2 border border-line'}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${emailNotifOn ? 'translate-x-4' : 'translate-x-0.5'}`} />
             </span>
-            Recibir notificaciones de Rste al correo
+            Recibir notificaciones de Senda al correo
           </button>
         </div>
         <button
