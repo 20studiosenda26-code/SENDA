@@ -2,7 +2,7 @@ import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Send, Search, Paperclip, Plus, X, Users, Bell, Loader2, Download, Check } from 'lucide-react';
+import { Send, Search, Paperclip, Plus, X, Users, Bell, Loader2, Download, Check, Trash2 } from 'lucide-react';
 import type { NotificationCategory } from '../types';
 
 function timeShort(iso: string) {
@@ -25,7 +25,7 @@ const CATEGORY_LABEL: Record<NotificationCategory, string> = {
 export function ChatView() {
   const {
     role, chatGroups, chatMessages, workers, adminProfiles, createChatGroup, sendChatGroupMessage, startAdminDm,
-    notificationsArchive,
+    deleteChatGroup, notificationsArchive,
   } = useStore();
   const { user } = useAuth();
   const isAdmin = role === 'admin';
@@ -39,6 +39,8 @@ export function ChatView() {
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<{ name: string; url: string } | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -106,6 +108,18 @@ export function ChatView() {
     const groupId = await startAdminDm(workerId);
     if (groupId) setActiveId(groupId);
     setShowNewDm(false);
+  };
+
+  // Solo el admin puede eliminar una conversación (grupo o privado). Pide
+  // confirmación en línea antes de borrar para evitar clics accidentales,
+  // y si la conversación eliminada era la que estaba abierta, vuelve a la
+  // pestaña de Notificaciones.
+  const handleDeleteGroup = async (groupId: string) => {
+    setDeletingId(groupId);
+    await deleteChatGroup(groupId);
+    if (activeId === groupId) setActiveId('notif');
+    setConfirmDeleteId(null);
+    setDeletingId(null);
   };
 
   if (!isSupabaseConfigured) {
@@ -189,14 +203,47 @@ export function ChatView() {
           <p className="text-xs text-muted-2 font-medium px-2 mb-1 mt-2">{isAdmin ? 'CONVERSACIONES' : 'MIS CHATS'}</p>
           {myGroups.length === 0 && <p className="text-xs text-muted-2 px-2 py-3">Sin conversaciones todavía</p>}
           {myGroups.map(g => (
-            <button
-              key={g.id}
-              onClick={() => setActiveId(g.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors mb-1 ${activeId === g.id ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-surface-3 hover:text-text'}`}
-            >
-              <span className="font-medium block truncate">{g.name}</span>
-              <span className="text-xs text-muted-2 block">{g.isDm ? 'Privado' : `Grupo · ${g.memberIds.length} miembros`}</span>
-            </button>
+            <div key={g.id} className="relative group/chatitem mb-1">
+              {confirmDeleteId === g.id ? (
+                <div className="px-3 py-2.5 rounded-lg text-sm bg-red-500/10 border border-red-500/30">
+                  <p className="text-xs text-text mb-2">¿Eliminar <span className="font-medium">{g.name}</span>? Se borran todos sus mensajes.</p>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => handleDeleteGroup(g.id)}
+                      disabled={deletingId === g.id}
+                      className="flex-1 flex items-center justify-center gap-1 bg-red-500 text-white rounded-md py-1.5 text-xs font-medium hover:bg-red-600 transition-colors disabled:opacity-60"
+                    >
+                      {deletingId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      Eliminar
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      disabled={deletingId === g.id}
+                      className="flex-1 bg-surface-3 border border-line rounded-md py-1.5 text-xs text-muted hover:text-text transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setActiveId(g.id)}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${activeId === g.id ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-surface-3 hover:text-text'} ${isAdmin ? 'pr-8' : ''}`}
+                >
+                  <span className="font-medium block truncate">{g.name}</span>
+                  <span className={`text-xs block ${activeId === g.id ? 'text-accent/70' : 'text-muted-2'}`}>{g.isDm ? 'Privado' : `Grupo · ${g.memberIds.length} miembros`}</span>
+                </button>
+              )}
+              {isAdmin && confirmDeleteId !== g.id && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(g.id); }}
+                  title="Eliminar conversación"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md flex items-center justify-center text-muted-2 opacity-0 group-hover/chatitem:opacity-100 hover:bg-red-500/15 hover:text-red-400 transition-all"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
 

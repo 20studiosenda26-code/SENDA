@@ -2,8 +2,9 @@ import { useStore } from '../store';
 import type { NotificationCategory, Role } from '../types';
 import { type AuthUser } from '../lib/auth';
 import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, DollarSign, MessageSquare, Info, LogOut } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import sendaLogo from '../assets/senda-logo.png';
+import { playNotificationChime } from '../lib/notificationSound';
 
 const CATEGORY_ICON: Record<NotificationCategory, typeof Bell> = {
   trabajo_asignado: Briefcase,
@@ -55,6 +56,25 @@ export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut:
   const roleNotifs = notifications
     .filter(n => n.role === role)
     .sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
+
+  // Reproduce el carillón de SENDA cuando llega una notificación nueva
+  // (propia del rol de esta sesión). La primera vez que se calcula
+  // (carga inicial / cambio de sesión) solo guarda la referencia, para
+  // no sonar de golpe por todo el historial ya existente.
+  const knownNotifIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const currentIds = new Set(notifications.filter(n => n.role === role).map(n => n.id));
+    if (knownNotifIds.current === null) {
+      knownNotifIds.current = currentIds;
+      return;
+    }
+    let hasNew = false;
+    currentIds.forEach(id => {
+      if (!knownNotifIds.current!.has(id)) hasNew = true;
+    });
+    if (hasNew) playNotificationChime();
+    knownNotifIds.current = currentIds;
+  }, [notifications, role]);
 
   return (
     <header className="sticky top-0 z-40 h-16 bg-surface/80 backdrop-blur-md border-b border-line flex items-center justify-between px-6">

@@ -171,6 +171,7 @@ interface Store {
   sendChatGroupMessage: (groupId: string, text: string, fileName?: string, fileUrl?: string) => Promise<void>;
   ensureOwnAdminDm: () => Promise<string | null>;
   startAdminDm: (workerId: string) => Promise<string | null>;
+  deleteChatGroup: (groupId: string) => Promise<void>;
 
   // --- Notificaciones permanentes (para la pestaña "Notificaciones" del chat) ---
   notificationsArchive: NotificationItem[];
@@ -824,6 +825,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return newGroup.id as string;
   }, [user, chatGroups, loadChat]);
 
+  // Elimina una conversación completa (grupo o privado) junto con sus
+  // miembros y mensajes (cascada por FK). Las políticas de Supabase ya
+  // restringen esta operación a administradores; aquí además se evita
+  // llamarla si por alguna razón el rol activo no es admin.
+  const deleteChatGroup = useCallback(async (groupId: string) => {
+    if (!isSupabaseConfigured || !supabase || !user || role !== 'admin') return;
+    await supabase.from('chat_groups').delete().eq('id', groupId);
+    void loadChat();
+  }, [user, role, loadChat]);
+
   const approveFinal = useCallback((videoId: string) => {
     const v = findVideo(videoId);
     const wasAlreadyPaid100 = v ? v.paid100 : true;
@@ -1109,6 +1120,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     lessonCompletions, markLessonComplete,
     contracts, contractSignedUploads, uploadContract, deleteContract, uploadSignedContract,
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
+    deleteChatGroup,
     notificationsArchive,
     orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper,
     workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
