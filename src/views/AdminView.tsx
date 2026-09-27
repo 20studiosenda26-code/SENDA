@@ -1,5 +1,5 @@
 import { useStore } from '../store';
-import { Users, DollarSign, Video, TrendingUp, Flame, CheckCircle2, Clock, DollarSign as Dollar } from 'lucide-react';
+import { Users, DollarSign, Video, TrendingUp, Flame, CheckCircle2, Clock, DollarSign as Dollar, Wifi } from 'lucide-react';
 
 export function AdminView() {
   const { workers, brands, paidHistory, closeDay, togglePaid50, approveFinal } = useStore();
@@ -8,6 +8,7 @@ export function AdminView() {
   const inProgress = allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
   const totalPaid = paidHistory.filter(p => p.paid100).length;
   const totalPending = allVideos.filter(v => v.paid50 && !v.paid100).length;
+  const onlineWorkers = workers.filter(w => w.online);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -19,6 +20,24 @@ export function AdminView() {
       </div>
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
+        <h3 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
+          <Wifi size={18} className="text-mint" /> En línea ahora ({onlineWorkers.length})
+        </h3>
+        {onlineWorkers.length === 0 ? (
+          <p className="text-sm text-muted text-center py-4">Nadie está en línea en este momento</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {onlineWorkers.map(w => (
+              <span key={w.id} className="inline-flex items-center gap-2 bg-mint-dim text-mint border border-mint/30 rounded-full px-3 py-1.5 text-sm font-medium">
+                <span className="w-2 h-2 rounded-full bg-mint" />
+                {w.name} <span className="text-[10px] text-mint/70">· {w.cargo}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-surface-2 border border-line rounded-xl p-5">
         <h3 className="font-display text-lg font-semibold mb-4">Equipo</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -26,6 +45,7 @@ export function AdminView() {
               <tr className="text-left text-muted text-xs border-b border-line">
                 <th className="py-2 pr-4 font-medium">Nombre</th>
                 <th className="py-2 pr-4 font-medium">Cargo</th>
+                <th className="py-2 pr-4 font-medium">Estado</th>
                 <th className="py-2 pr-4 font-medium">Puntos hoy</th>
                 <th className="py-2 pr-4 font-medium">Puntos mes</th>
                 <th className="py-2 pr-4 font-medium">Racha</th>
@@ -38,6 +58,12 @@ export function AdminView() {
                 <tr key={w.id} className="border-b border-line/50 hover:bg-surface-3 transition-colors">
                   <td className="py-3 pr-4 font-medium">{w.name}</td>
                   <td className="py-3 pr-4 text-muted">{w.cargo}</td>
+                  <td className="py-3 pr-4">
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${w.online ? 'text-mint' : 'text-muted-2'}`}>
+                      <span className={`w-2 h-2 rounded-full ${w.online ? 'bg-mint' : 'bg-muted-2'}`} />
+                      {w.online ? 'En línea' : 'No en línea'}
+                    </span>
+                  </td>
                   <td className="py-3 pr-4">{w.pointsToday}</td>
                   <td className="py-3 pr-4">{w.pointsMonth}</td>
                   <td className="py-3 pr-4">

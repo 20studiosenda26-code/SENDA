@@ -2,6 +2,7 @@ import { useStore } from '../store';
 import { Flame, Target, TrendingUp, Play, ArrowRight, CheckCircle2, Clock, AlertCircle, CalendarDays, GraduationCap, BookOpen, Users } from 'lucide-react';
 import { CardNodeDeco } from '../components/BrandBackground';
 import { CLASSROOM_MODULES } from '../data';
+import { AdminHomePanels } from './AdminHomePanels';
 
 export function HomeView() {
   const { role, workers, currentWorkerId, brands, setView, config, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
@@ -16,24 +17,17 @@ export function HomeView() {
 
   const greeting = role === 'admin' ? 'Panel de administración' : `Hola, ${worker?.name?.split(' ')[0] || ''}`;
 
-  return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-end justify-between">
+  // El Inicio del Admin es un panel totalmente distinto al de clíper/editor
+  // (estado del equipo, utilidad, carga del equipo, QC pendiente y orden de
+  // entrega), así que se delega por completo en AdminHomePanels.
+  if (role === 'admin') {
+    return (
+      <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="font-display text-3xl font-bold">{greeting}</h2>
-            {role !== 'admin' && worker && (
-              <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full ${worker.online ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
-                <span className={`w-2 h-2 rounded-full ${worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
-                {worker.online ? 'En línea' : 'No en línea'}
-              </span>
-            )}
-          </div>
+          <h2 className="font-display text-3xl font-bold">{greeting}</h2>
           <p className="text-muted mt-1">Aquí está tu resumen de hoy, {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}.</p>
         </div>
-      </div>
 
-      {role === 'admin' && (
         <div className="bg-surface-2 border border-line rounded-xl p-5">
           <h3 className="font-display text-lg font-semibold mb-3 flex items-center gap-2">
             <Users size={18} className="text-accent" /> Estado del equipo
@@ -50,7 +44,28 @@ export function HomeView() {
             ))}
           </div>
         </div>
-      )}
+
+        <AdminHomePanels />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="font-display text-3xl font-bold">{greeting}</h2>
+            {worker && (
+              <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full ${worker.online ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
+                <span className={`w-2 h-2 rounded-full ${worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
+                {worker.online ? 'En línea' : 'No en línea'}
+              </span>
+            )}
+          </div>
+          <p className="text-muted mt-1">Aquí está tu resumen de hoy, {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}.</p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard icon={Target} label="Puntos hoy" value={worker?.pointsToday || 0} target={goals.daily} sub={`Meta: ${goals.daily}`} accent="accent" onClick={() => setView('perfil')} />

@@ -22,7 +22,15 @@ export function ProfileView() {
     }
   }, [worker?.id]);
 
-  if (!worker) return null;
+  if (!worker) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="bg-surface-2 border border-line rounded-xl p-6 text-center text-sm text-muted">
+          Cargando tu perfil…
+        </div>
+      </div>
+    );
+  }
 
   const myVideos = brands.flatMap(b => b.videos).filter(v =>
     role === 'admin' ? true : role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId

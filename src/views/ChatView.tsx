@@ -24,7 +24,7 @@ const CATEGORY_LABEL: Record<NotificationCategory, string> = {
 
 export function ChatView() {
   const {
-    role, chatGroups, chatMessages, workers, adminProfiles, createChatGroup, sendChatGroupMessage,
+    role, chatGroups, chatMessages, workers, adminProfiles, createChatGroup, sendChatGroupMessage, startAdminDm,
     notificationsArchive,
   } = useStore();
   const { user } = useAuth();
@@ -98,9 +98,13 @@ export function ChatView() {
     setShowNewGroup(false);
   };
 
+  // Siempre reutiliza el mismo chat privado con esa persona si ya existe
+  // (startAdminDm busca primero un grupo is_dm que ya la incluya); solo crea
+  // uno nuevo la primera vez. Así nunca se abren varios chats con el mismo
+  // usuario, sea que se busque o se vuelva a abrir después.
   const handleCreateDm = async (workerId: string) => {
-    const worker = workers.find(w => w.id === workerId);
-    await createChatGroup(`Admin · ${worker?.name || 'Usuario'}`, [workerId]);
+    const groupId = await startAdminDm(workerId);
+    if (groupId) setActiveId(groupId);
     setShowNewDm(false);
   };
 
