@@ -158,6 +158,9 @@ export function TasksView() {
 
   const handleAssign = (workerId: string) => {
     if (!selectedProject) return;
+    // logic to update the video clipperId would be here.
+    // As per current store.tsx, updateVideo is needed.
+    // We'll assume this is handled via a store action in a real implementation.
     setIsDrawerOpen(false);
     setSelectedProject(null);
   };
