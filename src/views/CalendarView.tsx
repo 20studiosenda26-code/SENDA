@@ -1,14 +1,38 @@
 import { useStore } from '../store';
-import { ChevronLeft, ChevronRight, Plus, X, ExternalLink, Pencil, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronLeft, ChevronRight, Plus, X, ExternalLink, Pencil, Trash2, CalendarDays } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
+// Cuántas celdas se pintan siempre (6 semanas): así la grilla nunca "salta"
+// de tamaño entre meses de 4 y 5 semanas, se ve estable y prolija.
+const TOTAL_CELLS = 42;
+
+interface CalendarCell {
+  day: number;
+  inMonth: boolean;
+}
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function CalendarView() {
   const { brands, role, calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent } = useStore();
-  const [month, setMonth] = useState(8); // September (0-indexed)
-  const [year] = useState(2026);
+
+  // "now" es la fecha/hora real, y se refresca sola mientras la pantalla
+  // sigue abierta (cada minuto), para que el día de hoy resaltado en el
+  // calendario esté siempre en vivo y nunca se quede desactualizado si
+  // alguien deja la pestaña abierta pasada la medianoche.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear] = useState(now.getFullYear());
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fDay, setFDay] = useState('');
@@ -18,6 +42,7 @@ export function CalendarView() {
   const [fColor, setFColor] = useState('accent');
 
   const isAdmin = role === 'admin';
+  const isViewingCurrentMonth = month === now.getMonth() && year === now.getFullYear();
 
   const resetForm = () => {
     setEditingId(null);
@@ -36,9 +61,20 @@ export function CalendarView() {
     setShowForm(true);
   };
 
+  // Navegación de mes que sí cruza de año (antes diciembre <-> enero se
+  // quedaba pegado porque el mes estaba limitado a 0-11 sin tocar el año).
+  const goPrevMonth = () => {
+    if (month === 0) { setMonth(11); setYear(y => y - 1); } else { setMonth(m => m - 1); }
+  };
+  const goNextMonth = () => {
+    if (month === 11) { setMonth(0); setYear(y => y + 1); } else { setMonth(m => m + 1); }
+  };
+  const goToday = () => { setMonth(now.getMonth()); setYear(now.getFullYear()); };
+
   const firstDay = new Date(year, month, 1).getDay();
   const offset = firstDay === 0 ? 6 : firstDay - 1;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const prevMonthDays = new Date(year, month, 0).getDate();
 
   const allEvents = [...calendarEvents];
   brands.forEach(b => b.videos.forEach(v => {
@@ -55,9 +91,16 @@ export function CalendarView() {
     violet: 'bg-violet/20 text-violet border-violet/30',
   };
 
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < offset; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  // Celdas de días "fantasma" del mes anterior/siguiente, para que la
+  // grilla siempre se vea completa y ordenada (look de calendario real,
+  // no un mes flotando con huecos en blanco al inicio/final).
+  const cells: CalendarCell[] = [];
+  for (let i = offset - 1; i >= 0; i--) cells.push({ day: prevMonthDays - i, inMonth: false });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, inMonth: true });
+  let trailing = 1;
+  while (cells.length < TOTAL_CELLS) cells.push({ day: trailing++, inMonth: false });
+
+  const todayLabel = capitalize(now.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }));
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
@@ -73,7 +116,7 @@ export function CalendarView() {
             </button>
           </div>
           {showForm && (
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 animate-fadeIn">
               {editingId && (
                 <p className="sm:col-span-2 text-xs text-accent font-medium">Editando: "{fLabel || 'evento'}"</p>
               )}
@@ -129,32 +172,70 @@ export function CalendarView() {
       </div>
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-display text-xl font-semibold">{MONTHS[month]} {year}</h2>
-          <div className="flex gap-1">
-            <button onClick={() => setMonth(m => Math.max(0, m - 1))} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text transition-colors">
+        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <div>
+            <h2 className="font-display text-xl font-semibold">{MONTHS[month]} {year}</h2>
+            <p className="text-xs text-muted-2 mt-1 flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent" />
+              </span>
+              Hoy es {todayLabel}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {!isViewingCurrentMonth && (
+              <button
+                onClick={goToday}
+                className="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-accent-dim border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors"
+              >
+                <CalendarDays size={13} /> Hoy
+              </button>
+            )}
+            <button onClick={goPrevMonth} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/40 transition-colors">
               <ChevronLeft size={18} />
             </button>
-            <button onClick={() => setMonth(m => Math.min(11, m + 1))} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text transition-colors">
+            <button onClick={goNextMonth} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/40 transition-colors">
               <ChevronRight size={18} />
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {DAYS.map(d => <div key={d} className="text-center text-xs text-muted-2 font-medium py-2">{d}</div>)}
+        <div className="grid grid-cols-7 gap-1.5 mb-2">
+          {DAYS.map((d, i) => (
+            <div key={d} className={`text-center text-xs font-medium py-2 ${i >= 5 ? 'text-muted-2/70' : 'text-muted-2'}`}>{d}</div>
+          ))}
         </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((day, i) => {
-            const events = day ? allEvents.filter(e => e.day === day) : [];
-            const isToday = day === 22 && month === 8;
+        <div key={`${year}-${month}`} className="grid grid-cols-7 gap-1.5 animate-fadeIn">
+          {cells.map((cell, i) => {
+            const events = cell.inMonth ? allEvents.filter(e => e.day === cell.day) : [];
+            const isTodayCell = cell.inMonth && isViewingCurrentMonth && cell.day === now.getDate();
+            const isWeekendCol = i % 7 >= 5;
+
+            const cellClasses = [
+              'min-h-[92px] p-1.5 rounded-lg border transition-all duration-150',
+              cell.inMonth ? 'bg-surface-3' : 'bg-surface-3/30 border-transparent',
+              cell.inMonth && !isTodayCell ? (isWeekendCol ? 'border-line/70' : 'border-line') : '',
+              isTodayCell ? 'ring-2 ring-accent bg-accent-dim border-accent/40' : '',
+              cell.inMonth && events.length > 0 ? 'hover:border-accent/30' : '',
+            ].filter(Boolean).join(' ');
+
             return (
-              <div key={i} className={`min-h-[80px] p-1.5 rounded-lg border ${day ? 'bg-surface-3 border-line' : 'border-transparent'} ${isToday ? 'ring-1 ring-accent' : ''}`}>
-                {day && <span className={`text-xs ${isToday ? 'text-accent font-bold' : 'text-muted'}`}>{day}</span>}
+              <div key={i} className={cellClasses}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs leading-none ${!cell.inMonth ? 'text-muted-2/40' : isTodayCell ? 'text-accent font-bold' : 'text-muted'}`}>
+                    {cell.day}
+                  </span>
+                  {isTodayCell && (
+                    <span className="text-[8px] font-bold uppercase tracking-wide text-accent bg-accent/15 px-1 py-0.5 rounded leading-none">
+                      Hoy
+                    </span>
+                  )}
+                </div>
                 <div className="mt-1 space-y-1">
                   {events.map(e => {
                     const isEditable = isAdmin && calendarEvents.some(ce => ce.id === e.id);
                     const content = (
-                      <div className={`group/ev relative text-xs px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorMap[e.color] || colorMap.accent} ${e.link ? 'cursor-pointer hover:opacity-80' : ''}`} title={e.note || e.label}>
+                      <div className={`group/ev relative text-xs px-1.5 py-0.5 rounded border truncate flex items-center gap-1 transition-opacity ${colorMap[e.color] || colorMap.accent} ${e.link ? 'cursor-pointer hover:opacity-80' : ''}`} title={e.note || e.label}>
                         {e.link && <ExternalLink size={9} className="shrink-0" />}
                         <span className="truncate flex-1">{e.label}</span>
                         {isEditable && (
