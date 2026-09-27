@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip, Worker } from '../types';
 import { uploadSharedFile } from '../lib/supabaseClient';
+import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
@@ -766,7 +767,7 @@ function VideoDetail({
                       video.qc === q ? 'bg-accent text-on-accent border-accent' : 'bg-surface-3 text-muted border-line hover:text-text'
                     }`}
                   >
-                    {q.replace(/_/g, ' ')}
+                    {qcStatusLabel(q, video)}
                   </button>
                 ) : (
                   <span
@@ -775,7 +776,7 @@ function VideoDetail({
                       video.qc === q ? 'bg-accent text-on-accent border-accent' : 'bg-surface-3 text-muted border-line opacity-60'
                     }`}
                   >
-                    {q.replace(/_/g, ' ')}
+                    {qcStatusLabel(q, video)}
                   </span>
                 )
               ))}
@@ -1134,7 +1135,9 @@ export function TasksBoard() {
                 <p className="text-sm font-medium truncate">{v.name}</p>
                 <p className="text-xs text-muted-2 truncate">{v.brandName} · {v.clipperName} + {v.editorName} · {v.date}</p>
               </div>
-              <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${BOARD_QC_CLASSES[v.qc]}`}>{BOARD_QC_LABEL[v.qc]}</span>
+              <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${BOARD_QC_CLASSES[v.qc]}`}>
+                {v.qc === 'pendiente' ? `Pendiente ${pendingRoleSuffix(v)}` : BOARD_QC_LABEL[v.qc]}
+              </span>
               <ChevronRight size={15} className="text-muted-2 shrink-0" />
             </button>
           ))}

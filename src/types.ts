@@ -243,6 +243,10 @@ export interface Order {
   /** Notas escritas por el cliente para este proyecto, si las hay. */
   clientNotes?: string | null;
   createdAt: string;
+  /** true en cuanto el pedido quedó con clíper Y editor(a) asignados y ya se creó su tarjeta en "Proyectos iniciados" (tablero de QC). Evita duplicarla. */
+  promotedToBoard?: boolean;
+  /** id del video creado en el tablero de "Proyectos iniciados" cuando el pedido se asignó por completo. */
+  boardVideoId?: string | null;
 }
 
 // --- Chat (grupos + privados) ---

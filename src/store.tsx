@@ -948,6 +948,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return ordersRef.current.filter(o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId)).length;
   }, []);
 
+  // Cuando un pedido queda con clíper Y editor(a) asignados, se "promueve"
+  // automáticamente: se crea su tarjeta de video dentro de la marca
+  // correspondiente (se crea la marca si no existía todavía), con estado
+  // "sin_iniciar", para que aparezca de inmediato en "Proyectos iniciados"
+  // (el tablero de estados: sin iniciar, pendiente, revisión, etc.). El
+  // pedido en sí no se borra (queda como historial), pero se filtra de
+  // "Proyectos disponibles" en cuanto tiene ambos roles asignados.
+  const createBoardVideoForOrder = useCallback((order: Order, clipperId: string, editorId: string): string => {
+    const clipper = workersRef.current.find(w => w.id === clipperId);
+    const editor = workersRef.current.find(w => w.id === editorId);
+    const videoId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newVideo: Video = {
+      id: videoId,
+      name: order.brand,
+      clipperName: clipper?.name || 'Sin asignar',
+      editorName: editor?.name || 'Sin asignar',
+      clipperId, editorId,
+      qc: 'sin_iniciar',
+      editorQc: 'pendiente',
+      duration: null,
+      durationSeconds: 0,
+      tierSnapshot: null,
+      date: new Date().toISOString().slice(0, 10),
+      clips: [],
+      finalVideos: [],
+      corrections: [],
+      finalUploaded: false,
+      paid50: false,
+      paid100: false,
+      briefFileName: order.briefFileName || null,
+      briefFileUrl: order.briefFileUrl || null,
+      sentByClipper: false,
+      mainImageFileName: null,
+      mainImageFileUrl: null,
+      mainImageStatus: null,
+      mainImageComment: null,
+    };
+    setBrands(prev => {
+      const existing = prev.find(b => b.name.trim().toLowerCase() === order.brand.trim().toLowerCase());
+      if (existing) {
+        return prev.map(b => (b.id === existing.id ? { ...b, videos: [newVideo, ...b.videos] } : b));
+      }
+      const newBrand: Brand = { id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: order.brand, videos: [newVideo] };
+      return [newBrand, ...prev];
+    });
+    return videoId;
+  }, []);
+
   // Paso 2 del flujo de "Proyectos disponibles": ya con el brief, el avatar,
   // las referencias y las notas del cliente a la vista, el Admin elige un
   // clíper y un editor (ambos ordenados por volumen de trabajo) y confirma
@@ -962,10 +1010,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const clipper = workersRef.current.find(w => w.id === clipperId);
     const editor = workersRef.current.find(w => w.id === editorId);
 
+    const videoId = order.promotedToBoard ? order.boardVideoId : createBoardVideoForOrder(order, clipperId, editorId);
     updateOrder(orderId, {
       clipperId, editorId,
       assignedWorkerIds: [clipperId, editorId],
       status: 'asignado' as OrderStatus,
+      promotedToBoard: true,
+      boardVideoId: videoId,
     });
 
     const when = order.deliveryDate
@@ -988,7 +1039,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // y el correo ya quedaron registrados arriba, así que no se pierde.
       }
     }
-  }, [updateOrder, pushNotification, startAdminDm, sendChatGroupMessage]);
+  }, [updateOrder, pushNotification, startAdminDm, sendChatGroupMessage, createBoardVideoForOrder]);
 
   // --- Asignación por pasos: el Admin puede asignar primero solo el
   // clíper y, más tarde (en otro momento), asignar el editor(a) al mismo
@@ -1018,25 +1069,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const order = ordersRef.current.find(o => o.id === orderId);
     if (!order) return;
     const nowFull = !!order.editorId;
+    const videoId = nowFull && !order.promotedToBoard ? createBoardVideoForOrder(order, clipperId, order.editorId as string) : order.boardVideoId;
     updateOrder(orderId, {
       clipperId,
       assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []), clipperId])),
       status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+      ...(nowFull ? { promotedToBoard: true, boardVideoId: videoId } : {}),
     });
     await notifyPersonAssigned(order, 'clipper', clipperId);
-  }, [updateOrder, notifyPersonAssigned]);
+  }, [updateOrder, notifyPersonAssigned, createBoardVideoForOrder]);
 
   const assignOrderEditor = useCallback(async (orderId: string, editorId: string) => {
     const order = ordersRef.current.find(o => o.id === orderId);
     if (!order) return;
     const nowFull = !!order.clipperId;
+    const videoId = nowFull && !order.promotedToBoard ? createBoardVideoForOrder(order, order.clipperId as string, editorId) : order.boardVideoId;
     updateOrder(orderId, {
       editorId,
       assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []), editorId])),
       status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+      ...(nowFull ? { promotedToBoard: true, boardVideoId: videoId } : {}),
     });
     await notifyPersonAssigned(order, 'editor', editorId);
-  }, [updateOrder, notifyPersonAssigned]);
+  }, [updateOrder, notifyPersonAssigned, createBoardVideoForOrder]);
 
   const store: Store = {
     role, theme, toggleTheme, view, setView,

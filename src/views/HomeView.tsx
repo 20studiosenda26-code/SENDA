@@ -3,6 +3,7 @@ import { Flame, Target, TrendingUp, Play, ArrowRight, CheckCircle2, Clock, Alert
 import { CardNodeDeco } from '../components/BrandBackground';
 import { CLASSROOM_MODULES } from '../data';
 import { AdminHomePanels } from './AdminHomePanels';
+import { pendingRoleSuffix } from '../lib/qcLabel';
 
 export function HomeView() {
   const { role, workers, currentWorkerId, brands, setView, config, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
@@ -96,9 +97,9 @@ export function HomeView() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{v.name}</p>
-                    <p className="text-xs text-muted">QC: {v.qc.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-muted">QC: {v.qc === 'pendiente' ? `pendiente ${pendingRoleSuffix(v)}` : v.qc.replace(/_/g, ' ')}</p>
                   </div>
-                  <QcBadge status={v.qc} />
+                  <QcBadge status={v.qc} suffix={v.qc === 'pendiente' ? pendingRoleSuffix(v) : undefined} />
                 </button>
               ))}
             </div>
@@ -236,7 +237,7 @@ function StatCard({ icon: Icon, label, value, target, sub, accent, onClick }: { 
   );
 }
 
-function QcBadge({ status }: { status: string }) {
+function QcBadge({ status, suffix }: { status: string; suffix?: string }) {
   const map: Record<string, { color: string; icon: typeof Clock }> = {
     pendiente: { color: 'text-amber bg-amber-dim', icon: Clock },
     revision: { color: 'text-accent bg-accent-dim', icon: AlertCircle },
@@ -251,7 +252,7 @@ function QcBadge({ status }: { status: string }) {
   return (
     <span className={`text-xs font-medium px-2 py-1 rounded-md flex items-center gap-1 ${m.color}`}>
       <Icon size={12} />
-      {status.replace(/_/g, ' ')}
+      {status.replace(/_/g, ' ')}{suffix ? ` ${suffix}` : ''}
     </span>
   );
 }

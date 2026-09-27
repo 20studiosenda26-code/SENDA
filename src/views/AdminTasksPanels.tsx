@@ -1,9 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { uploadSharedFile } from '../lib/supabaseClient';
-import type { Order, OrderReference, OrderStatus, Worker } from '../types';
+import type { Order, OrderStatus, Worker } from '../types';
 import {
-  FolderOpen, ArrowLeft, Plus, X, Upload, Loader2, ListChecks, ChevronRight, ChevronDown,
+  FolderOpen, ArrowLeft, Loader2, ListChecks, ChevronRight, ChevronDown,
   User, FileDown, Link2, StickyNote, CheckCircle2, Trash2,
 } from 'lucide-react';
 import { TasksBoard } from './TasksView';
@@ -358,142 +357,34 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
 }
 
 // --- Carpeta: Proyectos disponibles ---
+// Los proyectos llegan aquí automáticamente desde la página de clientes
+// (cuando se crean, sin asignar). En cuanto un proyecto queda con
+// clíper Y editor(a) asignados, desaparece de esta lista por completo y
+// pasa a "Proyectos iniciados" (estados: sin iniciar, pendiente, etc.).
 function ProyectosDisponibles({ onBack }: { onBack: () => void }) {
-  const { orders, addOrder } = useStore();
-  const [showForm, setShowForm] = useState(false);
+  const { orders } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const [brand, setBrand] = useState('');
-  const [videoCount, setVideoCount] = useState('1');
-  const [deliveryDate, setDeliveryDate] = useState('');
-  const [deliveryTime, setDeliveryTime] = useState('');
-  const [avatarName, setAvatarName] = useState('');
-  const [briefFileName, setBriefFileName] = useState('');
-  const [briefFileUrl, setBriefFileUrl] = useState('');
-  const [clientNotes, setClientNotes] = useState('');
-  const [references, setReferences] = useState<OrderReference[]>([]);
-  const [uploadingBrief, setUploadingBrief] = useState(false);
-  const [uploadingRef, setUploadingRef] = useState(false);
-  const briefInputRef = useRef<HTMLInputElement>(null);
-  const refInputRef = useRef<HTMLInputElement>(null);
-
-  const resetForm = () => {
-    setBrand(''); setVideoCount('1'); setDeliveryDate(''); setDeliveryTime('');
-    setAvatarName(''); setBriefFileName(''); setBriefFileUrl(''); setClientNotes(''); setReferences([]);
-    setShowForm(false);
-  };
-
-  const handleBriefFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploadingBrief(true);
-    try {
-      const url = await uploadSharedFile(f, 'briefs/proyectos');
-      setBriefFileName(f.name);
-      setBriefFileUrl(url);
-    } finally {
-      setUploadingBrief(false);
-    }
-  };
-
-  const handleRefFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploadingRef(true);
-    try {
-      const url = await uploadSharedFile(f, 'referencias/proyectos');
-      setReferences(prev => [...prev, { id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: f.name, url }]);
-    } finally {
-      setUploadingRef(false);
-      if (refInputRef.current) refInputRef.current.value = '';
-    }
-  };
-
-  const handleCreate = () => {
-    if (!brand.trim()) return;
-    addOrder({
-      brand: brand.trim(),
-      videoCount: parseInt(videoCount) || 1,
-      deliveryDate, deliveryTime,
-      status: 'sin_asignar',
-      assignedWorkerIds: [],
-      clipperId: null,
-      editorId: null,
-      briefFileName: briefFileName || null,
-      briefFileUrl: briefFileUrl || null,
-      avatarName: avatarName.trim() || null,
-      avatarFileUrl: null,
-      references,
-      clientNotes: clientNotes.trim() || null,
-    });
-    resetForm();
-  };
-
   const sorted = useMemo(() => {
-    return [...orders].sort((a, b) => {
-      if (a.status === 'finalizado' && b.status !== 'finalizado') return 1;
-      if (b.status === 'finalizado' && a.status !== 'finalizado') return -1;
-      const da = a.deliveryDate ? new Date(`${a.deliveryDate}T${a.deliveryTime || '23:59'}`).getTime() : Infinity;
-      const db = b.deliveryDate ? new Date(`${b.deliveryDate}T${b.deliveryTime || '23:59'}`).getTime() : Infinity;
-      return da - db;
-    });
+    return [...orders]
+      .filter(o => !(o.clipperId && o.editorId))
+      .sort((a, b) => {
+        if (a.status === 'finalizado' && b.status !== 'finalizado') return 1;
+        if (b.status === 'finalizado' && a.status !== 'finalizado') return -1;
+        const da = a.deliveryDate ? new Date(`${a.deliveryDate}T${a.deliveryTime || '23:59'}`).getTime() : Infinity;
+        const db = b.deliveryDate ? new Date(`${b.deliveryDate}T${b.deliveryTime || '23:59'}`).getTime() : Infinity;
+        return da - db;
+      });
   }, [orders]);
 
   return (
     <div>
       <BackBar onBack={onBack} title="Proyectos disponibles" />
       <div className="p-6 max-w-3xl mx-auto space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs text-muted-2">Ordenados por hora de entrega — el más próximo primero</p>
-          <button onClick={() => { resetForm(); setShowForm(s => !s); }} className="flex items-center gap-1.5 text-sm font-medium bg-accent text-on-accent rounded-lg px-3 py-2 hover:bg-accent-strong transition-colors shrink-0">
-            <Plus size={15} /> Nuevo proyecto
-          </button>
-        </div>
-
-        {showForm && (
-          <div className="bg-surface-2 border border-line rounded-xl p-4 space-y-2.5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input value={brand} onChange={e => setBrand(e.target.value)} placeholder="Marca / cliente" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
-              <input value={videoCount} onChange={e => setVideoCount(e.target.value)} type="number" min="1" placeholder="Cantidad de videos" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
-              <input value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} type="date" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
-              <input value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} type="time" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
-              <input value={avatarName} onChange={e => setAvatarName(e.target.value)} placeholder="Avatar elegido por el cliente" className="sm:col-span-2 bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
-            </div>
-
-            <label className="flex items-center gap-2 bg-surface-3 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
-              {uploadingBrief ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {briefFileName || 'Subir brief (PDF u otro formato)'}
-              <input ref={briefInputRef} type="file" className="hidden" onChange={handleBriefFile} />
-            </label>
-
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-2 bg-surface-3 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
-                {uploadingRef ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                Agregar referencia del cliente
-                <input ref={refInputRef} type="file" className="hidden" onChange={handleRefFile} />
-              </label>
-              {references.map(r => (
-                <div key={r.id} className="flex items-center gap-2 text-xs text-muted-2 px-1">
-                  <Link2 size={12} className="shrink-0" /> <span className="flex-1 truncate">{r.name}</span>
-                  <button onClick={() => setReferences(prev => prev.filter(x => x.id !== r.id))} className="hover:text-red-400 shrink-0"><X size={12} /></button>
-                </div>
-              ))}
-            </div>
-
-            <textarea
-              value={clientNotes} onChange={e => setClientNotes(e.target.value)}
-              placeholder="Notas del cliente (opcional)" rows={2}
-              className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent resize-none"
-            />
-
-            <div className="flex gap-2 pt-1">
-              <button onClick={handleCreate} disabled={!brand.trim()} className="bg-accent text-on-accent rounded-md px-3 py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50">
-                Crear proyecto
-              </button>
-              <button onClick={resetForm} className="text-sm text-muted hover:text-text px-3 py-2">Cancelar</button>
-            </div>
-          </div>
-        )}
+        <p className="text-xs text-muted-2">
+          Ordenados por hora de entrega — el más próximo primero. Se cargan solos desde la página de clientes cuando un proyecto no está asignado todavía;
+          al asignarle clíper y editor(a) pasan a "Proyectos iniciados".
+        </p>
 
         {sorted.length === 0 ? (
           <p className="text-sm text-muted text-center py-8">Sin proyectos disponibles todavía</p>
