@@ -6,6 +6,9 @@ import { useAuth } from './lib/auth';
 
 export interface AdminProfile { id: string; name: string; }
 
+const HEARTBEAT_INTERVAL_MS = 15 * 1000;
+const HEARTBEAT_TTL_MS = 35 * 1000;
+
 function workerFromProfileRow(p: Record<string, unknown>): Worker {
   return {
     id: p.id as string,
@@ -20,7 +23,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
     bestStreak: (p.best_streak as number) || 0,
     streakLog: (Array.isArray(p.streak_log) ? p.streak_log : []) as ('on' | 'off')[],
     dayClosedToday: !!p.day_closed_today,
-    online: false,
+    online: !!p.online,
     phone: (p.phone as string) || '',
     email: (p.contact_email as string) || '',
     bankInfo: (p.bank_info as string) || '',
@@ -179,7 +182,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<ViewKey>('home');
   const [brands, setBrands] = useState<Brand[]>(() => loadState('brands', INITIAL_BRANDS));
   const [workers, setWorkers] = useState<Worker[]>(() => loadState('workers', INITIAL_WORKERS));
-  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(() => new Set());
+  const [presenceOnlineIds, setPresenceOnlineIds] = useState<Set<string>>(() => new Set());
+  const [heartbeatMap, setHeartbeatMap] = useState<Record<string, number>>({});
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => applyNotificationReset(loadState('notifications', INITIAL_NOTIFICATIONS)));
   const [emailLog, setEmailLog] = useState<EmailLogEntry[]>(() => loadState('emailLog', [] as EmailLogEntry[]));
   const [chat, setChat] = useState<ChatMessage[]>(() => loadState('chat', INITIAL_CHAT));
@@ -190,6 +195,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (user?.id) setCurrentWorkerId(user.id);
   }, [user?.id]);
+
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [selectedClassroomModuleId, setSelectedClassroomModuleId] = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => loadState('calendarEvents', CALENDAR_EVENTS));
@@ -216,6 +222,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
   useEffect(() => { saveState('workerCapacities', workerCapacities); }, [workerCapacities]);
 
+  const refreshOnlineHeartbeats = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
+    if (remoteHeartbeats && typeof remoteHeartbeats === 'object') {
+      setHeartbeatMap(remoteHeartbeats);
+      setNowTick(Date.now());
+    }
+  }, []);
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     let active = true;
@@ -226,6 +241,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
       const remoteOrders = await loadShared<Order[]>('orders');
       if (active && remoteOrders) setOrders(remoteOrders);
+      const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
+      if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
+        setHeartbeatMap(remoteHeartbeats);
+      }
     })();
     return () => { active = false; };
   }, []);
@@ -240,10 +259,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
         const remoteOrders = await loadShared<Order[]>('orders');
         if (remoteOrders) setOrders(remoteOrders);
+        await refreshOnlineHeartbeats();
       })();
     });
     return unsub;
-  }, []);
+  }, [refreshOnlineHeartbeats]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -272,17 +292,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [loadWorkersFromProfiles, user?.id]);
 
-  // --- Estado "En línea" en tiempo real (Supabase Realtime Presence) ---
-  // Mantiene al usuario "En línea" únicamente mientras tenga la página abierta
-  // en su navegador (aunque esté navegando en otra pestaña). Al cerrar la
-  // página o pestaña en su navegador, pasa a "No en línea" en tiempo real.
+  // --- Estado "En línea" en tiempo real (Supabase Realtime Presence + Heartbeat en platform_kv + profiles) ---
+  // Mantiene al usuario "En línea" mientras tenga la página abierta en su navegador
+  // (incluso si está en otra pestaña) y lo pasa a "No en línea" apenas cierra la pestaña o sesión.
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !user?.id) {
-      setOnlineUserIds(new Set());
+      setPresenceOnlineIds(new Set());
       return;
     }
 
     const currentUserId = user.id;
+
+    const sendHeartbeat = async (isAlive: boolean) => {
+      if (role === 'admin') return;
+      try {
+        const currentMap = (await loadShared<Record<string, number>>('online_heartbeats')) || {};
+        const now = Date.now();
+        const cleaned: Record<string, number> = {};
+        for (const [uid, ts] of Object.entries(currentMap)) {
+          if (typeof ts === 'number' && now - ts < HEARTBEAT_TTL_MS && uid !== currentUserId) {
+            cleaned[uid] = ts;
+          }
+        }
+        if (isAlive) {
+          cleaned[currentUserId] = now;
+        }
+        setHeartbeatMap(cleaned);
+        setNowTick(now);
+        await saveShared('online_heartbeats', cleaned);
+        await supabase.from('profiles').update({ online: isAlive }).eq('id', currentUserId);
+      } catch {
+        // ignorar errores de red temporales
+      }
+    };
+
     const channel = supabase.channel('senda_online_presence', {
       config: {
         presence: { key: currentUserId },
@@ -305,7 +348,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (role !== 'admin') {
         nextIds.add(currentUserId);
       }
-      setOnlineUserIds(nextIds);
+      setPresenceOnlineIds(nextIds);
     };
 
     channel
@@ -320,16 +363,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               role,
               online_at: new Date().toISOString(),
             });
-            void supabase.from('profiles').update({ online: true }).eq('id', currentUserId);
           }
           syncOnlineUsers();
         }
       });
 
+    void sendHeartbeat(true);
+    void refreshOnlineHeartbeats();
+
+    const heartbeatTimer = setInterval(() => {
+      setNowTick(Date.now());
+      if (role !== 'admin') {
+        void sendHeartbeat(true);
+      } else {
+        void refreshOnlineHeartbeats();
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
     const handlePageClose = () => {
       if (role !== 'admin') {
         void channel.untrack();
-        void supabase.from('profiles').update({ online: false }).eq('id', currentUserId);
+        void sendHeartbeat(false);
       }
     };
 
@@ -337,23 +391,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     window.addEventListener('beforeunload', handlePageClose);
 
     return () => {
+      clearInterval(heartbeatTimer);
       window.removeEventListener('pagehide', handlePageClose);
       window.removeEventListener('beforeunload', handlePageClose);
       if (role !== 'admin') {
         void channel.untrack();
-        void supabase.from('profiles').update({ online: false }).eq('id', currentUserId);
+        void sendHeartbeat(false);
       }
       void supabase.removeChannel(channel);
     };
-  }, [user?.id, role]);
+  }, [user?.id, role, refreshOnlineHeartbeats]);
 
   const workersWithOnline = useMemo(() => {
     if (!isSupabaseConfigured) return workers;
-    return workers.map(w => ({
-      ...w,
-      online: onlineUserIds.has(w.id),
-    }));
-  }, [workers, onlineUserIds]);
+    return workers.map(w => {
+      const isSelf = Boolean(user?.id && w.id === user.id);
+      const inPresence = presenceOnlineIds.has(w.id);
+      const lastBeat = heartbeatMap[w.id] || 0;
+      const hasRecentBeat = lastBeat > 0 && (nowTick - lastBeat) < HEARTBEAT_TTL_MS;
+      return {
+        ...w,
+        online: isSelf || inPresence || hasRecentBeat,
+      };
+    });
+  }, [workers, user?.id, presenceOnlineIds, heartbeatMap, nowTick]);
 
   const loadContracts = useCallback(async () => {
     if (!supabase) return;
