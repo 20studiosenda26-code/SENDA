@@ -45,8 +45,8 @@ const VIEW_TITLES: Record<string, string> = {
   perfil: 'Perfil',
   finanzas: 'Finanzas',
   nominas: 'Nóminas',
+  capacidad: 'Motor de Capacidad y Entrega',
   administracion: 'Administración',
-  configuracion: 'Configuración',
 };
 
 export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut: () => void }) {

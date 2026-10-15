@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment } from './types';
-import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
+import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
+import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 
@@ -13,6 +13,17 @@ const DEFAULT_FINANCE_SETTINGS: FinanceSettings = {
   clientPricePerVideo: 25,
   defaultClipperCost: 3,
   defaultEditorCost: 4,
+};
+
+const DEFAULT_CAPACITY_CONFIG: CapacityProtocolConfig = {
+  safetyMarginPct: 15,
+  defaultClipperDailyVideos: 20,
+  defaultEditorDailyVideos: 20,
+  workdayStartHour: 8,
+  workdayEndHour: 20,
+  maxNoResponseMinutes: 45,
+  maxStalledHours: 3,
+  urgentThresholdHours: 4,
 };
 
 const LEGACY_DEFAULT_EVENT_IDS = new Set(['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6', 'ev7']);
@@ -70,7 +81,9 @@ type SharedKey =
   | 'financeClosings'
   | 'appExpenses'
   | 'payrollPayments'
-  | 'payrollAdjustments';
+  | 'payrollAdjustments'
+  | 'capacityProtocolConfig'
+  | 'workerCapacities';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -223,6 +236,9 @@ interface Store {
   setWorkerPayrollAdjustment: (workerId: string, amount: number) => void;
   recordPayrollPayment: (data: Omit<PayrollPayment, 'id' | 'paidAt'>) => void;
   revertPayrollPayment: (paymentId: string) => void;
+
+  capacityConfig: CapacityProtocolConfig;
+  updateCapacityConfig: (patch: Partial<CapacityProtocolConfig>) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -276,6 +292,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [appExpenses, setAppExpenses] = useState<AppExpense[]>(() => loadState('appExpenses', [] as AppExpense[]));
   const [payrollPayments, setPayrollPayments] = useState<PayrollPayment[]>(() => loadState('payrollPayments', [] as PayrollPayment[]));
   const [payrollAdjustments, setPayrollAdjustments] = useState<Record<string, number>>(() => loadState('payrollAdjustments', {} as Record<string, number>));
+  const [capacityConfig, setCapacityConfig] = useState<CapacityProtocolConfig>(() => loadState('capacityProtocolConfig', DEFAULT_CAPACITY_CONFIG));
 
   const localWriteLockUntil = useRef<number>(0);
   const markLocalWrite = useCallback(() => {
@@ -300,6 +317,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('appExpenses', appExpenses); }, [appExpenses, persistShared]);
   useEffect(() => { persistShared('payrollPayments', payrollPayments); }, [payrollPayments, persistShared]);
   useEffect(() => { persistShared('payrollAdjustments', payrollAdjustments); }, [payrollAdjustments, persistShared]);
+  useEffect(() => { persistShared('capacityProtocolConfig', capacityConfig); }, [capacityConfig, persistShared]);
+  useEffect(() => { persistShared('workerCapacities', workerCapacities); }, [workerCapacities, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -307,7 +326,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('emailLog', emailLog); }, [emailLog]);
   useEffect(() => { saveState('classroomModules', classroomModules); }, [classroomModules]);
   useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
-  useEffect(() => { saveState('workerCapacities', workerCapacities); }, [workerCapacities]);
 
   const refreshOnlineHeartbeats = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -344,6 +362,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
       const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
       if (active && remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
+      const remoteCapConfig = await loadShared<CapacityProtocolConfig>('capacityProtocolConfig');
+      if (active && remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
+      const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
+      if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -380,6 +402,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
         const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
         if (remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
+        const remoteCapConfig = await loadShared<CapacityProtocolConfig>('capacityProtocolConfig');
+        if (remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
+        const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
+        if (remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
       })();
     });
     return unsub;
@@ -1220,8 +1246,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [addOrder, pushNotification]);
 
   const getWorkerCapacity = useCallback((workerId: string): number => {
-    return workerCapacities[workerId] ?? DEFAULT_DAILY_CAPACITY;
-  }, [workerCapacities]);
+    const w = workersRef.current.find(x => x.id === workerId);
+    const defaultByRole = w?.role === 'editor' ? capacityConfig.defaultEditorDailyVideos : capacityConfig.defaultClipperDailyVideos;
+    return workerCapacities[workerId] ?? defaultByRole;
+  }, [workerCapacities, capacityConfig.defaultClipperDailyVideos, capacityConfig.defaultEditorDailyVideos]);
 
   const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
     setWorkerCapacities(prev => ({ ...prev, [workerId]: Math.max(1, Math.round(capacity) || 1) }));
@@ -1536,6 +1564,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [markLocalWrite]);
 
+  const updateCapacityConfig = useCallback((patch: Partial<CapacityProtocolConfig>) => {
+    setCapacityConfig(prev => {
+      const next: CapacityProtocolConfig = { ...prev, ...patch };
+      saveState('capacityProtocolConfig', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('capacityProtocolConfig', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
@@ -1562,6 +1602,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
     appExpenses, addAppExpense, deleteAppExpense,
     payrollPayments, payrollAdjustments, setWorkerPayrollAdjustment, recordPayrollPayment, revertPayrollPayment,
+    capacityConfig, updateCapacityConfig,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

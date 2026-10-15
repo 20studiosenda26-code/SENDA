@@ -1,7 +1,7 @@
 import { useStore } from '../store';
 import type { ViewKey, Role } from '../types';
 import { useAuth } from '../lib/auth';
-import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, DollarSign, Wallet, Shield, Settings, Moon, Sun, LogOut } from 'lucide-react';
+import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, DollarSign, Wallet, Gauge, Shield, Moon, Sun, LogOut } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 
 const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] = [
@@ -14,8 +14,8 @@ const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] =
   { key: 'perfil', label: 'Perfil', icon: User, roles: ['clipper', 'editor'] },
   { key: 'finanzas', label: 'Finanzas', icon: DollarSign, roles: ['admin'] },
   { key: 'nominas', label: 'Nóminas', icon: Wallet, roles: ['admin'] },
+  { key: 'capacidad', label: 'Capacidad', icon: Gauge, roles: ['admin'] },
   { key: 'administracion', label: 'Admin', icon: Shield, roles: ['admin'] },
-  { key: 'configuracion', label: 'Config', icon: Settings, roles: ['admin'] },
 ];
 
 export function Rail({ onSignOut }: { onSignOut: () => void }) {

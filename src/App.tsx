@@ -12,8 +12,8 @@ import { ContractsView } from './views/ContractsView';
 import { ProfileView } from './views/ProfileView';
 import { FinancesView } from './views/FinancesView';
 import { PayrollView } from './views/PayrollView';
+import { CapacityView } from './views/CapacityView';
 import { AdminView } from './views/AdminView';
-import { ConfigView } from './views/ConfigView';
 import { LoginView } from './views/LoginView';
 import { UserManagement } from './views/UserManagement';
 import { useEffect } from 'react';
@@ -56,6 +56,7 @@ function Shell() {
       case 'perfil': return user.role === 'admin' ? <HomeView /> : <ProfileView />;
       case 'finanzas': return user.role === 'admin' ? <FinancesView /> : <HomeView />;
       case 'nominas': return user.role === 'admin' ? <PayrollView /> : <HomeView />;
+      case 'capacidad': return user.role === 'admin' ? <CapacityView /> : <HomeView />;
       case 'administracion':
         return (
           <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -63,7 +64,6 @@ function Shell() {
             <AdminView />
           </div>
         );
-      case 'configuracion': return <ConfigView />;
       default: return <HomeView />;
     }
   };
