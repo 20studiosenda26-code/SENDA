@@ -262,7 +262,17 @@ export interface FinanceDayClosing {
   projectsCount: number;
 }
 
-/** Pago de nómina realizado a un Clipper o Editor (con comprobante de transferencia adjunto). */
+export interface PayrollReportItem {
+  videoId: string;
+  projectName: string;
+  brandName: string;
+  date: string;
+  videosCount: number;
+  unitPay: number;
+  subtotal: number;
+}
+
+/** Pago de nómina definitivo con comprobante de transferencia + informe de proyectos finalizados (Aprobado Cliente). */
 export interface PayrollPayment {
   id: string;
   workerId: string;
@@ -273,6 +283,8 @@ export interface PayrollPayment {
   weekendLabel: string;
   receiptFileName: string | null;
   receiptFileUrl: string | null;
+  reportItems?: PayrollReportItem[];
+  bankSnapshot?: string | null;
   note?: string | null;
   paidAt: string;
 }

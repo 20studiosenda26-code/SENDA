@@ -1,30 +1,22 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useStore } from '../store';
-import { uploadSharedFile } from '../lib/supabaseClient';
-import type { Worker, Order } from '../types';
-import { CardNodeDeco } from '../components/BrandBackground';
+import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
+import type { Worker, Order, PayrollReportItem } from '../types';
+import { fmtMoneyClean, parseBankInfo, openWorkerPayrollReportPdf } from '../lib/payrollPdf';
 import {
-  Wallet, Scissors, Film, Upload, CheckCircle2, Clock, Landmark,
-  Copy, Check, Eye, RotateCcw, Calendar, ChevronLeft, ChevronRight,
-  Loader2, FileText, Sparkles, SlidersHorizontal, Download,
+  Wallet, Scissors, Film, Upload, CheckCircle2, Landmark,
+  Copy, Check, Eye, Calendar, ChevronLeft, ChevronRight,
+  Loader2, FileText, Download, Building2, CreditCard, UserCheck, Send,
 } from 'lucide-react';
-
-const CURRENCY_SIGN = String.fromCharCode(36);
-
-function fmtMoney(n: number): string {
-  const clean = Math.round(Number(n) || 0);
-  return CURRENCY_SIGN + clean.toLocaleString('es-CO');
-}
 
 function isImageFile(name?: string | null) {
   if (!name) return false;
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
 }
 
-/** Calcula el sábado y domingo del corte semanal correspondiente (offsetWeeks: 0 = esta semana, -1 = anterior, etc.) */
 function getWeekendCycle(offsetWeeks: number) {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0 = Domingo, 6 = Sábado
+  const dayOfWeek = now.getDay();
   const diffToSaturday = dayOfWeek === 0 ? -1 : 6 - dayOfWeek;
 
   const saturday = new Date(now);
@@ -35,51 +27,35 @@ function getWeekendCycle(offsetWeeks: number) {
   sunday.setDate(saturday.getDate() + 1);
 
   const satIso = saturday.toISOString().slice(0, 10);
-  const sunIso = sunday.toISOString().slice(0, 10);
   const weekKey = `wk-${satIso}`;
 
   const satLabel = saturday.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
   const sunLabel = sunday.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
   const weekendLabel = `Sáb ${satLabel} · Dom ${sunLabel}`;
 
-  const isWeekendToday = offsetWeeks === 0 && (dayOfWeek === 6 || dayOfWeek === 0);
-  const daysUntilSaturday = offsetWeeks === 0 ? Math.max(0, diffToSaturday) : 0;
-
-  return {
-    weekKey,
-    weekendLabel,
-    satIso,
-    sunIso,
-    isWeekendToday,
-    daysUntilSaturday,
-  };
+  return { weekKey, weekendLabel };
 }
 
 export function PayrollView() {
   const {
     workers, brands, orders, financeSettings,
-    payrollPayments, payrollAdjustments, setWorkerPayrollAdjustment,
-    recordPayrollPayment, revertPayrollPayment,
+    payrollPayments, recordPayrollPayment, startAdminDm, sendChatGroupMessage,
   } = useStore();
 
   const [roleTab, setRoleTab] = useState<'clipper' | 'editor'>('clipper');
-  const [statusFilter, setStatusFilter] = useState<'todos' | 'por_pagar' | 'pagados'>('todos');
   const [weekOffset, setWeekOffset] = useState<number>(0);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
 
-  // Estado por trabajador para comprobante antes de confirmar pago
   const [draftReceipts, setDraftReceipts] = useState<Record<string, { fileName: string; fileUrl: string }>>({});
   const [uploadingWorkerId, setUploadingWorkerId] = useState<string | null>(null);
-  const [editingAmountWorkerId, setEditingAmountWorkerId] = useState<string | null>(null);
-  const [customAmountInput, setCustomAmountInput] = useState<string>('');
-  const [copiedBankId, setCopiedBankId] = useState<string | null>(null);
+  const [payingWorkerId, setPayingWorkerId] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<{ name: string; url: string; workerName: string } | null>(null);
-  const [justPaidId, setJustPaidId] = useState<string | null>(null);
 
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cycle = useMemo(() => getWeekendCycle(weekOffset), [weekOffset]);
 
-  // Calcula lo acumulado por cada Clipper y Editor a partir de videos aprobados (50% Senda / 100% Cliente) + ajustes manuales
+  // Cálculo 100% automático basado en todos los pedidos finalizados (Aprobado Cliente) de cada Clipper / Editor
   const workerPayrollRows = useMemo(() => {
     const defClipper = financeSettings.defaultClipperCost;
     const defEditor = financeSettings.defaultEditorCost;
@@ -94,59 +70,71 @@ export function PayrollView() {
     const allVideos = brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name })));
 
     return workers.map(w => {
-      let accruedFromTasks = 0;
-      const completedTasks: { id: string; name: string; videos: number; stage: '50%' | '100%'; amount: number }[] = [];
+      const reportItems: PayrollReportItem[] = [];
+      let totalFromApprovedClient = 0;
 
       for (const v of allVideos) {
-        const isMyTask = w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id;
-        if (!isMyTask) continue;
+        const isMine = w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id;
+        if (!isMine) continue;
+
+        // Únicamente pedidos finalizados completamente (Aprobado Cliente)
+        if (v.qc !== 'aprobado_cliente' && !v.paid100) continue;
 
         const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(v.brandName.trim().toLowerCase());
-        const count = linked ? Math.max(1, linked.videoCount || 1) : 1;
-        const unitRate = w.role === 'clipper'
+        const videosCount = linked ? Math.max(1, linked.videoCount || 1) : 1;
+        const unitPay = w.role === 'clipper'
           ? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper)
           : (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
 
-        if (v.qc === 'aprobado_cliente' || v.paid100) {
-          const amt = count * unitRate;
-          accruedFromTasks += amt;
-          completedTasks.push({ id: v.id, name: v.name, videos: count, stage: '100%', amount: amt });
-        } else if (v.qc === 'aprobado_senda' || v.qc === 'aprobado' || v.paid50) {
-          const amt = Math.round(count * unitRate * 0.5);
-          accruedFromTasks += amt;
-          completedTasks.push({ id: v.id, name: v.name, videos: count, stage: '50%', amount: amt });
-        }
+        const subtotal = videosCount * unitPay;
+        totalFromApprovedClient += subtotal;
+
+        reportItems.push({
+          videoId: v.id,
+          projectName: v.name,
+          brandName: v.brandName,
+          date: v.date,
+          videosCount,
+          unitPay,
+          subtotal,
+        });
       }
 
-      const manualOverride = payrollAdjustments[w.id];
-      const grossForCycle = manualOverride !== undefined ? manualOverride : accruedFromTasks;
-
-      // Pagos ya realizados a este trabajador en el corte semanal activo
       const paymentsThisCycle = payrollPayments.filter(
         p => p.workerId === w.id && p.weekKey === cycle.weekKey
       );
       const paidAmount = paymentsThisCycle.reduce((s, p) => s + p.amount, 0);
       const latestPayment = paymentsThisCycle[0] || null;
 
-      // Lo que resta por pagar (se descuenta automáticamente cuando se marca como pagado)
-      const pendingAmount = Math.max(0, grossForCycle - paidAmount);
-      const isPaid = grossForCycle > 0 && pendingAmount === 0 && paymentsThisCycle.length > 0;
+      const pendingAmount = Math.max(0, totalFromApprovedClient - paidAmount);
+      const isPaid = paymentsThisCycle.length > 0 && pendingAmount === 0;
 
       return {
         worker: w,
-        accruedFromTasks,
-        grossForCycle,
+        totalFromApprovedClient,
         paidAmount,
         pendingAmount,
         isPaid,
         latestPayment,
-        completedTasks,
+        reportItems,
       };
     });
-  }, [workers, brands, orders, financeSettings, payrollAdjustments, payrollPayments, cycle.weekKey]);
+  }, [workers, brands, orders, financeSettings, payrollPayments, cycle.weekKey]);
 
   const clippersRows = useMemo(() => workerPayrollRows.filter(r => r.worker.role === 'clipper'), [workerPayrollRows]);
   const editorsRows = useMemo(() => workerPayrollRows.filter(r => r.worker.role === 'editor'), [workerPayrollRows]);
+  const currentList = roleTab === 'clipper' ? clippersRows : editorsRows;
+
+  useEffect(() => {
+    if (!selectedWorkerId || !currentList.some(r => r.worker.id === selectedWorkerId)) {
+      setSelectedWorkerId(currentList[0]?.worker.id || null);
+    }
+  }, [roleTab, currentList, selectedWorkerId]);
+
+  const selectedRow = useMemo(
+    () => currentList.find(r => r.worker.id === selectedWorkerId) || currentList[0] || null,
+    [currentList, selectedWorkerId]
+  );
 
   const totals = useMemo(() => {
     const totalPendingAll = workerPayrollRows.reduce((s, r) => s + r.pendingAmount, 0);
@@ -154,35 +142,19 @@ export function PayrollView() {
     const totalCycleAll = totalPendingAll + totalPaidAll;
 
     const pendingClippers = clippersRows.reduce((s, r) => s + r.pendingAmount, 0);
-    const paidClippers = clippersRows.reduce((s, r) => s + r.paidAmount, 0);
-
     const pendingEditors = editorsRows.reduce((s, r) => s + r.pendingAmount, 0);
-    const paidEditors = editorsRows.reduce((s, r) => s + r.paidAmount, 0);
 
-    const pendingWorkersCount = workerPayrollRows.filter(r => r.pendingAmount > 0).length;
-    const paidWorkersCount = workerPayrollRows.filter(r => r.isPaid).length;
-    const progressPct = totalCycleAll > 0 ? Math.min(100, Math.round((totalPaidAll / totalCycleAll) * 100)) : 0;
+    const remainingPct = totalCycleAll > 0 ? Math.round((totalPendingAll / totalCycleAll) * 100) : 0;
 
     return {
       totalPendingAll,
       totalPaidAll,
       totalCycleAll,
       pendingClippers,
-      paidClippers,
       pendingEditors,
-      paidEditors,
-      pendingWorkersCount,
-      paidWorkersCount,
-      progressPct,
+      remainingPct,
     };
   }, [workerPayrollRows, clippersRows, editorsRows]);
-
-  const visibleRows = useMemo(() => {
-    const base = roleTab === 'clipper' ? clippersRows : editorsRows;
-    if (statusFilter === 'por_pagar') return base.filter(r => r.pendingAmount > 0 || !r.isPaid);
-    if (statusFilter === 'pagados') return base.filter(r => r.isPaid);
-    return base;
-  }, [roleTab, clippersRows, editorsRows, statusFilter]);
 
   const handleUploadReceipt = async (workerId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -199,534 +171,481 @@ export function PayrollView() {
     }
   };
 
-  const handleMarkAsPaid = (row: (typeof workerPayrollRows)[number]) => {
-    const amountToPay = row.pendingAmount > 0 ? row.pendingAmount : row.grossForCycle;
-    if (amountToPay <= 0) return;
+  const handleConfirmPayment = async (row: (typeof workerPayrollRows)[number]) => {
+    if (row.pendingAmount <= 0 || row.isPaid) return;
     const draft = draftReceipts[row.worker.id];
+    setPayingWorkerId(row.worker.id);
 
-    recordPayrollPayment({
-      workerId: row.worker.id,
-      workerName: row.worker.name,
-      role: row.worker.role,
-      amount: amountToPay,
-      weekKey: cycle.weekKey,
-      weekendLabel: cycle.weekendLabel,
-      receiptFileName: draft?.fileName || null,
-      receiptFileUrl: draft?.fileUrl || null,
-    });
+    try {
+      recordPayrollPayment({
+        workerId: row.worker.id,
+        workerName: row.worker.name,
+        role: row.worker.role,
+        amount: row.pendingAmount,
+        weekKey: cycle.weekKey,
+        weekendLabel: cycle.weekendLabel,
+        receiptFileName: draft?.fileName || null,
+        receiptFileUrl: draft?.fileUrl || null,
+        reportItems: row.reportItems,
+        bankSnapshot: row.worker.bankInfo || null,
+      });
 
-    setJustPaidId(row.worker.id);
-    setTimeout(() => setJustPaidId(prev => (prev === row.worker.id ? null : prev)), 2600);
+      // Envía automáticamente al chat privado del Clipper/Editor el comprobante y el resumen de su Informe PDF
+      if (isSupabaseConfigured) {
+        try {
+          const dmId = await startAdminDm(row.worker.id);
+          if (dmId) {
+            const summaryLines = row.reportItems
+              .map(i => `• ${i.projectName} (${i.videosCount} vid): ${fmtMoneyClean(i.subtotal)}`)
+              .join('\n');
+            const msg = `Pago de nómina realizado (${cycle.weekendLabel}) por ${fmtMoneyClean(row.pendingAmount)}.\n\nInforme de pedidos Aprobado Cliente:\n${summaryLines}\n\nPuedes descargar tu Informe PDF y ver el comprobante directamente en tu pestaña Perfil.`;
+            await sendChatGroupMessage(dmId, msg, draft?.fileName, draft?.fileUrl);
+          }
+        } catch {
+          // La notificación y el informe en Perfil ya quedaron registrados
+        }
+      }
+    } finally {
+      setPayingWorkerId(null);
+    }
   };
 
-  const copyBank = (workerId: string, bankInfo?: string) => {
-    if (!bankInfo) return;
-    void navigator.clipboard?.writeText(bankInfo);
-    setCopiedBankId(workerId);
-    setTimeout(() => setCopiedBankId(prev => (prev === workerId ? null : prev)), 1800);
+  const copyText = (key: string, value: string) => {
+    if (!value || value === 'Sin registrar') return;
+    void navigator.clipboard?.writeText(value);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(prev => (prev === key ? null : prev)), 1600);
   };
+
+  // Circunferencia para el medidor radial que se vacía a medida que pagas
+  const radius = 34;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (totals.remainingPct / 100) * circumference;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
-      {/* Cabecera + Selector de Fin de Semana (Sábado / Domingo) */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent-dim border border-accent/30 text-accent flex items-center justify-center shadow-[0_0_20px_-4px_rgba(53,214,228,0.38)]">
-            <Wallet size={22} />
-          </div>
-          <div>
-            <h2 className="font-display text-2xl sm:text-3xl font-bold">Nóminas</h2>
-            <p className="text-xs text-muted">Dispersión de fin de semana (Sábado / Domingo) con comprobante de transferencia</p>
-          </div>
-        </div>
-
-        {/* Selector de corte de fin de semana */}
-        <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-xl p-1.5">
-          <button
-            type="button"
-            onClick={() => setWeekOffset(w => w - 1)}
-            className="w-8 h-8 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/40 transition-colors"
-            title="Semana anterior"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <div className="px-3 text-center">
-            <p className="text-[10px] uppercase tracking-wider font-tech text-accent flex items-center justify-center gap-1">
-              <Calendar size={11} /> Corte Fin de Semana
-            </p>
-            <p className="text-xs font-semibold">{cycle.weekendLabel}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setWeekOffset(w => w + 1)}
-            className="w-8 h-8 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/40 transition-colors"
-            title="Semana siguiente"
-          >
-            <ChevronRight size={16} />
-          </button>
-          {weekOffset !== 0 && (
-            <button
-              type="button"
-              onClick={() => setWeekOffset(0)}
-              className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-accent-dim text-accent border border-accent/30 hover:bg-accent/20 transition-colors"
-            >
-              Actual
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* HERO ANIMADO: Total Pagos por Hacer (se va restando en vivo cada vez que pagas a alguien) */}
-      <div className="relative bg-surface-2 border border-accent/40 rounded-2xl p-6 sm:p-7 overflow-hidden shadow-[0_0_50px_-14px_rgba(53,214,228,0.28)]">
+      {/* BARRA SUPERIOR COMPACTA: Medidor Radial en Vivo + Total Pagos por Hacer + Selector Clippers/Editores + Corte */}
+      <div className="bg-surface-2 border border-line rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-5 flex-wrap relative overflow-hidden">
+        {/* Pulso ambiental sutil */}
         <div
-          className="absolute -left-16 -top-16 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-25 animate-pulse"
+          className="absolute -left-10 top-1/2 -translate-y-1/2 w-56 h-56 rounded-full pointer-events-none blur-3xl opacity-20"
           style={{ background: 'radial-gradient(circle, var(--accent), transparent 70%)' }}
         />
-        <div
-          className="absolute right-8 -bottom-20 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-25"
-          style={{ background: 'radial-gradient(circle, var(--mint), transparent 70%)' }}
-        />
 
-        {/* Circuito animado de dispersión de nómina */}
-        <svg
-          className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
-          viewBox="0 0 900 250"
-          fill="none"
-          preserveAspectRatio="xMaxYMid slice"
-        >
-          <defs>
-            <linearGradient id="payrollGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="var(--amber)" stopOpacity="0" />
-              <stop offset="50%" stopColor="var(--accent)" stopOpacity="0.65" />
-              <stop offset="100%" stopColor="var(--mint)" stopOpacity="0.95" />
-            </linearGradient>
-            <filter id="payrollGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="3.2" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
-          </defs>
-
-          <path
-            d="M 320 210 L 455 210 L 505 150 L 635 150 L 685 95 L 805 95"
-            stroke="url(#payrollGrad1)"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M 420 40 L 535 40 L 580 90 L 700 90"
-            stroke="var(--accent)"
-            strokeOpacity="0.45"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          <circle r="4" fill="var(--accent)" filter="url(#payrollGlow)">
-            <animateMotion dur="3.8s" repeatCount="indefinite" path="M 320 210 L 455 210 L 505 150 L 635 150 L 685 95 L 805 95" />
-          </circle>
-          <circle r="3.5" fill="var(--mint)" filter="url(#payrollGlow)">
-            <animateMotion dur="4.6s" repeatCount="indefinite" path="M 420 40 L 535 40 L 580 90 L 700 90" />
-          </circle>
-
-          <circle cx="455" cy="210" r="4" fill="#E7ECEF" fillOpacity="0.7" />
-          <circle cx="505" cy="150" r="5" fill="none" stroke="var(--accent)" strokeWidth="2" />
-          <circle cx="635" cy="150" r="4" fill="var(--mint)" />
-          <circle cx="580" cy="90" r="4" fill="var(--accent)" />
-
-          <g transform="translate(805, 95)">
-            <circle r="15" fill="none" stroke="var(--accent)" strokeWidth="1.2" strokeDasharray="5 5" opacity="0.7">
-              <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="9s" repeatCount="indefinite" />
-            </circle>
-            <circle r="8" fill="var(--mint)" opacity="0.25">
-              <animate attributeName="r" values="6;12;6" dur="2.2s" repeatCount="indefinite" />
-            </circle>
-            <circle r="4.5" fill="var(--mint)" />
-          </g>
-        </svg>
-
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          {/* Cifra principal que se va restando */}
-          <div className="lg:col-span-7 space-y-3.5">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-dim border border-amber/30 text-amber text-xs font-semibold tracking-wide">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber" />
-                </span>
-                TOTAL PAGOS POR HACER
-              </span>
-
-              <span className="font-tech text-xs px-2.5 py-1 rounded-full bg-surface-3 border border-line text-muted">
-                {cycle.isWeekendToday
-                  ? 'Hoy es fin de semana de pago'
-                  : cycle.daysUntilSaturday > 0
-                  ? `Próximo corte en ${cycle.daysUntilSaturday} día(s)`
-                  : cycle.weekendLabel}
-              </span>
+        {/* Anillo Radial que se resta en vivo + Cifra Total */}
+        <div className="flex items-center gap-4 relative z-10">
+          <div className="relative w-20 h-20 flex items-center justify-center shrink-0">
+            <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
+              <circle
+                cx="40"
+                cy="40"
+                r={radius}
+                stroke="var(--surface-3)"
+                strokeWidth="6"
+                fill="none"
+              />
+              <circle
+                cx="40"
+                cy="40"
+                r={radius}
+                stroke={totals.totalPendingAll === 0 ? 'var(--mint)' : 'var(--accent)'}
+                strokeWidth="6"
+                strokeLinecap="round"
+                fill="none"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                className="transition-all duration-700 ease-out"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <Wallet size={16} className={totals.totalPendingAll === 0 ? 'text-mint' : 'text-accent'} />
+              <span className="font-tech text-[10px] text-muted-2 mt-0.5">{totals.remainingPct}%</span>
             </div>
+          </div>
 
-            <div className="flex items-baseline gap-4 flex-wrap">
-              <p className="font-display text-5xl sm:text-6xl font-bold tracking-tight text-text transition-all duration-500">
-                {fmtMoney(totals.totalPendingAll)}
+          <div>
+            <span className="text-[11px] uppercase tracking-wider font-tech text-accent block">
+              Total pagos por hacer
+            </span>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <p className="font-display text-3xl sm:text-4xl font-bold text-text transition-all duration-500">
+                {fmtMoneyClean(totals.totalPendingAll)}
               </p>
-              {totals.totalPendingAll === 0 && totals.totalPaidAll > 0 ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-mint bg-mint-dim border border-mint/30 px-3 py-1 rounded-full">
-                  <CheckCircle2 size={14} /> Nómina 100% liquidada
-                </span>
-              ) : (
-                <span className="text-xs text-muted font-tech">
-                  {totals.pendingWorkersCount} pendiente(s) · {totals.paidWorkersCount} pagado(s)
+              {totals.totalPaidAll > 0 && (
+                <span className="font-tech text-xs px-2 py-0.5 rounded-md bg-mint-dim text-mint border border-mint/30">
+                  −{fmtMoneyClean(totals.totalPaidAll)} ya pagado
                 </span>
               )}
             </div>
-
-            <div className="flex items-center gap-2 flex-wrap pt-1">
-              <div className="bg-surface-3/90 border border-line rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
-                <span className="text-muted-2">Total corte:</span>
-                <span className="font-tech font-semibold text-text">{fmtMoney(totals.totalCycleAll)}</span>
-              </div>
-              <span className="text-muted-2 font-tech text-xs">−</span>
-              <div className="bg-mint-dim/70 border border-mint/30 rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
-                <span className="text-mint">Ya pagado (restado):</span>
-                <span className="font-tech font-bold text-mint">{fmtMoney(totals.totalPaidAll)}</span>
-              </div>
-              <span className="text-muted-2 font-tech text-xs">=</span>
-              <div className="bg-amber-dim/60 border border-amber/30 rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
-                <span className="text-amber">Restante:</span>
-                <span className="font-tech font-bold text-amber">{fmtMoney(totals.totalPendingAll)}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Tarjeta derecha: Desglose Clippers vs Editores */}
-          <div className="lg:col-span-5 bg-surface/85 backdrop-blur-md border border-line rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-muted">Progreso de liquidación</span>
-              <span className="font-tech text-mint font-bold">{totals.progressPct}% pagado</span>
-            </div>
-
-            <div className="h-2 bg-surface-3 rounded-full overflow-hidden border border-line">
-              <div
-                className="h-full bg-gradient-to-r from-accent to-mint transition-all duration-500 rounded-full"
-                style={{ width: `${totals.progressPct}%` }}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => setRoleTab('clipper')}
-                className={`text-left rounded-xl p-3 border transition-all ${
-                  roleTab === 'clipper'
-                    ? 'bg-accent-dim/70 border-accent'
-                    : 'bg-surface-2 border-line hover:border-accent/40'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-medium text-accent flex items-center gap-1">
-                    <Scissors size={11} /> Clippers
-                  </span>
-                  <span className="font-tech text-[10px] text-muted-2">{clippersRows.length}</span>
-                </div>
-                <p className="font-display text-lg font-bold text-text">{fmtMoney(totals.pendingClippers)}</p>
-                <p className="text-[10px] font-tech text-muted-2 mt-0.5">
-                  Pagado: <span className="text-mint">{fmtMoney(totals.paidClippers)}</span>
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setRoleTab('editor')}
-                className={`text-left rounded-xl p-3 border transition-all ${
-                  roleTab === 'editor'
-                    ? 'bg-mint-dim/70 border-mint'
-                    : 'bg-surface-2 border-line hover:border-mint/40'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-medium text-mint flex items-center gap-1">
-                    <Film size={11} /> Editores
-                  </span>
-                  <span className="font-tech text-[10px] text-muted-2">{editorsRows.length}</span>
-                </div>
-                <p className="font-display text-lg font-bold text-text">{fmtMoney(totals.pendingEditors)}</p>
-                <p className="text-[10px] font-tech text-muted-2 mt-0.5">
-                  Pagado: <span className="text-mint">{fmtMoney(totals.paidEditors)}</span>
-                </p>
-              </button>
-            </div>
           </div>
         </div>
-      </div>
 
-      {/* Selector de Sección: Clippers primero, Editores después + Filtro de Estado */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 bg-surface-2 border border-line rounded-xl p-1">
-          <button
-            type="button"
-            onClick={() => setRoleTab('clipper')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-              roleTab === 'clipper'
-                ? 'bg-accent text-on-accent shadow-sm'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <Scissors size={14} /> Nómina Clippers ({clippersRows.length})
-            <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
-              roleTab === 'clipper' ? 'bg-black/20 text-on-accent' : 'bg-surface-3 text-muted'
-            }`}>
-              {fmtMoney(totals.pendingClippers)}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRoleTab('editor')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-              roleTab === 'editor'
-                ? 'bg-mint text-on-accent shadow-sm'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <Film size={14} /> Nómina Editores ({editorsRows.length})
-            <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
-              roleTab === 'editor' ? 'bg-black/20 text-on-accent' : 'bg-surface-3 text-muted'
-            }`}>
-              {fmtMoney(totals.pendingEditors)}
-            </span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-xl p-1">
-          {(
-            [
-              { key: 'todos', label: 'Todos' },
-              { key: 'por_pagar', label: 'Por pagar' },
-              { key: 'pagados', label: 'Pagados' },
-            ] as const
-          ).map(f => (
+        {/* Switch Clippers / Editores + Corte de Fin de Semana */}
+        <div className="flex items-center gap-3 flex-wrap relative z-10">
+          <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
             <button
-              key={f.key}
               type="button"
-              onClick={() => setStatusFilter(f.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                statusFilter === f.key ? 'bg-surface-3 text-text border border-line' : 'text-muted hover:text-text'
+              onClick={() => setRoleTab('clipper')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                roleTab === 'clipper'
+                  ? 'bg-accent text-on-accent shadow-sm'
+                  : 'text-muted hover:text-text'
               }`}
             >
-              {f.label}
+              <Scissors size={13} /> Clippers
+              <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
+                roleTab === 'clipper' ? 'bg-black/20 text-on-accent' : 'bg-surface-2 text-muted'
+              }`}>
+                {fmtMoneyClean(totals.pendingClippers)}
+              </span>
             </button>
-          ))}
+
+            <button
+              type="button"
+              onClick={() => setRoleTab('editor')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                roleTab === 'editor'
+                  ? 'bg-mint text-on-accent shadow-sm'
+                  : 'text-muted hover:text-text'
+              }`}
+            >
+              <Film size={13} /> Editores
+              <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
+                roleTab === 'editor' ? 'bg-black/20 text-on-accent' : 'bg-surface-2 text-muted'
+              }`}>
+                {fmtMoneyClean(totals.pendingEditors)}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setWeekOffset(w => w - 1)}
+              className="w-7 h-7 rounded-lg hover:bg-surface-2 flex items-center justify-center text-muted hover:text-text transition-colors"
+              title=" Fin de semana anterior"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <div className="px-2.5 text-center">
+              <span className="text-[10px] font-tech text-muted-2 flex items-center gap-1">
+                <Calendar size={10} className="text-accent" /> {cycle.weekendLabel}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWeekOffset(w => w + 1)}
+              className="w-7 h-7 rounded-lg hover:bg-surface-2 flex items-center justify-center text-muted hover:text-text transition-colors"
+              title="Fin de semana siguiente"
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Grilla de tarjetas de Nómina por empleado */}
-      {visibleRows.length === 0 ? (
-        <div className="bg-surface-2 border border-dashed border-line rounded-2xl p-12 text-center">
-          <Sparkles size={26} className="text-muted-2 mx-auto mb-2" />
-          <p className="text-sm font-medium">No hay {roleTab === 'clipper' ? 'clippers' : 'editores'} en este filtro</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {visibleRows.map(row => {
-            const w: Worker = row.worker;
-            const draft = draftReceipts[w.id];
-            const isUploading = uploadingWorkerId === w.id;
-            const isEditingAmt = editingAmountWorkerId === w.id;
-            const wasJustPaid = justPaidId === w.id;
+      {/* WORKSPACE EN 2 COLUMNAS: Izquierda = Lista de Empleados | Derecha = Terminal de Pago + Informe PDF Pre-cargado */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Columna Izquierda (4 cols): Lista de Clippers o Editores */}
+        <div className="lg:col-span-4 bg-surface-2 border border-line rounded-2xl p-3 space-y-2">
+          <div className="px-2 py-1.5 flex items-center justify-between text-xs text-muted border-b border-line/60">
+            <span className="font-semibold">
+              {roleTab === 'clipper' ? 'Lista de Clippers' : 'Lista de Editores'} ({currentList.length})
+            </span>
+            <span className="font-tech text-[11px]">Automático</span>
+          </div>
 
-            return (
-              <div
-                key={w.id}
-                className={`relative bg-surface-2 border rounded-xl p-5 transition-all overflow-hidden ${
-                  row.isPaid
-                    ? 'border-mint/40 bg-mint-dim/10'
-                    : wasJustPaid
-                    ? 'border-mint ring-2 ring-mint/40'
-                    : 'border-line hover:border-accent/40'
-                }`}
-              >
-                <CardNodeDeco color={row.isPaid ? 'var(--mint)' : w.role === 'clipper' ? 'var(--accent)' : 'var(--mint)'} />
-
-                {/* Encabezado del trabajador y monto */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-display text-base font-bold shrink-0 ${
+          <div className="space-y-1.5 max-h-[540px] overflow-y-auto pr-0.5">
+            {currentList.map(row => {
+              const active = selectedRow?.worker.id === row.worker.id;
+              return (
+                <button
+                  key={row.worker.id}
+                  type="button"
+                  onClick={() => setSelectedWorkerId(row.worker.id)}
+                  className={`w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                    active
+                      ? 'bg-accent-dim/50 border-accent shadow-sm'
+                      : 'bg-surface-3/60 border-transparent hover:bg-surface-3 hover:border-line'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-display text-sm font-bold shrink-0 ${
                       row.isPaid
                         ? 'bg-mint text-on-accent'
-                        : w.role === 'clipper'
-                        ? 'bg-accent-dim text-accent border border-accent/30'
-                        : 'bg-mint-dim text-mint border border-mint/30'
+                        : active
+                        ? 'bg-accent text-on-accent'
+                        : 'bg-surface-2 text-muted border border-line'
                     }`}>
-                      {row.isPaid ? <CheckCircle2 size={20} /> : w.name.charAt(0).toUpperCase()}
+                      {row.isPaid ? <CheckCircle2 size={16} /> : row.worker.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-display text-base font-semibold truncate">{w.name}</h3>
-                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                          row.isPaid
-                            ? 'bg-mint-dim text-mint border border-mint/30'
-                            : row.pendingAmount > 0
-                            ? 'bg-amber-dim text-amber border border-amber/30'
-                            : 'bg-surface-3 text-muted-2'
-                        }`}>
-                          {row.isPaid ? 'Pagado' : row.pendingAmount > 0 ? 'Pago por hacer' : 'Sin saldo pendiente'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-2 truncate mt-0.5">
-                        {w.cargo} · {row.completedTasks.length} tarea(s) aprobada(s)
+                      <p className="text-sm font-semibold truncate">{row.worker.name}</p>
+                      <p className="text-[11px] text-muted-2 font-tech">
+                        {row.reportItems.length} proyecto(s) finalizados
                       </p>
                     </div>
                   </div>
 
-                  {/* Monto por hacer / pagado + botón de ajuste rápido */}
                   <div className="text-right shrink-0">
-                    {isEditingAmt ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={0}
-                          value={customAmountInput}
-                          onChange={e => setCustomAmountInput(e.target.value)}
-                          className="w-24 bg-surface-3 border border-accent rounded-md px-2 py-1 text-xs font-tech text-right outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setWorkerPayrollAdjustment(w.id, Number(customAmountInput) || 0);
-                            setEditingAmountWorkerId(null);
-                          }}
-                          className="w-7 h-7 rounded-md bg-accent text-on-accent flex items-center justify-center"
-                          title="Guardar monto"
-                        >
-                          <Check size={13} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="group/amt inline-flex flex-col items-end">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`font-display text-2xl font-bold font-tech ${
-                            row.isPaid ? 'text-mint line-through opacity-80' : 'text-text'
-                          }`}>
-                            {fmtMoney(row.isPaid ? row.paidAmount : row.pendingAmount)}
-                          </span>
-                          {!row.isPaid && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingAmountWorkerId(w.id);
-                                setCustomAmountInput(String(row.grossForCycle));
-                              }}
-                              title="Ajustar monto a pagar"
-                              className="text-muted-2 hover:text-accent transition-colors"
-                            >
-                              <SlidersHorizontal size={12} />
-                            </button>
-                          )}
-                        </div>
-                        <span className="text-[10px] font-tech text-muted-2">
-                          {row.isPaid ? 'Transferido y restado' : 'Por transferir'}
+                    <p className={`font-display text-base font-bold font-tech ${
+                      row.isPaid ? 'text-mint line-through opacity-75' : 'text-text'
+                    }`}>
+                      {fmtMoneyClean(row.isPaid ? row.paidAmount : row.pendingAmount)}
+                    </p>
+                    <span className={`text-[10px] font-tech ${
+                      row.isPaid ? 'text-mint' : row.pendingAmount > 0 ? 'text-amber' : 'text-muted-2'
+                    }`}>
+                      {row.isPaid ? 'Pagado' : row.pendingAmount > 0 ? 'Por pagar' : 'Al día'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Columna Derecha (8 cols): Mesa de Dispersión + Cuenta Bancaria Detallada + Informe PDF Pre-cargado */}
+        <div className="lg:col-span-8">
+          {!selectedRow ? (
+            <div className="bg-surface-2 border border-line rounded-2xl p-12 text-center text-sm text-muted">
+              Selecciona un empleado a la izquierda
+            </div>
+          ) : (() => {
+            const w: Worker = selectedRow.worker;
+            const bank = parseBankInfo(w.bankInfo, w.name);
+            const draft = draftReceipts[w.id];
+            const isUploading = uploadingWorkerId === w.id;
+            const isPaying = payingWorkerId === w.id;
+
+            return (
+              <div className="bg-surface-2 border border-line rounded-2xl p-5 sm:p-6 space-y-5">
+                {/* Cabecera del empleado seleccionado */}
+                <div className="flex items-center justify-between gap-4 flex-wrap pb-4 border-b border-line">
+                  <div className="flex items-center gap-3.5">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-display text-lg font-bold ${
+                      selectedRow.isPaid ? 'bg-mint text-on-accent' : 'bg-accent-dim text-accent border border-accent/30'
+                    }`}>
+                      {selectedRow.isPaid ? <CheckCircle2 size={22} /> : w.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-display text-xl font-bold">{w.name}</h3>
+                        <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${
+                          selectedRow.isPaid
+                            ? 'bg-mint-dim text-mint border border-mint/30'
+                            : 'bg-amber-dim text-amber border border-amber/30'
+                        }`}>
+                          {selectedRow.isPaid ? 'Liquidado' : 'Pendiente de transferencia'}
                         </span>
                       </div>
-                    )}
+                      <p className="text-xs text-muted font-tech mt-0.5">
+                        {w.cargo} · {w.email || 'Sin correo'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase tracking-wider font-tech text-muted-2 block">
+                      {selectedRow.isPaid ? 'Monto transferido' : 'Total automático a transferir'}
+                    </span>
+                    <p className="font-display text-3xl sm:text-4xl font-bold font-tech text-mint">
+                      {fmtMoneyClean(selectedRow.isPaid ? selectedRow.paidAmount : selectedRow.pendingAmount)}
+                    </p>
                   </div>
                 </div>
 
-                {/* Cuenta bancaria para copiar en 1 clic */}
-                <div className="mt-3.5 bg-surface-3/80 border border-line rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Landmark size={13} className="text-accent shrink-0" />
-                    <span className="truncate font-tech text-[11px] text-text">
-                      {w.bankInfo || 'Sin cuenta bancaria registrada en Perfil'}
+                {/* 1. Datos Bancarios Estructurados (Banco, Número de cuenta, Titular) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-muted flex items-center gap-1.5">
+                      <Landmark size={14} className="text-accent" /> Datos Bancarios para Transferencia
                     </span>
+                    {w.bankInfo && (
+                      <button
+                        type="button"
+                        onClick={() => copyText(`all-${w.id}`, `${bank.bankName} - ${bank.accountNumber} - ${bank.accountHolder}`)}
+                        className="text-[11px] text-accent hover:text-accent-strong flex items-center gap-1 font-medium"
+                      >
+                        {copiedKey === `all-${w.id}` ? <><Check size={11} className="text-mint" /> Todo copiado</> : <><Copy size={11} /> Copiar todo</>}
+                      </button>
+                    )}
                   </div>
-                  {w.bankInfo && (
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="bg-surface-3 border border-line rounded-xl p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-2 uppercase font-tech flex items-center gap-1">
+                          <Building2 size={11} className="text-accent" /> Banco
+                        </span>
+                        <p className="text-xs font-semibold truncate mt-0.5">{bank.bankName}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyText(`bank-${w.id}`, bank.bankName)}
+                        className="text-muted-2 hover:text-accent shrink-0"
+                        title="Copiar banco"
+                      >
+                        {copiedKey === `bank-${w.id}` ? <Check size={13} className="text-mint" /> : <Copy size={13} />}
+                      </button>
+                    </div>
+
+                    <div className="bg-surface-3 border border-line rounded-xl p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-2 uppercase font-tech flex items-center gap-1">
+                          <CreditCard size={11} className="text-mint" /> Número de cuenta
+                        </span>
+                        <p className="text-xs font-tech font-semibold truncate mt-0.5">{bank.accountNumber}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyText(`acc-${w.id}`, bank.accountNumber)}
+                        className="text-muted-2 hover:text-accent shrink-0"
+                        title="Copiar número de cuenta"
+                      >
+                        {copiedKey === `acc-${w.id}` ? <Check size={13} className="text-mint" /> : <Copy size={13} />}
+                      </button>
+                    </div>
+
+                    <div className="bg-surface-3 border border-line rounded-xl p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-2 uppercase font-tech flex items-center gap-1">
+                          <UserCheck size={11} className="text-violet" /> Titular / Tipo
+                        </span>
+                        <p className="text-xs font-semibold truncate mt-0.5">
+                          {bank.accountHolder} <span className="text-muted-2 font-normal">({bank.accountType})</span>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyText(`holder-${w.id}`, bank.accountHolder)}
+                        className="text-muted-2 hover:text-accent shrink-0"
+                        title="Copiar titular"
+                      >
+                        {copiedKey === `holder-${w.id}` ? <Check size={13} className="text-mint" /> : <Copy size={13} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Informe PDF Automático Pre-cargado (Pedidos Finalizados · Aprobado Cliente) */}
+                <div className="bg-surface-3/70 border border-line rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-accent-dim text-accent flex items-center justify-center shrink-0">
+                        <FileText size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold">
+                          Informe PDF de {w.name} (Pre-cargado desde su perfil)
+                        </p>
+                        <p className="text-[11px] text-muted-2 font-tech">
+                          {selectedRow.reportItems.length} pedido(s) con estado Aprobado Cliente
+                        </p>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => copyBank(w.id, w.bankInfo)}
-                      className="text-[11px] text-accent hover:text-accent-strong flex items-center gap-1 shrink-0 font-medium"
+                      onClick={() =>
+                        openWorkerPayrollReportPdf({
+                          worker: w,
+                          weekendLabel: cycle.weekendLabel,
+                          items: selectedRow.reportItems,
+                          totalAmount: selectedRow.isPaid ? selectedRow.paidAmount : selectedRow.pendingAmount,
+                          isPaid: selectedRow.isPaid,
+                          paidAt: selectedRow.latestPayment?.paidAt,
+                          receiptFileName: selectedRow.latestPayment?.receiptFileName || draft?.fileName,
+                        })
+                      }
+                      className="flex items-center gap-1.5 bg-surface-2 hover:bg-accent-dim text-accent border border-accent/30 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
                     >
-                      {copiedBankId === w.id ? <><Check size={11} className="text-mint" /> Copiado</> : <><Copy size={11} /> Copiar</>}
+                      <Eye size={13} /> Ver / Descargar Informe PDF
                     </button>
+                  </div>
+
+                  {selectedRow.reportItems.length === 0 ? (
+                    <p className="text-xs text-muted text-center py-4">
+                      Este creador aún no tiene pedidos en estado Aprobado Cliente.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-line bg-surface-2">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-muted-2 border-b border-line bg-surface-3/60 font-tech text-[10px] uppercase">
+                            <th className="py-2 px-3">Pedido finalizado (Aprobado Cliente)</th>
+                            <th className="py-2 px-3">Fecha</th>
+                            <th className="py-2 px-3 text-center">Videos</th>
+                            <th className="py-2 px-3 text-right">Tarifa</th>
+                            <th className="py-2 px-3 text-right">Subtotal</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line/50">
+                          {selectedRow.reportItems.map(item => (
+                            <tr key={item.videoId}>
+                              <td className="py-2 px-3 font-medium">
+                                {item.projectName} <span className="text-muted-2">· {item.brandName}</span>
+                              </td>
+                              <td className="py-2 px-3 font-tech text-muted">{item.date}</td>
+                              <td className="py-2 px-3 font-tech text-center">{item.videosCount}</td>
+                              <td className="py-2 px-3 font-tech text-right text-muted">{fmtMoneyClean(item.unitPay)}</td>
+                              <td className="py-2 px-3 font-tech text-right font-semibold text-mint">{fmtMoneyClean(item.subtotal)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
 
-                {/* Desglose compacto de videos que componen su pago */}
-                {row.completedTasks.length > 0 && (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    {row.completedTasks.slice(0, 4).map(t => (
-                      <span
-                        key={t.id}
-                        className="text-[10px] font-tech px-2 py-0.5 rounded-md bg-surface-3 border border-line text-muted"
-                      >
-                        {t.name} ({t.stage}: {fmtMoney(t.amount)})
-                      </span>
-                    ))}
-                    {row.completedTasks.length > 4 && (
-                      <span className="text-[10px] font-tech px-2 py-0.5 rounded-md bg-surface-3 text-muted-2">
-                        +{row.completedTasks.length - 4} más
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Zona de Comprobante de Transferencia + Botón Pagado */}
-                <div className="mt-4 pt-3 border-t border-line/70 flex items-center justify-between gap-2 flex-wrap">
-                  {row.isPaid && row.latestPayment ? (
-                    <>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <CheckCircle2 size={15} className="text-mint shrink-0" />
-                        <div className="min-w-0 text-xs">
-                          <p className="font-medium text-mint truncate">
-                            Pagado ({fmtMoney(row.latestPayment.amount)})
+                {/* 3. Barra de Cierre de Transferencia (Sin opción de restablecer una vez enviado) */}
+                <div className="pt-2 border-t border-line flex items-center justify-between gap-3 flex-wrap">
+                  {selectedRow.isPaid && selectedRow.latestPayment ? (
+                    <div className="w-full flex items-center justify-between gap-3 flex-wrap bg-mint-dim/40 border border-mint/30 rounded-xl px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <CheckCircle2 size={18} className="text-mint shrink-0" />
+                        <div className="text-xs">
+                          <p className="font-semibold text-mint">
+                            Transferencia enviada + Informe PDF entregado a {w.name}
                           </p>
-                          <p className="text-[10px] text-muted-2 font-tech truncate">
-                            {row.latestPayment.receiptFileName || 'Sin archivo adjunto'}
+                          <p className="text-[11px] text-muted font-tech">
+                            {new Date(selectedRow.latestPayment.paidAt).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
+                            {selectedRow.latestPayment.receiptFileName ? ` · Comprobante: ${selectedRow.latestPayment.receiptFileName}` : ''}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {row.latestPayment.receiptFileUrl && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setPreviewReceipt({
-                                  name: row.latestPayment!.receiptFileName || 'Comprobante',
-                                  url: row.latestPayment!.receiptFileUrl!,
-                                  workerName: w.name,
-                                })
-                              }
-                              className="text-xs bg-surface-3 hover:bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-accent flex items-center gap-1 transition-colors"
-                            >
-                              <Eye size={12} /> Comprobante
-                            </button>
-                            <a
-                              href={row.latestPayment.receiptFileUrl}
-                              download={row.latestPayment.receiptFileName || 'comprobante'}
-                              className="w-7 h-7 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text transition-colors"
-                              title="Descargar comprobante"
-                            >
-                              <Download size={12} />
-                            </a>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => revertPayrollPayment(row.latestPayment!.id)}
-                          className="w-7 h-7 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted-2 hover:text-amber transition-colors"
-                          title="Deshacer pago (volver a sumar a pendientes)"
-                        >
-                          <RotateCcw size={12} />
-                        </button>
-                      </div>
-                    </>
+                      {selectedRow.latestPayment.receiptFileUrl && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewReceipt({
+                                name: selectedRow.latestPayment!.receiptFileName || 'Comprobante',
+                                url: selectedRow.latestPayment!.receiptFileUrl!,
+                                workerName: w.name,
+                              })
+                            }
+                            className="text-xs bg-surface-2 hover:bg-surface-3 border border-line rounded-lg px-3 py-1.5 text-accent flex items-center gap-1 font-medium"
+                          >
+                            <Eye size={13} /> Ver comprobante
+                          </button>
+                          <a
+                            href={selectedRow.latestPayment.receiptFileUrl}
+                            download={selectedRow.latestPayment.receiptFileName || 'comprobante'}
+                            className="w-8 h-8 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text"
+                            title="Descargar comprobante"
+                          >
+                            <Download size={13} />
+                          </a>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-1 min-w-[220px]">
                         <input
-                          ref={el => { fileInputRefs.current[w.id] = el; }}
+                          ref={fileInputRef}
                           type="file"
                           accept="image/*,.pdf,*/*"
                           className="hidden"
@@ -734,49 +653,48 @@ export function PayrollView() {
                         />
                         <button
                           type="button"
-                          onClick={() => fileInputRefs.current[w.id]?.click()}
+                          onClick={() => fileInputRef.current?.click()}
                           disabled={isUploading}
-                          className={`flex items-center gap-1.5 text-xs rounded-lg px-3 py-2 border transition-colors min-w-0 max-w-full ${
+                          className={`flex items-center gap-2 text-xs rounded-xl px-3.5 py-2.5 border transition-colors flex-1 ${
                             draft
-                              ? 'bg-accent-dim/60 border-accent/40 text-accent'
+                              ? 'bg-accent-dim/60 border-accent/40 text-accent font-medium'
                               : 'bg-surface-3 border-line border-dashed text-muted hover:text-text hover:border-accent/40'
                           }`}
                         >
                           {isUploading ? (
-                            <Loader2 size={13} className="animate-spin shrink-0" />
-                          ) : draft ? (
-                            <FileText size={13} className="shrink-0" />
+                            <Loader2 size={14} className="animate-spin shrink-0" />
                           ) : (
-                            <Upload size={13} className="shrink-0" />
+                            <Upload size={14} className="shrink-0" />
                           )}
                           <span className="truncate">
                             {isUploading
-                              ? 'Subiendo...'
+                              ? 'Subiendo comprobante...'
                               : draft
-                              ? draft.fileName
-                              : 'Subir comprobante'}
+                              ? `Comprobante listo: ${draft.fileName}`
+                              : '1. Subir comprobante de transferencia'}
                           </span>
                         </button>
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => handleMarkAsPaid(row)}
-                        disabled={row.pendingAmount <= 0 && row.grossForCycle <= 0}
-                        className="flex items-center gap-1.5 bg-mint text-on-accent rounded-lg px-3.5 py-2 text-xs font-semibold hover:opacity-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-[0_6px_18px_-6px_rgba(111,231,200,0.45)]"
+                        onClick={() => void handleConfirmPayment(selectedRow)}
+                        disabled={selectedRow.pendingAmount <= 0 || isPaying}
+                        className="flex items-center gap-2 bg-mint text-on-accent rounded-xl px-5 py-2.5 text-xs sm:text-sm font-semibold hover:opacity-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_8px_22px_-6px_rgba(111,231,200,0.5)]"
                       >
-                        <CheckCircle2 size={14} /> Marcar Pagado
+                        {isPaying ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                        2. Pagado · Enviar Comprobante + Informe PDF
                       </button>
                     </>
                   )}
                 </div>
               </div>
             );
-          })}
+          })()}
         </div>
-      )}
+      </div>
 
-      {/* Modal de vista previa del comprobante de transferencia */}
+      {/* Modal de vista previa del comprobante */}
       {previewReceipt && (
         <div
           className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
@@ -789,7 +707,7 @@ export function PayrollView() {
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-display text-base font-semibold">
-                  Comprobante de pago · {previewReceipt.workerName}
+                  Comprobante · {previewReceipt.workerName}
                 </h4>
                 <p className="text-xs text-muted font-tech">{previewReceipt.name}</p>
               </div>
@@ -819,7 +737,7 @@ export function PayrollView() {
                 download={previewReceipt.name}
                 className="inline-flex items-center gap-1.5 bg-accent text-on-accent rounded-lg px-4 py-2 text-xs font-semibold hover:bg-accent-strong transition-colors"
               >
-                <Download size={14} /> Descargar archivo
+                <Download size={14} /> Descargar comprobante
               </a>
             </div>
           </div>
