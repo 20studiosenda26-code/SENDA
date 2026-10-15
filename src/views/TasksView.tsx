@@ -1,12 +1,12 @@
 import { useStore } from '../store';
-import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip, Worker } from '../types';
+import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip } from '../types';
 import { uploadSharedFile } from '../lib/supabaseClient';
 import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
   ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
-  Clock, UserPlus, ChevronRight, Zap, LayoutDashboard, User, ArrowRight, Info
+  Clock, ChevronRight, User, Link2, StickyNote
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
@@ -31,7 +31,7 @@ function clipStatusClasses(status?: ClipStatus | null) {
 
 function isImageFile(name?: string | null) {
   if (!name) return false;
-  return /\\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+  return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
 }
 
 function VideoTimeline({
@@ -102,62 +102,25 @@ function VideoTimeline({
   );
 }
 
-// --- UI Helpers for Assignment ---
-
-function UrgencyBadge({ level }: { level: 'critical' | 'high' | 'low' }) {
-  const styles = {
-    critical: 'bg-red-500/20 text-red-400 border-red-500/50 animate-pulse',
-    high: 'bg-orange-500/20 text-orange-400 border-orange-500/50',
-    low: 'bg-green-500/20 text-green-400 border-green-500/50',
-  };
-  const labels = { critical: 'Crítico', high: 'Urgente', low: 'Estable' };
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${styles[level]}`}>{labels[level]}</span>;
-}
-
-function WorkloadIndicator({ current, max }: { current: number; max: number }) {
-  const percent = (current / max) * 100;
-  let color = 'bg-emerald-500';
-  if (percent > 40) color = 'bg-amber-500';
-  if (percent > 80) color = 'bg-red-500';
-  return (
-    <div className="w-full bg-gray-700 h-1.5 rounded-full overflow-hidden">
-      <div className={`h-full transition-all duration-500 ${color}`} style={{ width: `${percent}%` }} />
-    </div>
-  );
-}
-
 export function TasksView() {
   const {
-    brands, role, currentWorkerId, setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
+    brands, orders, role, currentWorkerId, setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
     addCorrection, updateCorrectionTime,
     uploadBrief, addFinalVideo, uploadMainImage, setMainImageStatus, sendVideo,
-    setSelectedVideo, selectedVideo, workers, assignClipper,
+    setSelectedVideo, selectedVideo,
   } = useStore();
 
-  const [isAssignmentDrawerOpen, setIsAssignmentDrawerOpen] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<Video | null>(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const allVideos = useMemo(
+    () => brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))),
+    [brands]
+  );
 
-  const allVideos = brands.flatMap(b => b.videos);
-  const availableProjects = useMemo(() => {
+  // Proyectos asignados específicamente al Clipper o Editor autenticado
+  const myAssignedVideos = useMemo(() => {
     return allVideos
-      .filter(v => v.qc === 'sin_iniciar')
+      .filter(v => (role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId))
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [allVideos]);
-
-  const sortedClippers = useMemo(() => {
-    return [...workers]
-      .filter(w => w.role === 'clipper')
-      .sort((a, b) => a.pointsToday - b.pointsToday);
-  }, [workers]);
-
-  const handleAssign = (workerId: string) => {
-    if (!selectedProject) return;
-    assignClipper(selectedProject.id, workerId);
-    setIsAssignmentDrawerOpen(false);
-    setIsDetailModalOpen(false);
-    setSelectedProject(null);
-  };
+  }, [allVideos, role, currentWorkerId]);
 
   if (selectedVideo) {
     return (
@@ -182,222 +145,98 @@ export function TasksView() {
     );
   }
 
-  // El Admin gestiona los pedidos de clientes (brief, avatar, referencias,
-  // notas y asignación de clíper + editor(a) por volumen de trabajo) desde
-  // su propio panel de carpetas; el resto de este componente (más abajo)
-  // sigue siendo la vista de clíper/editor.
   if (role === 'admin') {
     return <AdminTasksRoot />;
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8 relative">
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight text-white mb-2">Proyectos Disponibles</h1>
-          <p className="text-gray-400">Gestiona la asignación de editores según la urgencia y carga de trabajo.</p>
-        </div>
-        <div className="flex items-center gap-3 text-sm text-gray-500 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-          <LayoutDashboard size={16} />
-          <span>Panel de Administración</span>
-        </div>
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div>
+        <h2 className="font-display text-2xl font-bold mb-1">Proyectos disponibles</h2>
+        <p className="text-muted text-sm">
+          Proyectos asignados a ti ({role === 'clipper' ? 'Clipper' : 'Editor(a)'}). Haz clic en un proyecto para revisar el brief, subir tu material y gestionar avances.
+        </p>
       </div>
 
-      <div className="grid gap-4">
-        {availableProjects.map((project, index) => (
-          <div
-            key={project.id}
-            className="bg-surface-2 border border-line rounded-2xl p-5 flex items-center justify-between group relative overflow-hidden hover:border-accent/40 transition-all hover:-translate-y-0.5"
-          >
-            <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-[shimmer_3s_infinite_linear]" />
-            <div className="flex items-center gap-6 z-10">
-              <div className="w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold">
-                {index + 1}
-              </div>
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="text-lg font-semibold text-white">{project.name}</span>
-                  <UrgencyBadge level={project.durationSeconds > 60 ? 'high' : 'low'} />
-                </div>
-                <div className="flex items-center gap-4 text-sm text-gray-400">
-                  <span className="flex items-center gap-1.5">
-                    <Zap size={14} className="text-amber-400" />
-                    {project.durationSeconds} seg
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <Clock size={14} />
-                    {project.date}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-4 z-10">
-              <button
-                onClick={() => {
-                  setSelectedProject(project);
-                  setIsDetailModalOpen(true);
-                }}
-                className="group/btn flex items-center gap-2 px-5 py-2.5 bg-white text-black rounded-full text-sm font-bold transition-all hover:bg-indigo-400 hover:text-white active:scale-95"
+      {myAssignedVideos.length === 0 ? (
+        <div className="text-center py-16 bg-surface-2 border border-dashed border-line rounded-2xl">
+          <div className="w-14 h-14 rounded-full bg-surface-3 flex items-center justify-center mx-auto mb-3 text-muted">
+            <CheckCircle2 size={28} />
+          </div>
+          <h3 className="text-base font-semibold">No tienes proyectos asignados por ahora</h3>
+          <p className="text-xs text-muted mt-1">Cuando el administrador te asigne un proyecto aparecerá inmediatamente aquí.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {myAssignedVideos.map((project, index) => {
+            const linkedOrder = orders.find(o =>
+              o.boardVideoId === project.id ||
+              (o.brand.trim().toLowerCase() === project.name.trim().toLowerCase() &&
+                (role === 'clipper' ? o.clipperId === currentWorkerId : o.editorId === currentWorkerId))
+            );
+            return (
+              <div
+                key={project.id}
+                className="bg-surface-2 border border-line rounded-xl p-4 hover:border-accent/40 transition-colors space-y-3"
               >
-                <Eye size={16} />
-                Ver Detalles
-                <ChevronRight size={16} className="transition-transform group-hover/btn:translate-x-1" />
-              </button>
-            </div>
-          </div>
-        ))}
-        {availableProjects.length === 0 && (
-          <div className="text-center py-20 bg-surface-2 border border-dashed border-line rounded-3xl">
-            <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mx-auto mb-4 text-muted">
-              <CheckCircle2 size={32} />
-            </div>
-            <h3 className="text-xl font-semibold text-white">Todo asignando</h3>
-            <p className="text-muted">No hay proyectos pendientes de asignación en este momento.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Project Detail Modal */}
-      {isDetailModalOpen && selectedProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setIsDetailModalOpen(false)} />
-          <div className="relative bg-[#121216] border border-white/10 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
-            <div className="p-8">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h2 className="text-3xl font-bold text-white mb-2">{selectedProject.name}</h2>
-                  <div className="flex items-center gap-3">
-                    <UrgencyBadge level={selectedProject.durationSeconds > 60 ? 'high' : 'low'} />
-                    <span className="text-sm text-gray-400 flex items-center gap-1">
-                      <Clock size={14} /> {selectedProject.date}
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-7 h-7 rounded-full bg-accent-dim text-accent border border-accent/30 flex items-center justify-center text-xs font-semibold shrink-0 font-tech">
+                      {index + 1}
                     </span>
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold truncate">
+                        {project.name}
+                        {linkedOrder ? ` · ${linkedOrder.videoCount} videos` : ''}
+                      </p>
+                      <p className="text-xs text-muted-2 flex items-center gap-2 flex-wrap mt-0.5">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock size={12} /> Entrega: {linkedOrder?.deliveryDate ? `${linkedOrder.deliveryDate} · ${linkedOrder.deliveryTime || ''}` : project.date}
+                        </span>
+                        <span>· Clipper: {project.clipperName}</span>
+                        <span>· Editor(a): {project.editorName}</span>
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <button onClick={() => setIsDetailModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                  <X size={24} />
-                </button>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="space-y-4">
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-2xl">
-                    <p className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-2 flex items-center gap-2">
-                      <Zap size={14} className="text-amber-400" /> Duración Estimada
-                    </p>
-                    <p className="text-xl font-semibold text-white">{selectedProject.durationSeconds} segundos</p>
-                  </div>
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-2xl">
-                    <p className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-2 flex items-center gap-2">
-                      <FileText size={14} className="text-indigo-400" /> Brief del Proyecto
-                    </p>
-                    <p className="text-sm text-gray-300 leading-relaxed">
-                      {selectedProject.briefFileName || 'No hay brief adjunto. Por favor, revisa los requerimientos del cliente en el panel de pedidos.'}
-                    </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[project.qc]}`}>
+                      {project.qc === 'pendiente' ? `Pendiente ${pendingRoleSuffix(project)}` : BOARD_QC_LABEL[project.qc]}
+                    </span>
+                    <button
+                      onClick={() => setSelectedVideo(project)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-accent text-on-accent rounded-lg text-xs font-semibold hover:bg-accent-strong transition-colors"
+                    >
+                      Abrir proyecto <ChevronRight size={14} />
+                    </button>
                   </div>
                 </div>
-                <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-6 flex flex-col justify-center text-center">
-                  <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/30">
-                    <Info size={24} className="text-white" />
+
+                {linkedOrder && (linkedOrder.avatarName || linkedOrder.briefFileName || (linkedOrder.references && linkedOrder.references.length > 0) || linkedOrder.clientNotes) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-line/60 text-xs">
+                    <div className="bg-surface-3 rounded-lg p-2.5">
+                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
+                      <p className="truncate">{linkedOrder.avatarName || 'Sin avatar especificado'}</p>
+                    </div>
+                    <div className="bg-surface-3 rounded-lg p-2.5">
+                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><FileText size={11} /> Brief</p>
+                      <p className="truncate">{project.briefFileName || linkedOrder.briefFileName || 'Sin brief'}</p>
+                    </div>
+                    <div className="bg-surface-3 rounded-lg p-2.5">
+                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><Link2 size={11} /> Referencias</p>
+                      <p className="truncate">{linkedOrder.references && linkedOrder.references.length > 0 ? `${linkedOrder.references.length} referencia(s)` : 'Sin referencias'}</p>
+                    </div>
+                    <div className="bg-surface-3 rounded-lg p-2.5">
+                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><StickyNote size={11} /> Notas cliente</p>
+                      <p className="truncate">{linkedOrder.clientNotes || 'Sin notas'}</p>
+                    </div>
                   </div>
-                  <h3 className="text-white font-bold mb-2">Siguiente Paso</h3>
-                  <p className="text-sm text-indigo-200/70 mb-6">
-                    Revisa la carga de trabajo de tu equipo y asigna el clipper más apto para este proyecto.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setIsDetailModalOpen(false);
-                      setIsAssignmentDrawerOpen(true);
-                    }}
-                    className="w-full py-3 bg-white text-black rounded-xl font-bold hover:bg-indigo-400 hover:text-white transition-all active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    Asignar Clipper <ArrowRight size={18} />
-                  </button>
-                </div>
+                )}
               </div>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
-
-      {/* Assignment Drawer */}
-      <div className={`fixed inset-0 z-50 transition-all duration-500 ${isAssignmentDrawerOpen ? 'visible' : 'invisible'}`}>
-        <div
-          className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-500 ${isAssignmentDrawerOpen ? 'opacity-100' : 'opacity-0'}`}
-          onClick={() => setIsAssignmentDrawerOpen(false)}
-        />
-        <div
-          className={`absolute right-0 top-0 h-full w-full max-w-md bg-[#121216] border-l border-white/10 transition-transform duration-500 ${isAssignmentDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
-        >
-          <div className="p-8 flex flex-col h-full">
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <h2 className="text-2xl font-bold text-white">Asignar Editor</h2>
-                <p className="text-gray-400 text-sm">Proyecto: {selectedProject?.name}</p>
-              </div>
-              <button onClick={() => setIsAssignmentDrawerOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-              {sortedClippers.map((clipper) => (
-                <div
-                  key={clipper.id}
-                  onClick={() => handleAssign(clipper.id)}
-                  className="bg-white/5 border border-white/10 p-4 rounded-2xl cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all group relative"
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">
-                        {clipper.name.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-white group-hover:text-indigo-400 transition-colors">{clipper.name}</h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <User size={12} />
-                          <span>Clipper Especialista</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                      clipper.pointsToday === 0 ? 'bg-emerald-500/20 text-emerald-400' :
-                      clipper.pointsToday < 3 ? 'bg-amber-500/20 text-amber-400' :
-                      'bg-red-500/20 text-red-400'
-                    }`}>
-                      {clipper.pointsToday === 0 ? 'Libre' : clipper.pointsToday < 3 ? 'Activo' : 'Lleno'}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs text-gray-400">
-                      <span>Carga de trabajo</span>
-                      <span>{clipper.pointsToday} puntos hoy</span>
-                    </div>
-                    <WorkloadIndicator current={clipper.pointsToday} max={5} />
-                  </div>
-                  <div className="absolute right-4 bottom-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="p-2 bg-white text-black rounded-full">
-                      <ArrowRight size={16} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-8 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-start gap-3">
-              <AlertCircle className="text-indigo-400 shrink-0" size={18} />
-              <p className="text-xs text-indigo-300/80 leading-relaxed">
-                Los editores se muestran priorizando a quienes tienen menos carga de trabajo actual para optimizar los tiempos de entrega.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -522,7 +361,7 @@ function VideoDetail({
           <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2">
             <FileText size={16} className="text-accent shrink-0" />
             <div className="text-xs">
-              <p className="font-medium">Brief / Trabajo asignad</p>
+              <p className="font-medium">Brief / Trabajo asignado</p>
               <p className="text-muted-2 truncate max-w-[160px]">{video.briefFileName || 'Sin archivo'}</p>
             </div>
             {isAdmin && (
@@ -1067,9 +906,6 @@ function VideoDetail({
   );
 }
 
-// --- Tablero de "Proyectos iniciados": todos los videos (de todas las
-// marcas) con su estado de QC, para que el Admin vea de un vistazo en qué
-// va cada uno y entre al detalle completo (clips, correcciones, aprobación). ---
 const BOARD_QC_LABEL: Record<QcStatus, string> = {
   sin_iniciar: 'Sin iniciar',
   pendiente: 'Pendiente',
