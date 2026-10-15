@@ -7,6 +7,11 @@ import {
 
 type WorkerLoad = 'lleno' | 'meta' | 'sin_trabajo';
 
+const CURRENCY_SIGN = String.fromCharCode(36);
+function fmtMoney(n: number): string {
+  return CURRENCY_SIGN + Math.round(Number(n) || 0).toLocaleString('es-CO');
+}
+
 function workerLoadColor(load: WorkerLoad) {
   if (load === 'lleno') return 'bg-red-500';
   if (load === 'meta') return 'bg-mint';
@@ -75,14 +80,12 @@ export function AdminHomePanels() {
     return map;
   }, [brands]);
 
-  // --- Utilidad / Finanzas ---
   const entregados = useMemo(() => allVideos.filter(v => v.qc === 'aprobado_cliente' && v.paid100), [allVideos]);
   const utilidadTotal = useMemo(
     () => entregados.reduce((sum, v) => sum + (v.tierSnapshot ? v.tierSnapshot.clipperPay + v.tierSnapshot.editorPay : 0), 0),
     [entregados]
   );
 
-  // --- Carga de clíper / editor ---
   const workerLoad = (w: Worker): number => allVideos.filter(v =>
     (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
     v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar'
@@ -111,7 +114,6 @@ export function AdminHomePanels() {
     return v ? (brandNameForVideo[v.id] || v.name) : 'Sin marca activa';
   };
 
-  // --- QC pendiente ---
   const pendingClipVideos = useMemo(
     () => allVideos.filter(v => v.clips.some(c => c.fileUrl && (!c.status || c.status === 'pending'))),
     [allVideos]
@@ -126,7 +128,6 @@ export function AdminHomePanels() {
     setView('tareas');
   };
 
-  // --- Orden de entrega ---
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => new Date(`${a.deliveryDate}T${a.deliveryTime || '00:00'}`).getTime() - new Date(`${b.deliveryDate}T${b.deliveryTime || '00:00'}`).getTime()),
     [orders]
@@ -135,7 +136,6 @@ export function AdminHomePanels() {
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Utilidad */}
         <button
           onClick={() => setOpenFolder('finanzas')}
           className="text-left bg-surface-2 border border-line rounded-xl p-5 hover:border-mint/50 hover:bg-surface-3 transition-colors"
@@ -143,11 +143,10 @@ export function AdminHomePanels() {
           <div className="w-10 h-10 rounded-lg bg-mint-dim text-mint flex items-center justify-center mb-3">
             <DollarSign size={20} />
           </div>
-          <p className="font-display text-2xl font-bold">${utilidadTotal.toLocaleString('es-CO')}</p>
+          <p className="font-display text-2xl font-bold">{fmtMoney(utilidadTotal)}</p>
           <p className="text-xs text-muted-2 mt-1">Utilidad · {entregados.length} entregados (aprobados y pagados)</p>
         </button>
 
-        {/* Cliper / Editores */}
         <div className="bg-surface-2 border border-line rounded-xl p-5">
           <p className="text-sm font-medium text-muted mb-3">Cliper / Editores</p>
           <div className="grid grid-cols-3 gap-2">
@@ -169,7 +168,6 @@ export function AdminHomePanels() {
           </div>
         </div>
 
-        {/* QC */}
         <div className="bg-surface-2 border border-line rounded-xl p-5">
           <p className="text-sm font-medium text-muted mb-3 flex items-center gap-1.5"><ClipboardCheck size={15} /> QC</p>
           <div className="grid grid-cols-2 gap-2">
@@ -195,7 +193,6 @@ export function AdminHomePanels() {
         </div>
       </div>
 
-      {/* Orden de entrega */}
       <div className="bg-surface-2 border border-line rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-display text-base font-semibold flex items-center gap-2"><Clock3 size={16} className="text-amber" /> Orden de entrega</h3>
@@ -230,13 +227,12 @@ export function AdminHomePanels() {
         )}
       </div>
 
-      {/* --- Carpeta: Finanzas --- */}
       {openFolder === 'finanzas' && (
         <FolderModal title="Finanzas" onClose={() => setOpenFolder(null)}>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="bg-surface-3 border border-line rounded-lg p-4">
               <p className="text-xs text-muted-2">Utilidad total</p>
-              <p className="font-display text-2xl font-bold text-mint">${utilidadTotal.toLocaleString('es-CO')}</p>
+              <p className="font-display text-2xl font-bold text-mint">{fmtMoney(utilidadTotal)}</p>
             </div>
             <div className="bg-surface-3 border border-line rounded-lg p-4">
               <p className="text-xs text-muted-2">Entregados (aprobados y pagados)</p>
@@ -255,7 +251,7 @@ export function AdminHomePanels() {
                     <p className="text-xs text-muted">{v.clipperName} · {v.editorName} · {v.date}</p>
                   </div>
                   <span className="text-sm font-semibold text-mint shrink-0">
-                    ${(v.tierSnapshot ? v.tierSnapshot.clipperPay + v.tierSnapshot.editorPay : 0).toLocaleString('es-CO')}
+                    {fmtMoney(v.tierSnapshot ? v.tierSnapshot.clipperPay + v.tierSnapshot.editorPay : 0)}
                   </span>
                 </div>
               ))}
@@ -264,7 +260,6 @@ export function AdminHomePanels() {
         </FolderModal>
       )}
 
-      {/* --- Carpeta: Equipo --- */}
       {openFolder === 'equipo' && (
         <FolderModal title="Equipo" onClose={() => setOpenFolder(null)}>
           <div className="flex gap-2 mb-4">
@@ -299,7 +294,6 @@ export function AdminHomePanels() {
         </FolderModal>
       )}
 
-      {/* --- Carpeta: Pedidos (orden de entrega, ícono de reloj) --- */}
       {openFolder === 'pedidos' && (
         <FolderModal title="Pedidos" icon={<Clock3 size={18} className="text-amber" />} onClose={() => setOpenFolder(null)}>
           {sortedOrders.length === 0 ? (

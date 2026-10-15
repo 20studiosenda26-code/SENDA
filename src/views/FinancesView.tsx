@@ -5,7 +5,7 @@ import { CardNodeDeco } from '../components/BrandBackground';
 import {
   DollarSign, Clock, CheckCircle2, ShieldCheck,
   Calendar, FileDown, Users, Scissors, Film,
-  ArrowUpRight, Sparkles, Layers, Eye, History, Cpu, Plus, Trash2, X,
+  ArrowUpRight, Sparkles, Layers, Eye, History, Cpu, Plus, Trash2, ChevronDown,
 } from 'lucide-react';
 
 type DatePreset = 'hoy' | 'quincena' | 'mes' | 'todo' | 'rango';
@@ -32,6 +32,13 @@ interface FinancialProjectRow {
   paid50: boolean;
   paid100: boolean;
   videoRef?: Video;
+}
+
+const CURRENCY_SIGN = String.fromCharCode(36);
+
+function fmtMoney(n: number): string {
+  const clean = Math.round(Number(n) || 0);
+  return CURRENCY_SIGN + clean.toLocaleString('es-CO');
 }
 
 function todayIso(): string {
@@ -61,8 +68,8 @@ export function FinancesView() {
   const [dateTo, setDateTo] = useState<string>(() => todayIso());
   const [reportTab, setReportTab] = useState<ReportTab>('aprobado_cliente');
 
-  // Formulario para registrar pagos de aplicaciones / créditos IA / material de trabajo
-  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  // Todo el registro y listado de Apps/Créditos vive dentro de su propio recuadro al hacer clic
+  const [appsBoxOpen, setAppsBoxOpen] = useState(false);
   const [expLabel, setExpLabel] = useState('');
   const [expAmount, setExpAmount] = useState('');
   const [expCategory, setExpCategory] = useState<AppExpense['category']>('creditos_ia');
@@ -73,7 +80,7 @@ export function FinancesView() {
     if (preset === 'hoy') return { from: today, to: today, label: `Hoy (${today})` };
     if (preset === 'quincena') {
       const from = subtractDaysIso(14);
-      return { from, to: today, label: `Quincena (${from} a ${today})` };
+      return { from, to: today, label: `15 Días (${from} a ${today})` };
     }
     if (preset === 'mes') {
       const from = firstDayOfMonthIso();
@@ -205,11 +212,11 @@ export function FinancesView() {
 
   const expensesSummary = useMemo(() => {
     const today = todayIso();
-    const quincenaStart = subtractDaysIso(14);
+    const monthStart = firstDayOfMonthIso();
     const todayTotal = appExpenses.filter(e => e.date === today).reduce((s, e) => s + e.amount, 0);
-    const quincenaTotal = appExpenses.filter(e => e.date >= quincenaStart && e.date <= today).reduce((s, e) => s + e.amount, 0);
+    const monthTotal = appExpenses.filter(e => e.date >= monthStart && e.date <= today).reduce((s, e) => s + e.amount, 0);
     const periodTotal = filteredExpenses.reduce((s, e) => s + e.amount, 0);
-    return { todayTotal, quincenaTotal, periodTotal };
+    return { todayTotal, monthTotal, periodTotal };
   }, [appExpenses, filteredExpenses]);
 
   const rowsNoIniciados = useMemo(() => filteredRows.filter(r => r.stage === 'no_iniciados'), [filteredRows]);
@@ -228,15 +235,12 @@ export function FinancesView() {
     const realizedCreatorCost = rowsAprobadoCliente.reduce((s, r) => s + r.creatorCostTotal, 0);
     const realizedVideos = rowsAprobadoCliente.reduce((s, r) => s + r.videoCount, 0);
 
-    // Nómina total a Clippers y Editores
     const totalClipperPay = [...rowsAprobadoSenda, ...rowsAprobadoCliente].reduce((s, r) => s + r.clipperPayTotal, 0);
     const totalEditorPay = [...rowsAprobadoSenda, ...rowsAprobadoCliente].reduce((s, r) => s + r.editorPayTotal, 0);
     const totalCreatorPayroll = totalClipperPay + totalEditorPay;
 
-    // Ingreso Neto Realizado = Facturado Aprobado Cliente - Nómina Realizada - Pagos de Apps/Créditos del período
     const realizedNetRevenue = realizedGrossRevenue - realizedCreatorCost - expensesSummary.periodTotal;
 
-    // Margen neto calculado automáticamente con Nómina + Pagos de Aplicaciones/Créditos
     const netMarginPct = realizedGrossRevenue > 0
       ? Math.max(0, Math.round((realizedNetRevenue / realizedGrossRevenue) * 100))
       : 0;
@@ -258,7 +262,6 @@ export function FinancesView() {
     };
   }, [rowsNoIniciados, rowsAprobadoSenda, rowsAprobadoCliente, expensesSummary.periodTotal]);
 
-  // Para el PDF de respaldo al cerrar el día
   const workerPayoutBreakdown = useMemo(() => {
     return workers.map(w => {
       const asClipper = filteredRows.filter(r => r.clipperId === w.id && (r.stage === 'aprobado_senda' || r.stage === 'aprobado_cliente'));
@@ -296,7 +299,6 @@ export function FinancesView() {
     });
     setExpLabel('');
     setExpAmount('');
-    setShowExpenseForm(false);
   };
 
   const handleCloseDayAndDownloadPdf = () => {
@@ -322,9 +324,9 @@ export function FinancesView() {
         <td>${r.date}</td>
         <td>${r.clipperName} / ${r.editorName}</td>
         <td>${r.statusLabel}</td>
-        <td style="text-align:right;">$${r.grossAmount.toLocaleString('es-CO')}</td>
-        <td style="text-align:right;">$${r.creatorCostTotal.toLocaleString('es-CO')}</td>
-        <td style="text-align:right;font-weight:700;color:#0d9488;">$${r.netMargin.toLocaleString('es-CO')}</td>
+        <td style="text-align:right;">${fmtMoney(r.grossAmount)}</td>
+        <td style="text-align:right;">${fmtMoney(r.creatorCostTotal)}</td>
+        <td style="text-align:right;font-weight:700;color:#0d9488;">${fmtMoney(r.netMargin)}</td>
       </tr>
     `).join('');
 
@@ -335,18 +337,18 @@ export function FinancesView() {
         <td>${item.worker.email || 'Sin correo'}<br/><span style="color:#64748b;font-size:11px;">${item.worker.phone || ''}</span></td>
         <td>${item.worker.bankInfo || 'Pendiente en Perfil'}</td>
         <td style="text-align:center;">${item.totalAssignedProjects}</td>
-        <td style="text-align:right;">$${item.earned50.toLocaleString('es-CO')}</td>
-        <td style="text-align:right;">$${item.earned100.toLocaleString('es-CO')}</td>
-        <td style="text-align:right;font-weight:700;color:#0f172a;">$${item.totalPayable.toLocaleString('es-CO')}</td>
+        <td style="text-align:right;">${fmtMoney(item.earned50)}</td>
+        <td style="text-align:right;">${fmtMoney(item.earned100)}</td>
+        <td style="text-align:right;font-weight:700;color:#0f172a;">${fmtMoney(item.totalPayable)}</td>
       </tr>
     `).join('');
 
     const expensesHtml = filteredExpenses.map(ex => `
       <tr>
         <td><strong>${ex.label}</strong></td>
-        <td>${ex.category === 'creditos_ia' ? 'Créditos IA' : ex.category === 'suscripcion' ? 'Suscripción App' : 'Herramienta'}</td>
+        <td>${ex.category === 'creditos_ia' ? 'Créditos IA' : ex.category === 'suscripcion' ? 'Suscripción App' : 'Material'}</td>
         <td>${ex.date}</td>
-        <td style="text-align:right;font-weight:700;">$${ex.amount.toLocaleString('es-CO')}</td>
+        <td style="text-align:right;font-weight:700;">${fmtMoney(ex.amount)}</td>
       </tr>
     `).join('');
 
@@ -391,22 +393,22 @@ export function FinancesView() {
         <div class="grid">
           <div class="card">
             <div class="card-label">Ingreso Diferido</div>
-            <div class="card-val">$${metrics.deferredRevenue.toLocaleString('es-CO')}</div>
+            <div class="card-val">${fmtMoney(metrics.deferredRevenue)}</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px;">${rowsNoIniciados.length} proyectos en cola</div>
           </div>
           <div class="card">
             <div class="card-label">Ingreso Bruto (Aprob. Senda)</div>
-            <div class="card-val">$${metrics.accruedGrossRevenue.toLocaleString('es-CO')}</div>
+            <div class="card-val">${fmtMoney(metrics.accruedGrossRevenue)}</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px;">${rowsAprobadoSenda.length} proyectos asegurados</div>
           </div>
           <div class="card">
             <div class="card-label">Nómina + Apps/Créditos</div>
-            <div class="card-val">$${(metrics.totalCreatorPayroll + expensesSummary.periodTotal).toLocaleString('es-CO')}</div>
-            <div style="font-size:11px;color:#64748b;margin-top:4px;">Nómina: $${metrics.totalCreatorPayroll.toLocaleString('es-CO')} · Apps: $${expensesSummary.periodTotal.toLocaleString('es-CO')}</div>
+            <div class="card-val">${fmtMoney(metrics.totalCreatorPayroll + expensesSummary.periodTotal)}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:4px;">Nómina: ${fmtMoney(metrics.totalCreatorPayroll)} · Apps: ${fmtMoney(expensesSummary.periodTotal)}</div>
           </div>
           <div class="card card-highlight">
             <div class="card-label" style="color:#047857;">Ingreso Neto Realizado</div>
-            <div class="card-val" style="color:#047857;">$${metrics.realizedNetRevenue.toLocaleString('es-CO')}</div>
+            <div class="card-val" style="color:#047857;">${fmtMoney(metrics.realizedNetRevenue)}</div>
             <div style="font-size:11px;color:#065f46;margin-top:4px;">Margen neto: ${metrics.netMarginPct}%</div>
           </div>
         </div>
@@ -441,7 +443,7 @@ export function FinancesView() {
             </tr>
           </thead>
           <tbody>
-            ${expensesHtml || '<tr><td colspan="4" style="text-align:center;">Sin gastos de aplicaciones registrados en este período</td></tr>'}
+            ${expensesHtml || '<tr><td colspan="4" style="text-align:center;">Sin gastos registrados en este período</td></tr>'}
           </tbody>
         </table>
 
@@ -492,7 +494,7 @@ export function FinancesView() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
-      {/* Cabecera limpia y directa */}
+      {/* Cabecera */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-mint-dim border border-mint/30 text-mint flex items-center justify-center shadow-[0_0_20px_-4px_rgba(111,231,200,0.35)]">
@@ -500,7 +502,7 @@ export function FinancesView() {
           </div>
           <div>
             <h2 className="font-display text-2xl sm:text-3xl font-bold">Finanzas</h2>
-            <p className="text-xs text-muted">Control de ingresos, nómina automática y material de trabajo</p>
+            <p className="text-xs text-muted">Flujo en vivo · Nómina automática y material de trabajo</p>
           </div>
         </div>
 
@@ -564,55 +566,99 @@ export function FinancesView() {
         )}
       </div>
 
-      {/* HERO: Ingreso Neto Realizado + Nómina Creadores con diseño visual de circuito SENDA */}
-      <div className="relative bg-surface-2 border border-mint/40 rounded-2xl p-6 overflow-hidden shadow-[0_0_45px_-15px_rgba(111,231,200,0.3)]">
-        {/* Fondo de circuito dinámico */}
+      {/* HERO: Ingreso Neto Realizado con animación de pulso y partículas de circuito SENDA */}
+      <div className="relative bg-surface-2 border border-mint/40 rounded-2xl p-6 sm:p-7 overflow-hidden shadow-[0_0_50px_-14px_rgba(111,231,200,0.32)]">
+        {/* Halo respirante */}
         <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(circle at 18% 25%, rgba(111,231,200,0.12), transparent 45%), ' +
-              'radial-gradient(circle at 85% 80%, rgba(53,214,228,0.10), transparent 45%)',
-          }}
+          className="absolute -left-16 -top-16 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-30 animate-pulse"
+          style={{ background: 'radial-gradient(circle, var(--mint), transparent 70%)' }}
         />
+        <div
+          className="absolute right-10 -bottom-20 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-25"
+          style={{ background: 'radial-gradient(circle, var(--accent), transparent 70%)' }}
+        />
+
+        {/* Circuito de marca con pulsos viajeros */}
         <svg
-          className="absolute right-0 top-0 h-full w-full pointer-events-none opacity-30"
-          viewBox="0 0 800 240"
+          className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
+          viewBox="0 0 900 260"
           fill="none"
           preserveAspectRatio="xMaxYMid slice"
         >
+          <defs>
+            <linearGradient id="sendaNetGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--accent)" stopOpacity="0" />
+              <stop offset="50%" stopColor="var(--accent)" stopOpacity="0.65" />
+              <stop offset="100%" stopColor="var(--mint)" stopOpacity="0.95" />
+            </linearGradient>
+            <linearGradient id="sendaNetGrad2" x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--mint)" stopOpacity="0" />
+              <stop offset="60%" stopColor="var(--mint)" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#E7ECEF" stopOpacity="0.85" />
+            </linearGradient>
+            <filter id="sendaGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3.5" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+          </defs>
+
+          {/* Ramas base estilo isotipo Senda */}
           <path
-            d="M 380 210 L 460 210 L 510 155 L 620 155 L 670 95 L 760 95"
-            stroke="var(--mint)"
+            id="circuitPathMain"
+            d="M 280 225 L 430 225 L 485 165 L 610 165 L 665 105 L 790 105"
+            stroke="url(#sendaNetGrad1)"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            strokeDasharray="8 8"
-          >
-            <animate attributeName="stroke-dashoffset" values="32;0" dur="2.8s" repeatCount="indefinite" />
-          </path>
+          />
           <path
-            d="M 460 35 L 540 35 L 590 85 L 690 85"
-            stroke="var(--accent)"
+            id="circuitPathTop"
+            d="M 390 35 L 510 35 L 560 85 L 695 85 L 740 50 L 835 50"
+            stroke="url(#sendaNetGrad2)"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            strokeDasharray="5 7"
-          >
-            <animate attributeName="stroke-dashoffset" values="0;24" dur="3.4s" repeatCount="indefinite" />
-          </path>
-          <circle cx="510" cy="155" r="4.5" fill="var(--mint)" />
-          <circle cx="620" cy="155" r="5" fill="none" stroke="var(--accent)" strokeWidth="2" />
-          <circle cx="590" cy="85" r="4" fill="var(--accent)" />
-          <circle cx="670" cy="95" r="5" fill="var(--mint)" />
-          <circle cx="760" cy="95" r="7" fill="var(--mint)">
-            <animate attributeName="r" values="4.5;8;4.5" dur="2.2s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="1;0.4;1" dur="2.2s" repeatCount="indefinite" />
+          />
+          <path
+            d="M 485 165 L 525 205 L 635 205"
+            stroke="var(--accent)"
+            strokeOpacity="0.35"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* Partículas de energía viajando por las ramas */}
+          <circle r="4" fill="var(--mint)" filter="url(#sendaGlow)">
+            <animateMotion dur="4.2s" repeatCount="indefinite" path="M 280 225 L 430 225 L 485 165 L 610 165 L 665 105 L 790 105" />
           </circle>
+          <circle r="3.5" fill="var(--accent)" filter="url(#sendaGlow)">
+            <animateMotion dur="5.1s" repeatCount="indefinite" path="M 390 35 L 510 35 L 560 85 L 695 85 L 740 50 L 835 50" />
+          </circle>
+
+          {/* Nodos de circuito */}
+          <circle cx="430" cy="225" r="4" fill="#E7ECEF" fillOpacity="0.7" />
+          <circle cx="485" cy="165" r="5" fill="none" stroke="var(--accent)" strokeWidth="2" />
+          <circle cx="610" cy="165" r="4" fill="var(--mint)" />
+          <circle cx="560" cy="85" r="4.5" fill="none" stroke="#E7ECEF" strokeWidth="1.8" strokeOpacity="0.7" />
+          <circle cx="695" cy="85" r="4" fill="var(--accent)" />
+          <circle cx="635" cy="205" r="3.5" fill="var(--accent)" />
+
+          {/* Nodo receptor con anillo orbital animado */}
+          <g transform="translate(790, 105)">
+            <circle r="16" fill="none" stroke="var(--mint)" strokeWidth="1.2" strokeDasharray="6 5" opacity="0.65">
+              <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="10s" repeatCount="indefinite" />
+            </circle>
+            <circle r="9" fill="var(--mint)" opacity="0.25">
+              <animate attributeName="r" values="7;13;7" dur="2.4s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.35;0.1;0.35" dur="2.4s" repeatCount="indefinite" />
+            </circle>
+            <circle r="5" fill="var(--mint)" />
+          </g>
         </svg>
 
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          {/* Cifra Principal de Ganancia Neta (sin barra de meta) */}
+          {/* Bloque izquierdo: Ingreso Neto Realizado */}
           <div className="lg:col-span-7 space-y-4">
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-mint-dim border border-mint/30 text-mint text-xs font-semibold tracking-wide">
@@ -620,7 +666,7 @@ export function FinancesView() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-mint opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-mint" />
                 </span>
-                INGRESO NETO REALIZADO · GANANCIA LIBRE
+                INGRESO NETO REALIZADO
               </span>
 
               <span className="font-tech text-xs px-2.5 py-1 rounded-full bg-surface-3 border border-accent/30 text-accent flex items-center gap-1">
@@ -629,46 +675,45 @@ export function FinancesView() {
             </div>
 
             <div className="flex items-baseline gap-4 flex-wrap">
-              <p className="font-display text-5xl sm:text-6xl font-bold tracking-tight text-mint drop-shadow-[0_0_24px_rgba(111,231,200,0.22)]">
-                ${metrics.realizedNetRevenue.toLocaleString('es-CO')}
+              <p className="font-display text-5xl sm:text-6xl font-bold tracking-tight text-mint drop-shadow-[0_0_28px_rgba(111,231,200,0.28)]">
+                {fmtMoney(metrics.realizedNetRevenue)}
               </p>
               <span className="text-xs text-muted font-tech">
-                {rowsAprobadoCliente.length} proyectos · {metrics.realizedVideos} videos entregados
+                {rowsAprobadoCliente.length} aprobados cliente · {metrics.realizedVideos} videos
               </span>
             </div>
 
-            {/* Píldoras visuales de ecuación neta */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
               <div className="bg-surface-3/90 border border-line rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
-                <span className="text-muted-2">Facturado Cliente:</span>
-                <span className="font-tech font-semibold text-text">${metrics.realizedGrossRevenue.toLocaleString('es-CO')}</span>
+                <span className="text-muted-2">Bruto Cliente:</span>
+                <span className="font-tech font-semibold text-text">{fmtMoney(metrics.realizedGrossRevenue)}</span>
               </div>
               <span className="text-muted-2 font-tech text-xs">−</span>
               <div className="bg-surface-3/90 border border-line rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
-                <span className="text-muted-2">Nómina 100%:</span>
-                <span className="font-tech font-semibold text-accent">${metrics.realizedCreatorCost.toLocaleString('es-CO')}</span>
+                <span className="text-muted-2">Nómina:</span>
+                <span className="font-tech font-semibold text-accent">{fmtMoney(metrics.realizedCreatorCost)}</span>
               </div>
               <span className="text-muted-2 font-tech text-xs">−</span>
               <div className="bg-surface-3/90 border border-line rounded-lg px-3 py-1.5 text-xs flex items-center gap-2">
                 <span className="text-muted-2">Apps / Créditos:</span>
-                <span className="font-tech font-semibold text-amber">${expensesSummary.periodTotal.toLocaleString('es-CO')}</span>
+                <span className="font-tech font-semibold text-amber">{fmtMoney(expensesSummary.periodTotal)}</span>
               </div>
             </div>
           </div>
 
-          {/* Nodo Creativo de Nómina (Clippers + Editores) */}
-          <div className="lg:col-span-5 bg-surface/80 backdrop-blur-md border border-line rounded-xl p-4 space-y-3 relative overflow-hidden">
+          {/* Bloque derecho: Nómina Creadores */}
+          <div className="lg:col-span-5 bg-surface/85 backdrop-blur-md border border-line rounded-xl p-4 space-y-3 relative overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-text flex items-center gap-1.5">
                 <Users size={14} className="text-accent" /> Nómina Creadores
               </span>
               <span className="font-display text-lg font-bold text-text font-tech">
-                ${metrics.totalCreatorPayroll.toLocaleString('es-CO')}
+                {fmtMoney(metrics.totalCreatorPayroll)}
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              <div className="bg-surface-2 border border-accent/25 rounded-xl p-3 relative overflow-hidden">
+              <div className="bg-surface-2 border border-accent/25 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[11px] text-muted flex items-center gap-1">
                     <Scissors size={11} className="text-accent" /> Clippers
@@ -676,11 +721,11 @@ export function FinancesView() {
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                 </div>
                 <p className="font-display text-xl font-bold text-accent">
-                  ${metrics.totalClipperPay.toLocaleString('es-CO')}
+                  {fmtMoney(metrics.totalClipperPay)}
                 </p>
               </div>
 
-              <div className="bg-surface-2 border border-mint/25 rounded-xl p-3 relative overflow-hidden">
+              <div className="bg-surface-2 border border-mint/25 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[11px] text-muted flex items-center gap-1">
                     <Film size={11} className="text-mint" /> Editores
@@ -688,7 +733,7 @@ export function FinancesView() {
                   <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" />
                 </div>
                 <p className="font-display text-xl font-bold text-mint">
-                  ${metrics.totalEditorPay.toLocaleString('es-CO')}
+                  {fmtMoney(metrics.totalEditorPay)}
                 </p>
               </div>
             </div>
@@ -696,20 +741,20 @@ export function FinancesView() {
             <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] font-tech">
               <div className="bg-surface-3 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
                 <span className="text-muted-2">50% Senda:</span>
-                <span className="text-amber font-semibold">${metrics.accruedPaid50Cost.toLocaleString('es-CO')}</span>
+                <span className="text-amber font-semibold">{fmtMoney(metrics.accruedPaid50Cost)}</span>
               </div>
               <div className="bg-surface-3 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
                 <span className="text-muted-2">100% Cliente:</span>
-                <span className="text-mint font-semibold">${metrics.realizedCreatorCost.toLocaleString('es-CO')}</span>
+                <span className="text-mint font-semibold">{fmtMoney(metrics.realizedCreatorCost)}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 3 Tarjetas Operativas: 1. Ingreso Diferido | 2. Ingreso Bruto (Aprobado Senda) | 3. Apps, Créditos y Material */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* 1. Ingreso Diferido (Por Devengar) */}
+      {/* 3 Tarjetas: Ingreso Diferido | Ingreso Bruto (Aprobado Senda) | Apps, Créditos y Material (con desplegable interno) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+        {/* 1. Ingreso Diferido */}
         <button
           type="button"
           onClick={() => setReportTab('no_iniciados')}
@@ -723,10 +768,10 @@ export function FinancesView() {
           </div>
           <p className="text-[11px] uppercase tracking-wider font-tech text-amber">Ingreso Diferido · Por Devengar</p>
           <p className="font-display text-2xl sm:text-3xl font-bold mt-1">
-            \${metrics.deferredRevenue.toLocaleString('es-CO')}
+            {fmtMoney(metrics.deferredRevenue)}
           </p>
           <p className="text-xs text-muted mt-1.5">
-            {rowsNoIniciados.length} proyectos en cola ({metrics.deferredVideos} videos por producir).
+            {rowsNoIniciados.length} proyectos en cola ({metrics.deferredVideos} videos).
           </p>
         </button>
 
@@ -744,134 +789,129 @@ export function FinancesView() {
           </div>
           <p className="text-[11px] uppercase tracking-wider font-tech text-accent">Ingreso Bruto · Aprobado Senda</p>
           <p className="font-display text-2xl sm:text-3xl font-bold mt-1">
-            \${metrics.accruedGrossRevenue.toLocaleString('es-CO')}
+            {fmtMoney(metrics.accruedGrossRevenue)}
           </p>
           <p className="text-xs text-muted mt-1.5">
             {rowsAprobadoSenda.length} proyectos listos ({metrics.accruedVideos} videos) · 50% liberado.
           </p>
         </button>
 
-        {/* 3. Pagos de Aplicaciones, Créditos y Material de Trabajo */}
-        <div className="relative bg-surface-2 border border-line rounded-xl p-5 overflow-hidden flex flex-col justify-between">
+        {/* 3. Apps, Créditos y Material (Todo se despliega aquí adentro al hacer clic) */}
+        <div
+          className={`relative bg-surface-2 border rounded-xl p-5 overflow-hidden transition-all ${
+            appsBoxOpen ? 'border-violet ring-1 ring-violet/30' : 'border-line hover:border-violet/40'
+          }`}
+        >
           <CardNodeDeco color="var(--violet)" />
-          <div>
+          <div
+            onClick={() => setAppsBoxOpen(o => !o)}
+            className="cursor-pointer select-none"
+          >
             <div className="flex items-center justify-between gap-2 mb-2.5">
               <div className="w-9 h-9 rounded-lg bg-violet-dim text-violet flex items-center justify-center">
                 <Cpu size={18} />
               </div>
-              <button
-                type="button"
-                onClick={() => setShowExpenseForm(s => !s)}
-                className="text-xs font-medium bg-surface-3 hover:bg-accent-dim text-accent border border-line hover:border-accent/40 rounded-lg px-2.5 py-1 flex items-center gap-1 transition-colors"
-              >
-                {showExpenseForm ? <X size={12} /> : <Plus size={12} />} {showExpenseForm ? 'Cerrar' : 'Registrar pago'}
-              </button>
+              <span className="inline-flex items-center gap-1 text-xs font-medium bg-surface-3 text-accent border border-line rounded-lg px-2.5 py-1">
+                <Plus size={12} /> Registrar / Ver
+                <ChevronDown size={13} className={`transition-transform duration-200 ${appsBoxOpen ? 'rotate-180' : ''}`} />
+              </span>
             </div>
+
             <p className="text-[11px] uppercase tracking-wider font-tech text-violet">Apps, Créditos y Material</p>
             <p className="font-display text-2xl sm:text-3xl font-bold mt-1">
-              \${expensesSummary.periodTotal.toLocaleString('es-CO')}
+              {fmtMoney(expensesSummary.periodTotal)}
             </p>
+
+            <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-line/60 text-[11px] font-tech">
+              <div>
+                <span className="text-muted-2 block">Pagado Hoy</span>
+                <span className="text-text font-semibold">{fmtMoney(expensesSummary.todayTotal)}</span>
+              </div>
+              <div>
+                <span className="text-muted-2 block">Este Mes</span>
+                <span className="text-text font-semibold">{fmtMoney(expensesSummary.monthTotal)}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-line/60 text-[11px] font-tech">
-            <div>
-              <span className="text-muted-2 block">Pagado Hoy</span>
-              <span className="text-text font-semibold">\${expensesSummary.todayTotal.toLocaleString('es-CO')}</span>
+          {/* Contenido interno desplegable solo al hacer clic */}
+          {appsBoxOpen && (
+            <div className="mt-4 pt-3.5 border-t border-line space-y-3 animate-fadeIn">
+              <form onSubmit={handleAddExpense} className="space-y-2 bg-surface-3 p-3 rounded-lg border border-line">
+                <p className="text-[11px] font-semibold text-muted">Registrar pago de app / créditos</p>
+                <input
+                  value={expLabel}
+                  onChange={e => setExpLabel(e.target.value)}
+                  placeholder="App o crédito (ej. ElevenLabs, HeyGen)"
+                  className="w-full bg-surface-2 border border-line rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-accent"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    value={expAmount}
+                    onChange={e => setExpAmount(e.target.value)}
+                    placeholder="Monto"
+                    className="bg-surface-2 border border-line rounded-md px-2.5 py-1.5 text-xs font-tech outline-none focus:border-accent"
+                  />
+                  <select
+                    value={expCategory}
+                    onChange={e => setExpCategory(e.target.value as AppExpense['category'])}
+                    className="bg-surface-2 border border-line rounded-md px-2 py-1.5 text-xs outline-none focus:border-accent"
+                  >
+                    <option value="creditos_ia">Créditos IA</option>
+                    <option value="suscripcion">Suscripción</option>
+                    <option value="herramienta">Material</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={expDate}
+                    onChange={e => setExpDate(e.target.value)}
+                    className="flex-1 bg-surface-2 border border-line rounded-md px-2 py-1.5 text-xs font-tech outline-none focus:border-accent"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-accent text-on-accent rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </form>
+
+              {filteredExpenses.length === 0 ? (
+                <p className="text-[11px] text-muted-2 text-center py-2">Sin pagos registrados en este período</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                  {filteredExpenses.map(exp => (
+                    <div
+                      key={exp.id}
+                      className="flex items-center justify-between gap-2 bg-surface-3 border border-line rounded-lg px-2.5 py-1.5 text-xs"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{exp.label}</p>
+                        <p className="text-[10px] text-muted-2 font-tech">{exp.date}</p>
+                      </div>
+                      <span className="font-tech text-amber font-semibold shrink-0">-{fmtMoney(exp.amount)}</span>
+                      <button
+                        type="button"
+                        onClick={() => deleteAppExpense(exp.id)}
+                        className="text-muted-2 hover:text-red-400 transition-colors shrink-0"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div>
-              <span className="text-muted-2 block">Esta Quincena</span>
-              <span className="text-text font-semibold">\${expensesSummary.quincenaTotal.toLocaleString('es-CO')}</span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Panel desplegable para agregar / ver pagos de Aplicaciones y Créditos */}
-      {(showExpenseForm || filteredExpenses.length > 0) && (
-        <div className="bg-surface-2 border border-line rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider font-tech text-muted flex items-center gap-1.5">
-              <Cpu size={13} className="text-violet" /> Registro de Aplicaciones y Créditos ({filteredExpenses.length})
-            </h4>
-            {!showExpenseForm && (
-              <button
-                type="button"
-                onClick={() => setShowExpenseForm(true)}
-                className="text-xs text-accent hover:text-accent-strong flex items-center gap-1"
-              >
-                <Plus size={13} /> Nuevo gasto de app / créditos
-              </button>
-            )}
-          </div>
-
-          {showExpenseForm && (
-            <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-5 gap-2 bg-surface-3 p-3 rounded-lg border border-line">
-              <input
-                value={expLabel}
-                onChange={e => setExpLabel(e.target.value)}
-                placeholder="Ej. ElevenLabs, HeyGen, Créditos..."
-                className="sm:col-span-2 bg-surface-2 border border-line rounded-md px-3 py-1.5 text-xs outline-none focus:border-accent"
-              />
-              <select
-                value={expCategory}
-                onChange={e => setExpCategory(e.target.value as AppExpense['category'])}
-                className="bg-surface-2 border border-line rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-accent"
-              >
-                <option value="creditos_ia">Créditos IA</option>
-                <option value="suscripcion">Suscripción App</option>
-                <option value="herramienta">Material / Otro</option>
-              </select>
-              <input
-                type="number"
-                min={1}
-                value={expAmount}
-                onChange={e => setExpAmount(e.target.value)}
-                placeholder="Monto (\$)"
-                className="bg-surface-2 border border-line rounded-md px-3 py-1.5 text-xs font-tech outline-none focus:border-accent"
-              />
-              <div className="flex gap-1.5">
-                <input
-                  type="date"
-                  value={expDate}
-                  onChange={e => setExpDate(e.target.value)}
-                  className="flex-1 bg-surface-2 border border-line rounded-md px-2 py-1.5 text-xs font-tech outline-none focus:border-accent"
-                />
-                <button
-                  type="submit"
-                  className="bg-accent text-on-accent rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0"
-                >
-                  Guardar
-                </button>
-              </div>
-            </form>
-          )}
-
-          {filteredExpenses.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {filteredExpenses.map(exp => (
-                <div
-                  key={exp.id}
-                  className="inline-flex items-center gap-2 bg-surface-3 border border-line rounded-lg px-3 py-1.5 text-xs"
-                >
-                  <span className="font-medium text-text">{exp.label}</span>
-                  <span className="font-tech text-amber font-semibold">-\${exp.amount.toLocaleString('es-CO')}</span>
-                  <span className="text-[10px] text-muted-2 font-tech">{exp.date}</span>
-                  <button
-                    type="button"
-                    onClick={() => deleteAppExpense(exp.id)}
-                    className="text-muted-2 hover:text-red-400 transition-colors"
-                    title="Eliminar gasto"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Informe Financiero Detallado (100% automático según estado en Tareas) */}
+      {/* Informe Financiero Detallado */}
       <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap border-b border-line pb-3.5">
           <h3 className="font-display text-base sm:text-lg font-semibold flex items-center gap-2">
@@ -944,13 +984,13 @@ export function FinancesView() {
                       <span className="text-text">{r.editorName}</span>
                     </td>
                     <td className="py-3 pr-3 text-right font-tech text-xs font-medium">
-                      \${r.grossAmount.toLocaleString('es-CO')}
+                      {fmtMoney(r.grossAmount)}
                     </td>
                     <td className="py-3 pr-3 text-right font-tech text-xs text-muted">
-                      -\${r.creatorCostTotal.toLocaleString('es-CO')}
+                      -{fmtMoney(r.creatorCostTotal)}
                     </td>
                     <td className="py-3 pr-3 text-right font-tech text-sm font-bold text-mint">
-                      \${r.netMargin.toLocaleString('es-CO')}
+                      {fmtMoney(r.netMargin)}
                     </td>
                     <td className="py-3 text-right">
                       <div className="inline-flex items-center gap-2 justify-end">
@@ -1003,7 +1043,7 @@ export function FinancesView() {
                   </p>
                 </div>
                 <span className="font-tech font-bold text-mint flex items-center gap-1">
-                  <CheckCircle2 size={12} /> \${c.realizedNetRevenue.toLocaleString('es-CO')}
+                  <CheckCircle2 size={12} /> {fmtMoney(c.realizedNetRevenue)}
                 </span>
               </div>
             ))}
