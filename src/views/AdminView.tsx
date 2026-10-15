@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 export function AdminView() {
-  const { workers, brands, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals } = useStore();
+  const { workers, registeredUsersCount, brands, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals } = useStore();
   const [teamTab, setTeamTab] = useState<'clipper' | 'editor'>('clipper');
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [ptsTodayInput, setPtsTodayInput] = useState<string>('');
@@ -51,9 +51,9 @@ export function AdminView() {
 
   return (
     <div className="space-y-5">
-      {/* KPIs superiores */}
+      {/* KPIs superiores — Equipo refleja en vivo todos los usuarios registrados (incluyendo Admin) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard icon={Users} label="Equipo" value={workers.length} color="accent" />
+        <KpiCard icon={Users} label="Equipo (usuarios registrados)" value={registeredUsersCount} color="accent" />
         <KpiCard icon={Video} label="Videos totales" value={allVideos.length} color="mint" />
         <KpiCard icon={CheckCircle2} label="Completados" value={completed.length} color="violet" />
         <KpiCard icon={Clock} label="En progreso" value={inProgress.length} color="amber" />
@@ -106,7 +106,6 @@ export function AdminView() {
             </p>
           </div>
 
-          {/* Selector: Primero Clippers, después Editores */}
           <div className="flex items-center gap-1.5 bg-surface-3 border border-line rounded-xl p-1">
             <button
               type="button"
@@ -171,7 +170,6 @@ export function AdminView() {
                         </span>
                       </td>
 
-                      {/* Puntos Hoy / Meta Diaria */}
                       <td className="py-3 pr-4">
                         {isEditing ? (
                           <div className="flex items-center gap-1.5">
@@ -210,7 +208,6 @@ export function AdminView() {
                         )}
                       </td>
 
-                      {/* Puntos Mes / Meta Mensual */}
                       <td className="py-3 pr-4">
                         {isEditing ? (
                           <div className="flex items-center gap-1.5">
@@ -255,7 +252,6 @@ export function AdminView() {
                         </span>
                       </td>
 
-                      {/* Día cerrado */}
                       <td className="py-3 pr-4">
                         <button
                           type="button"
@@ -279,7 +275,6 @@ export function AdminView() {
                         </button>
                       </td>
 
-                      {/* Acciones de edición de puntos / metas */}
                       <td className="py-3 text-right">
                         {isEditing ? (
                           <div className="inline-flex items-center gap-1.5">

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../lib/auth';
+import { useStore } from '../store';
 import { supabase, loadShared, saveShared } from '../lib/supabaseClient';
 import {
   UserPlus, X, Users, Shield, Loader2, AlertCircle, CheckCircle2,
@@ -10,6 +11,7 @@ import type { AuthUser } from '../lib/auth';
 
 export function UserManagement() {
   const { session, user: currentUser } = useAuth();
+  const { refreshProfiles } = useStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [users, setUsers] = useState<AuthUser[]>([]);
@@ -84,12 +86,12 @@ export function UserManagement() {
       if (!response.ok) {
         setFormError(result.error || 'Error al crear usuario');
       } else {
-        // Aseguramos que el correo quede guardado tanto en profiles.contact_email como en platform_kv (user_emails)
         if (result.id && supabase) {
           await supabase.from('profiles').update({ contact_email: formEmail.trim() }).eq('id', result.id);
           const existingMap = (await loadShared<Record<string, string>>('user_emails')) || {};
           await saveShared('user_emails', { ...existingMap, [result.id]: formEmail.trim() });
         }
+        await refreshProfiles();
         setFormSuccess(`Usuario "${formName.trim()}" (${formEmail.trim()}) creado correctamente`);
         setFormName('');
         setFormEmail('');
@@ -131,7 +133,6 @@ export function UserManagement() {
 
   return (
     <div className="bg-surface-2 border border-line rounded-xl overflow-hidden transition-all">
-      {/* Cabecera compacta con flechita desplegable */}
       <div className="p-4 sm:px-5 flex items-center justify-between gap-3 flex-wrap">
         <button
           type="button"
@@ -182,7 +183,6 @@ export function UserManagement() {
         </div>
       </div>
 
-      {/* Contenido desplegable */}
       {isExpanded && (
         <div className="border-t border-line px-4 sm:px-5 pb-5 pt-4 space-y-4">
           {showForm && (
@@ -235,7 +235,6 @@ export function UserManagement() {
             </form>
           )}
 
-          {/* Barra de búsqueda y filtro por rol */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-2" />
@@ -262,7 +261,6 @@ export function UserManagement() {
             </div>
           </div>
 
-          {/* Lista compacta con altura máxima controlada para 30-40+ usuarios */}
           {filteredUsers.length === 0 ? (
             <p className="text-sm text-muted text-center py-6">No se encontraron usuarios con ese criterio</p>
           ) : (

@@ -1,6 +1,6 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
-export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'administracion' | 'configuracion';
+export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'finanzas' | 'administracion' | 'configuracion';
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
@@ -233,6 +233,28 @@ export interface Order {
   createdAt: string;
   promotedToBoard?: boolean;
   boardVideoId?: string | null;
+  /** Precio unitario por video cobrado al cliente en este pedido (opcional, usa tarifa base si no se especifica). */
+  unitPriceClient?: number;
+}
+
+export interface FinanceSettings {
+  /** Precio comercial cobrado al cliente por cada video entregado ($ USD o moneda base). */
+  clientPricePerVideo: number;
+  /** Costo promedio de pago a Clipper por video cuando aún no tiene tier asignado. */
+  defaultClipperCost: number;
+  /** Costo promedio de pago a Editor por video cuando aún no tiene tier asignado. */
+  defaultEditorCost: number;
+}
+
+export interface FinanceDayClosing {
+  id: string;
+  closedAt: string;
+  periodLabel: string;
+  deferredRevenue: number;
+  accruedGrossRevenue: number;
+  realizedNetRevenue: number;
+  totalCreatorPayouts: number;
+  projectsCount: number;
 }
 
 export interface ChatGroup {

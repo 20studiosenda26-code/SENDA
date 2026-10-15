@@ -43,6 +43,7 @@ const VIEW_TITLES: Record<string, string> = {
   classroom: 'Classroom',
   contratos: 'Contratos',
   perfil: 'Perfil',
+  finanzas: 'Finanzas y Tesorería',
   administracion: 'Administración',
   configuracion: 'Configuración',
 };
@@ -57,10 +58,6 @@ export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut:
     .filter(n => n.role === role)
     .sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
 
-  // Reproduce el carillón de SENDA cuando llega una notificación nueva
-  // (propia del rol de esta sesión). La primera vez que se calcula
-  // (carga inicial / cambio de sesión) solo guarda la referencia, para
-  // no sonar de golpe por todo el historial ya existente.
   const knownNotifIds = useRef<Set<string> | null>(null);
   useEffect(() => {
     const currentIds = new Set(notifications.filter(n => n.role === role).map(n => n.id));

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
+import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
@@ -8,6 +8,12 @@ export interface AdminProfile { id: string; name: string; }
 
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const HEARTBEAT_TTL_MS = 35 * 1000;
+
+const DEFAULT_FINANCE_SETTINGS: FinanceSettings = {
+  clientPricePerVideo: 25,
+  defaultClipperCost: 3,
+  defaultEditorCost: 4,
+};
 
 const LEGACY_DEFAULT_EVENT_IDS = new Set(['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6', 'ev7']);
 
@@ -53,7 +59,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride';
+type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride' | 'financeSettings' | 'financeClosings';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -113,6 +119,8 @@ interface Store {
   setView: (v: ViewKey) => void;
   brands: Brand[];
   workers: Worker[];
+  registeredUsersCount: number;
+  refreshProfiles: () => Promise<void>;
   notifications: NotificationItem[];
   deleteNotification: (id: string) => void;
   clearNotifications: (role: Role) => void;
@@ -190,6 +198,11 @@ interface Store {
   assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<void>;
   assignOrderClipper: (orderId: string, clipperId: string) => Promise<void>;
   assignOrderEditor: (orderId: string, editorId: string) => Promise<void>;
+
+  financeSettings: FinanceSettings;
+  updateFinanceSettings: (patch: Partial<FinanceSettings>) => void;
+  financeClosings: FinanceDayClosing[];
+  recordFinanceDayClosing: (closing: Omit<FinanceDayClosing, 'id' | 'closedAt'>) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -238,6 +251,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
   const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
+  const [financeSettings, setFinanceSettings] = useState<FinanceSettings>(() => loadState('financeSettings', DEFAULT_FINANCE_SETTINGS));
+  const [financeClosings, setFinanceClosings] = useState<FinanceDayClosing[]>(() => loadState('financeClosings', [] as FinanceDayClosing[]));
 
   const localWriteLockUntil = useRef<number>(0);
   const markLocalWrite = useCallback(() => {
@@ -257,6 +272,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('workers', workers); }, [workers]);
   useEffect(() => { persistShared('workerGoals', workerGoalsMap); }, [workerGoalsMap, persistShared]);
   useEffect(() => { persistShared('workerPointsOverride', workerPointsOverride); }, [workerPointsOverride, persistShared]);
+  useEffect(() => { persistShared('financeSettings', financeSettings); }, [financeSettings, persistShared]);
+  useEffect(() => { persistShared('financeClosings', financeClosings); }, [financeClosings, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -291,6 +308,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
       const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
       if (active && remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
+      const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
+      if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+      const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
+      if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -317,6 +338,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
         const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
         if (remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
+        const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
+        if (remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+        const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
+        if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
       })();
     });
     return unsub;
@@ -477,6 +502,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
     });
   }, [workers, user?.id, presenceOnlineIds, heartbeatMap, nowTick, config.goals, workerGoalsMap, workerPointsOverride]);
+
+  // Total en vivo de usuarios registrados (Clippers + Editores + Administradores)
+  const registeredUsersCount = useMemo(() => {
+    if (!isSupabaseConfigured) return workersWithOnline.length + 1;
+    const uniqueIds = new Set<string>();
+    workersWithOnline.forEach(w => uniqueIds.add(w.id));
+    adminProfiles.forEach(a => uniqueIds.add(a.id));
+    if (user?.id) uniqueIds.add(user.id);
+    return uniqueIds.size;
+  }, [workersWithOnline, adminProfiles, user?.id]);
 
   const getWorkerGoals = useCallback((workerId: string, workerRole?: 'clipper' | 'editor'): WorkerCustomGoals => {
     const w = workers.find(x => x.id === workerId);
@@ -661,7 +696,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setQc = useCallback((videoId: string, status: QcStatus) => {
-    updateVideo(videoId, v => ({ ...v, qc: status }));
+    updateVideo(videoId, v => ({
+      ...v,
+      qc: status,
+      paid50: status === 'aprobado_senda' || status === 'aprobado_cliente' ? true : v.paid50,
+      paid100: status === 'aprobado_cliente' ? true : v.paid100,
+    }));
     const v = findVideo(videoId);
     if (v) {
       const label = status.replace(/_/g, ' ');
@@ -1025,7 +1065,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const v = findVideo(videoId);
     const wasAlreadyPaid100 = v ? v.paid100 : true;
     updateVideo(videoId, vid => {
-      const updated = { ...vid, finalUploaded: true, paid100: true, qc: 'aprobado_cliente' as QcStatus, editorQc: 'aprobado_cliente' as const };
+      const updated = { ...vid, finalUploaded: true, paid50: true, paid100: true, qc: 'aprobado_cliente' as QcStatus, editorQc: 'aprobado_cliente' as const };
       if (updated.tierSnapshot && !vid.paid100) {
         setPaidHistory(prev => [...prev, {
           videoName: updated.name,
@@ -1330,9 +1370,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await notifyPersonAssigned(updatedOrder, 'editor', editorId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
+  const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
+    setFinanceSettings(prev => {
+      const next: FinanceSettings = {
+        clientPricePerVideo: patch.clientPricePerVideo !== undefined ? Math.max(1, Number(patch.clientPricePerVideo) || 1) : prev.clientPricePerVideo,
+        defaultClipperCost: patch.defaultClipperCost !== undefined ? Math.max(0, Number(patch.defaultClipperCost) || 0) : prev.defaultClipperCost,
+        defaultEditorCost: patch.defaultEditorCost !== undefined ? Math.max(0, Number(patch.defaultEditorCost) || 0) : prev.defaultEditorCost,
+      };
+      saveState('financeSettings', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('financeSettings', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
+  const recordFinanceDayClosing = useCallback((closing: Omit<FinanceDayClosing, 'id' | 'closedAt'>) => {
+    const entry: FinanceDayClosing = {
+      ...closing,
+      id: `close-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      closedAt: new Date().toISOString(),
+    };
+    setFinanceClosings(prev => {
+      const next = [entry, ...prev].slice(0, 90);
+      saveState('financeClosings', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('financeClosings', next);
+      }
+      return next;
+    });
+    pushNotification('admin', 'sistema', `Cierre financiero registrado (${closing.periodLabel}) · Neto: $${closing.realizedNetRevenue.toLocaleString('es-CO')}`);
+  }, [markLocalWrite, pushNotification]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
-    brands, workers: workersWithOnline, notifications, deleteNotification, clearNotifications, emailLog,
+    brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
+    notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,
     selectedVideo, setSelectedVideo,
@@ -1352,6 +1427,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     orders, addOrder, updateOrder, deleteOrder, assignProject, assignClipper,
     workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
     assignOrderClipper, assignOrderEditor,
+    financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

@@ -10,6 +10,7 @@ import { CalendarView } from './views/CalendarView';
 import { ClassroomView } from './views/ClassroomView';
 import { ContractsView } from './views/ContractsView';
 import { ProfileView } from './views/ProfileView';
+import { FinancesView } from './views/FinancesView';
 import { AdminView } from './views/AdminView';
 import { ConfigView } from './views/ConfigView';
 import { LoginView } from './views/LoginView';
@@ -52,6 +53,7 @@ function Shell() {
       case 'classroom': return <ClassroomView />;
       case 'contratos': return <ContractsView />;
       case 'perfil': return user.role === 'admin' ? <HomeView /> : <ProfileView />;
+      case 'finanzas': return user.role === 'admin' ? <FinancesView /> : <HomeView />;
       case 'administracion':
         return (
           <div className="p-6 max-w-6xl mx-auto space-y-5">
