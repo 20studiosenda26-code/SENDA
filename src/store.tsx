@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense } from './types';
+import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
@@ -59,7 +59,18 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride' | 'financeSettings' | 'financeClosings' | 'appExpenses';
+type SharedKey =
+  | 'brands'
+  | 'notifications'
+  | 'orders'
+  | 'calendarEvents'
+  | 'workerGoals'
+  | 'workerPointsOverride'
+  | 'financeSettings'
+  | 'financeClosings'
+  | 'appExpenses'
+  | 'payrollPayments'
+  | 'payrollAdjustments';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -206,6 +217,12 @@ interface Store {
   appExpenses: AppExpense[];
   addAppExpense: (expense: Omit<AppExpense, 'id'>) => void;
   deleteAppExpense: (id: string) => void;
+
+  payrollPayments: PayrollPayment[];
+  payrollAdjustments: Record<string, number>;
+  setWorkerPayrollAdjustment: (workerId: string, amount: number) => void;
+  recordPayrollPayment: (data: Omit<PayrollPayment, 'id' | 'paidAt'>) => void;
+  revertPayrollPayment: (paymentId: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -257,6 +274,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [financeSettings, setFinanceSettings] = useState<FinanceSettings>(() => loadState('financeSettings', DEFAULT_FINANCE_SETTINGS));
   const [financeClosings, setFinanceClosings] = useState<FinanceDayClosing[]>(() => loadState('financeClosings', [] as FinanceDayClosing[]));
   const [appExpenses, setAppExpenses] = useState<AppExpense[]>(() => loadState('appExpenses', [] as AppExpense[]));
+  const [payrollPayments, setPayrollPayments] = useState<PayrollPayment[]>(() => loadState('payrollPayments', [] as PayrollPayment[]));
+  const [payrollAdjustments, setPayrollAdjustments] = useState<Record<string, number>>(() => loadState('payrollAdjustments', {} as Record<string, number>));
 
   const localWriteLockUntil = useRef<number>(0);
   const markLocalWrite = useCallback(() => {
@@ -279,6 +298,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('financeSettings', financeSettings); }, [financeSettings, persistShared]);
   useEffect(() => { persistShared('financeClosings', financeClosings); }, [financeClosings, persistShared]);
   useEffect(() => { persistShared('appExpenses', appExpenses); }, [appExpenses, persistShared]);
+  useEffect(() => { persistShared('payrollPayments', payrollPayments); }, [payrollPayments, persistShared]);
+  useEffect(() => { persistShared('payrollAdjustments', payrollAdjustments); }, [payrollAdjustments, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -319,6 +340,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
       const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
       if (active && Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
+      const remotePayrollPayments = await loadShared<PayrollPayment[]>('payrollPayments');
+      if (active && Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
+      const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
+      if (active && remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -351,6 +376,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
         const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
         if (Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
+        const remotePayrollPayments = await loadShared<PayrollPayment[]>('payrollPayments');
+        if (Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
+        const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
+        if (remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
       })();
     });
     return unsub;
@@ -383,7 +412,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [loadWorkersFromProfiles, user?.id]);
 
-  // --- Estado "En línea" en tiempo real (Supabase Realtime Presence + Heartbeat en platform_kv + profiles) ---
+  // --- Estado "En línea" en tiempo real ---
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !user?.id) {
       setPresenceOnlineIds(new Set());
@@ -1422,7 +1451,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-    pushNotification('admin', 'sistema', `Cierre financiero registrado (${closing.periodLabel}) · Neto: $${closing.realizedNetRevenue.toLocaleString('es-CO')}`);
+    const sign = String.fromCharCode(36);
+    pushNotification('admin', 'sistema', `Cierre financiero registrado (${closing.periodLabel}) · Neto: ${sign}${closing.realizedNetRevenue.toLocaleString('es-CO')}`);
   }, [markLocalWrite, pushNotification]);
 
   const addAppExpense = useCallback((expense: Omit<AppExpense, 'id'>) => {
@@ -1453,6 +1483,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [markLocalWrite]);
 
+  const setWorkerPayrollAdjustment = useCallback((workerId: string, amount: number) => {
+    setPayrollAdjustments(prev => {
+      const next = { ...prev, [workerId]: Math.max(0, Math.round(amount) || 0) };
+      saveState('payrollAdjustments', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('payrollAdjustments', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
+  const recordPayrollPayment = useCallback((data: Omit<PayrollPayment, 'id' | 'paidAt'>) => {
+    const entry: PayrollPayment = {
+      ...data,
+      id: `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      paidAt: new Date().toISOString(),
+    };
+    setPayrollPayments(prev => {
+      const next = [entry, ...prev];
+      saveState('payrollPayments', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('payrollPayments', next);
+      }
+      return next;
+    });
+    const sign = String.fromCharCode(36);
+    pushNotification(
+      data.role,
+      'pago_100',
+      `Nómina pagada (${data.weekendLabel}): ${sign}${data.amount.toLocaleString('es-CO')}${data.receiptFileName ? ` · Comprobante: ${data.receiptFileName}` : ''}`,
+      data.workerId
+    );
+    pushNotification(
+      'admin',
+      'pago_100',
+      `Pago de nómina registrado a ${data.workerName} (${sign}${data.amount.toLocaleString('es-CO')}) · ${data.weekendLabel}`
+    );
+  }, [markLocalWrite, pushNotification]);
+
+  const revertPayrollPayment = useCallback((paymentId: string) => {
+    setPayrollPayments(prev => {
+      const next = prev.filter(p => p.id !== paymentId);
+      saveState('payrollPayments', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('payrollPayments', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
@@ -1478,6 +1561,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     assignOrderClipper, assignOrderEditor,
     financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
     appExpenses, addAppExpense, deleteAppExpense,
+    payrollPayments, payrollAdjustments, setWorkerPayrollAdjustment, recordPayrollPayment, revertPayrollPayment,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

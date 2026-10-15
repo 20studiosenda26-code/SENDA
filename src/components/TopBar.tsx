@@ -43,7 +43,8 @@ const VIEW_TITLES: Record<string, string> = {
   classroom: 'Classroom',
   contratos: 'Contratos',
   perfil: 'Perfil',
-  finanzas: 'Finanzas y Tesorería',
+  finanzas: 'Finanzas',
+  nominas: 'Nóminas',
   administracion: 'Administración',
   configuracion: 'Configuración',
 };

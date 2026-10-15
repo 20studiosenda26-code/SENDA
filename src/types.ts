@@ -1,6 +1,6 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
-export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'finanzas' | 'administracion' | 'configuracion';
+export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'finanzas' | 'nominas' | 'administracion' | 'configuracion';
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
@@ -242,7 +242,6 @@ export interface FinanceSettings {
   defaultEditorCost: number;
 }
 
-/** Gasto operativo de material de trabajo: aplicaciones, créditos IA, licencias, etc. */
 export interface AppExpense {
   id: string;
   label: string;
@@ -261,6 +260,21 @@ export interface FinanceDayClosing {
   totalCreatorPayouts: number;
   totalAppExpenses?: number;
   projectsCount: number;
+}
+
+/** Pago de nómina realizado a un Clipper o Editor (con comprobante de transferencia adjunto). */
+export interface PayrollPayment {
+  id: string;
+  workerId: string;
+  workerName: string;
+  role: 'clipper' | 'editor';
+  amount: number;
+  weekKey: string;
+  weekendLabel: string;
+  receiptFileName: string | null;
+  receiptFileUrl: string | null;
+  note?: string | null;
+  paidAt: string;
 }
 
 export interface ChatGroup {
