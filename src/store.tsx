@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing } from './types';
+import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
@@ -59,7 +59,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride' | 'financeSettings' | 'financeClosings';
+type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride' | 'financeSettings' | 'financeClosings' | 'appExpenses';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -203,6 +203,9 @@ interface Store {
   updateFinanceSettings: (patch: Partial<FinanceSettings>) => void;
   financeClosings: FinanceDayClosing[];
   recordFinanceDayClosing: (closing: Omit<FinanceDayClosing, 'id' | 'closedAt'>) => void;
+  appExpenses: AppExpense[];
+  addAppExpense: (expense: Omit<AppExpense, 'id'>) => void;
+  deleteAppExpense: (id: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -253,6 +256,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
   const [financeSettings, setFinanceSettings] = useState<FinanceSettings>(() => loadState('financeSettings', DEFAULT_FINANCE_SETTINGS));
   const [financeClosings, setFinanceClosings] = useState<FinanceDayClosing[]>(() => loadState('financeClosings', [] as FinanceDayClosing[]));
+  const [appExpenses, setAppExpenses] = useState<AppExpense[]>(() => loadState('appExpenses', [] as AppExpense[]));
 
   const localWriteLockUntil = useRef<number>(0);
   const markLocalWrite = useCallback(() => {
@@ -274,6 +278,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('workerPointsOverride', workerPointsOverride); }, [workerPointsOverride, persistShared]);
   useEffect(() => { persistShared('financeSettings', financeSettings); }, [financeSettings, persistShared]);
   useEffect(() => { persistShared('financeClosings', financeClosings); }, [financeClosings, persistShared]);
+  useEffect(() => { persistShared('appExpenses', appExpenses); }, [appExpenses, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -312,6 +317,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
       const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
       if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
+      const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
+      if (active && Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -342,6 +349,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
         const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
         if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
+        const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
+        if (Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
       })();
     });
     return unsub;
@@ -503,7 +512,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [workers, user?.id, presenceOnlineIds, heartbeatMap, nowTick, config.goals, workerGoalsMap, workerPointsOverride]);
 
-  // Total en vivo de usuarios registrados (Clippers + Editores + Administradores)
   const registeredUsersCount = useMemo(() => {
     if (!isSupabaseConfigured) return workersWithOnline.length + 1;
     const uniqueIds = new Set<string>();
@@ -696,18 +704,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setQc = useCallback((videoId: string, status: QcStatus) => {
+    const prevVideo = findVideo(videoId);
+    const wasPaid50 = prevVideo ? prevVideo.paid50 : false;
+    const wasPaid100 = prevVideo ? prevVideo.paid100 : false;
+
     updateVideo(videoId, v => ({
       ...v,
       qc: status,
       paid50: status === 'aprobado_senda' || status === 'aprobado_cliente' ? true : v.paid50,
       paid100: status === 'aprobado_cliente' ? true : v.paid100,
     }));
-    const v = findVideo(videoId);
-    if (v) {
+
+    if (prevVideo) {
       const label = status.replace(/_/g, ' ');
-      pushNotification('clipper', 'qc_clip', `Estado de QC de tu clip "${v.name}": ${label}`, v.clipperId);
-      pushNotification('editor', 'qc_video', `Estado de QC del video "${v.name}": ${label}`, v.editorId);
-      pushNotification('admin', 'qc_video', `${v.name}: estado de QC cambiado a ${label}`);
+      pushNotification('clipper', 'qc_clip', `Estado de QC de tu clip "${prevVideo.name}": ${label}`, prevVideo.clipperId);
+      pushNotification('editor', 'qc_video', `Estado de QC del video "${prevVideo.name}": ${label}`, prevVideo.editorId);
+      pushNotification('admin', 'qc_video', `${prevVideo.name}: estado de QC cambiado a ${label}`);
+
+      if (status === 'aprobado_senda' && !wasPaid50) {
+        pushNotification('clipper', 'pago_50', `Se liberó automáticamente el 50% de pago de "${prevVideo.name}" (Aprobado Senda)`, prevVideo.clipperId);
+        pushNotification('editor', 'pago_50', `Se liberó automáticamente el 50% de pago de "${prevVideo.name}" (Aprobado Senda)`, prevVideo.editorId);
+      }
+      if (status === 'aprobado_cliente' && !wasPaid100) {
+        pushNotification('clipper', 'pago_100', `Se liberó automáticamente el 100% de pago de "${prevVideo.name}" (Aprobado Cliente)`, prevVideo.clipperId);
+        pushNotification('editor', 'pago_100', `Se liberó automáticamente el 100% de pago de "${prevVideo.name}" (Aprobado Cliente)`, prevVideo.editorId);
+      }
     }
   }, [updateVideo, findVideo, pushNotification]);
 
@@ -1404,6 +1425,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pushNotification('admin', 'sistema', `Cierre financiero registrado (${closing.periodLabel}) · Neto: $${closing.realizedNetRevenue.toLocaleString('es-CO')}`);
   }, [markLocalWrite, pushNotification]);
 
+  const addAppExpense = useCallback((expense: Omit<AppExpense, 'id'>) => {
+    const newItem: AppExpense = {
+      ...expense,
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    };
+    setAppExpenses(prev => {
+      const next = [newItem, ...prev];
+      saveState('appExpenses', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('appExpenses', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
+  const deleteAppExpense = useCallback((id: string) => {
+    setAppExpenses(prev => {
+      const next = prev.filter(x => x.id !== id);
+      saveState('appExpenses', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('appExpenses', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
@@ -1428,6 +1477,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
     assignOrderClipper, assignOrderEditor,
     financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
+    appExpenses, addAppExpense, deleteAppExpense,
   };
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

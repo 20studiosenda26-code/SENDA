@@ -233,17 +233,22 @@ export interface Order {
   createdAt: string;
   promotedToBoard?: boolean;
   boardVideoId?: string | null;
-  /** Precio unitario por video cobrado al cliente en este pedido (opcional, usa tarifa base si no se especifica). */
   unitPriceClient?: number;
 }
 
 export interface FinanceSettings {
-  /** Precio comercial cobrado al cliente por cada video entregado ($ USD o moneda base). */
   clientPricePerVideo: number;
-  /** Costo promedio de pago a Clipper por video cuando aún no tiene tier asignado. */
   defaultClipperCost: number;
-  /** Costo promedio de pago a Editor por video cuando aún no tiene tier asignado. */
   defaultEditorCost: number;
+}
+
+/** Gasto operativo de material de trabajo: aplicaciones, créditos IA, licencias, etc. */
+export interface AppExpense {
+  id: string;
+  label: string;
+  category: 'creditos_ia' | 'suscripcion' | 'herramienta';
+  amount: number;
+  date: string;
 }
 
 export interface FinanceDayClosing {
@@ -254,6 +259,7 @@ export interface FinanceDayClosing {
   accruedGrossRevenue: number;
   realizedNetRevenue: number;
   totalCreatorPayouts: number;
+  totalAppExpenses?: number;
   projectsCount: number;
 }
 
