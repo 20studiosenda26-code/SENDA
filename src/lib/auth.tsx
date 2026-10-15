@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { supabase, isSupabaseConfigured, loadShared, saveShared } from './supabaseClient';
 import type { Role } from '../types';
 
 export interface AuthUser {
@@ -35,13 +35,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return null;
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, role')
+      .select('id, name, role, contact_email')
       .eq('id', authUser.id)
       .maybeSingle();
     if (error || !data) return null;
+
+    // Si el usuario tiene email de login y contact_email está vacío en profiles, lo sincronizamos
+    // y también lo guardamos en user_emails dentro de platform_kv para que Gestión de usuarios siempre vea el correo.
+    if (authUser.email) {
+      if (!data.contact_email) {
+        void supabase.from('profiles').update({ contact_email: authUser.email }).eq('id', authUser.id);
+      }
+      void (async () => {
+        const existingMap = (await loadShared<Record<string, string>>('user_emails')) || {};
+        if (existingMap[authUser.id] !== authUser.email) {
+          await saveShared('user_emails', { ...existingMap, [authUser.id]: authUser.email! });
+        }
+      })();
+    }
+
     return {
       id: data.id,
-      email: authUser.email || '',
+      email: authUser.email || (data.contact_email as string) || '',
       name: data.name,
       role: data.role as Role,
     };
@@ -66,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       (async () => {
         setSession(s);
         if (s?.user) {

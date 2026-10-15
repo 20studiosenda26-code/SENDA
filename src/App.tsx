@@ -18,12 +18,18 @@ import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
 function Shell() {
-  const { view, theme } = useStore();
+  const { view, setView, theme } = useStore();
   const { user, loading, signOut } = useAuth();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (user?.role === 'admin' && view === 'perfil') {
+      setView('home');
+    }
+  }, [user?.role, view, setView]);
 
   if (loading) {
     return (
@@ -45,10 +51,10 @@ function Shell() {
       case 'calendario': return <CalendarView />;
       case 'classroom': return <ClassroomView />;
       case 'contratos': return <ContractsView />;
-      case 'perfil': return <ProfileView />;
+      case 'perfil': return user.role === 'admin' ? <HomeView /> : <ProfileView />;
       case 'administracion':
         return (
-          <div className="space-y-5">
+          <div className="p-6 max-w-6xl mx-auto space-y-5">
             <UserManagement />
             <AdminView />
           </div>

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
+import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
@@ -9,7 +9,6 @@ export interface AdminProfile { id: string; name: string; }
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const HEARTBEAT_TTL_MS = 35 * 1000;
 
-// IDs de los antiguos eventos predeterminados para descartarlos siempre
 const LEGACY_DEFAULT_EVENT_IDS = new Set(['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6', 'ev7']);
 
 function sanitizeCalendarEvents(list: unknown): CalendarEvent[] {
@@ -54,7 +53,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents';
+type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents' | 'workerGoals' | 'workerPointsOverride';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -96,6 +95,14 @@ function applyNotificationReset(list: NotificationItem[]): NotificationItem[] {
     }
   }
   return result;
+}
+
+interface WorkerPointsPatch {
+  pointsToday?: number;
+  pointsMonth?: number;
+  goalDaily?: number;
+  goalMonthly?: number;
+  dayClosedToday?: boolean;
 }
 
 interface Store {
@@ -141,6 +148,9 @@ interface Store {
   sendVideo: (videoId: string) => void;
   sendChat: (text: string) => void;
   closeDay: (workerId: string) => void;
+  toggleDayClosed: (workerId: string) => void;
+  updateWorkerPointsAndGoals: (workerId: string, patch: WorkerPointsPatch) => Promise<void>;
+  getWorkerGoals: (workerId: string, workerRole?: 'clipper' | 'editor') => WorkerCustomGoals;
   togglePaid50: (videoId: string) => void;
   approveFinal: (videoId: string) => void;
   toggleOnline: (workerId: string) => void;
@@ -197,6 +207,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<ViewKey>('home');
   const [brands, setBrands] = useState<Brand[]>(() => loadState('brands', INITIAL_BRANDS));
   const [workers, setWorkers] = useState<Worker[]>(() => loadState('workers', INITIAL_WORKERS));
+  const [workerGoalsMap, setWorkerGoalsMap] = useState<Record<string, WorkerCustomGoals>>(() => loadState('workerGoals', {} as Record<string, WorkerCustomGoals>));
+  const [workerPointsOverride, setWorkerPointsOverride] = useState<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>(() => loadState('workerPointsOverride', {}));
   const [presenceOnlineIds, setPresenceOnlineIds] = useState<Set<string>>(() => new Set());
   const [heartbeatMap, setHeartbeatMap] = useState<Record<string, number>>({});
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
@@ -243,6 +255,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('brands', brands); }, [brands, persistShared]);
   useEffect(() => { persistShared('orders', orders); }, [orders, persistShared]);
   useEffect(() => { saveState('workers', workers); }, [workers]);
+  useEffect(() => { persistShared('workerGoals', workerGoalsMap); }, [workerGoalsMap, persistShared]);
+  useEffect(() => { persistShared('workerPointsOverride', workerPointsOverride); }, [workerPointsOverride, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -273,6 +287,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteOrders) setOrders(remoteOrders);
       const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
       if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
+      const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
+      if (active && remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
+      const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
+      if (active && remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -295,6 +313,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteOrders) setOrders(remoteOrders);
         const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
         if (remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
+        const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
+        if (remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
+        const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
+        if (remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
       })();
     });
     return unsub;
@@ -436,18 +458,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [user?.id, role, refreshOnlineHeartbeats]);
 
   const workersWithOnline = useMemo(() => {
-    if (!isSupabaseConfigured) return workers;
     return workers.map(w => {
       const isSelf = Boolean(user?.id && w.id === user.id);
       const inPresence = presenceOnlineIds.has(w.id);
       const lastBeat = heartbeatMap[w.id] || 0;
       const hasRecentBeat = lastBeat > 0 && (nowTick - lastBeat) < HEARTBEAT_TTL_MS;
+      const defaultGoals = config.goals[w.role];
+      const customGoals = workerGoalsMap[w.id];
+      const override = workerPointsOverride[w.id];
       return {
         ...w,
-        online: isSelf || inPresence || hasRecentBeat,
+        online: isSupabaseConfigured ? (isSelf || inPresence || hasRecentBeat) : w.online,
+        pointsToday: override?.pointsToday !== undefined ? override.pointsToday : w.pointsToday,
+        pointsMonth: override?.pointsMonth !== undefined ? override.pointsMonth : w.pointsMonth,
+        dayClosedToday: override?.dayClosedToday !== undefined ? override.dayClosedToday : w.dayClosedToday,
+        customGoalDaily: customGoals?.daily ?? defaultGoals.daily,
+        customGoalMonthly: customGoals?.monthly ?? defaultGoals.monthly,
       };
     });
-  }, [workers, user?.id, presenceOnlineIds, heartbeatMap, nowTick]);
+  }, [workers, user?.id, presenceOnlineIds, heartbeatMap, nowTick, config.goals, workerGoalsMap, workerPointsOverride]);
+
+  const getWorkerGoals = useCallback((workerId: string, workerRole?: 'clipper' | 'editor'): WorkerCustomGoals => {
+    const w = workers.find(x => x.id === workerId);
+    const r = workerRole || w?.role || 'clipper';
+    const base = config.goals[r];
+    const custom = workerGoalsMap[workerId];
+    return {
+      daily: custom?.daily ?? base.daily,
+      monthly: custom?.monthly ?? base.monthly,
+    };
+  }, [workers, config.goals, workerGoalsMap]);
 
   const loadContracts = useCallback(async () => {
     if (!supabase) return;
@@ -776,13 +816,98 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const closeDay = useCallback((workerId: string) => {
     setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, dayClosedToday: true } : w));
+    setWorkerPointsOverride(prev => ({
+      ...prev,
+      [workerId]: { ...(prev[workerId] || {}), dayClosedToday: true },
+    }));
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('profiles').update({ day_closed_today: true }).eq('id', workerId);
+    }
     const w = workersRef.current.find(x => x.id === workerId);
     if (w) {
-      const role: Role = w.role === 'clipper' ? 'clipper' : 'editor';
-      pushNotification(role, 'racha', `Racha del día actualizada: ${w.streak} días seguidos`, w.id);
+      const targetRole: Role = w.role === 'clipper' ? 'clipper' : 'editor';
+      pushNotification(targetRole, 'racha', `Racha del día actualizada: ${w.streak} días seguidos`, w.id);
       pushNotification('admin', 'racha', `${w.name} cerró el día con ${w.pointsToday} puntos (racha: ${w.streak})`);
     }
   }, [pushNotification]);
+
+  const toggleDayClosed = useCallback((workerId: string) => {
+    const w = workersRef.current.find(x => x.id === workerId);
+    const nextClosed = w ? !w.dayClosedToday : true;
+    setWorkers(prev => prev.map(x => x.id === workerId ? { ...x, dayClosedToday: nextClosed } : x));
+    setWorkerPointsOverride(prev => ({
+      ...prev,
+      [workerId]: { ...(prev[workerId] || {}), dayClosedToday: nextClosed },
+    }));
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('profiles').update({ day_closed_today: nextClosed }).eq('id', workerId);
+    }
+    if (w && nextClosed) {
+      const targetRole: Role = w.role === 'clipper' ? 'clipper' : 'editor';
+      pushNotification(targetRole, 'racha', `Racha del día actualizada: ${w.streak} días seguidos`, w.id);
+      pushNotification('admin', 'racha', `${w.name} cerró el día con ${w.pointsToday} puntos (racha: ${w.streak})`);
+    }
+  }, [pushNotification]);
+
+  const updateWorkerPointsAndGoals = useCallback(async (workerId: string, patch: WorkerPointsPatch) => {
+    const w = workersRef.current.find(x => x.id === workerId);
+    const baseRole = w?.role || 'clipper';
+    const currentGoals = getWorkerGoals(workerId, baseRole);
+
+    if (patch.goalDaily !== undefined || patch.goalMonthly !== undefined) {
+      const nextGoals: WorkerCustomGoals = {
+        daily: patch.goalDaily !== undefined ? Math.max(1, Math.round(patch.goalDaily)) : currentGoals.daily,
+        monthly: patch.goalMonthly !== undefined ? Math.max(1, Math.round(patch.goalMonthly)) : currentGoals.monthly,
+      };
+      setWorkerGoalsMap(prev => {
+        const updated = { ...prev, [workerId]: nextGoals };
+        saveState('workerGoals', updated);
+        if (isSupabaseConfigured) {
+          markLocalWrite();
+          void saveShared('workerGoals', updated);
+        }
+        return updated;
+      });
+    }
+
+    if (patch.pointsToday !== undefined || patch.pointsMonth !== undefined || patch.dayClosedToday !== undefined) {
+      const nextPtsToday = patch.pointsToday !== undefined ? Math.max(0, Math.round(patch.pointsToday)) : (w?.pointsToday ?? 0);
+      const nextPtsMonth = patch.pointsMonth !== undefined ? Math.max(0, Math.round(patch.pointsMonth)) : (w?.pointsMonth ?? 0);
+      const nextClosed = patch.dayClosedToday !== undefined ? patch.dayClosedToday : (w?.dayClosedToday ?? false);
+
+      setWorkers(prev => prev.map(item => item.id === workerId ? {
+        ...item,
+        pointsToday: nextPtsToday,
+        pointsMonth: nextPtsMonth,
+        dayClosedToday: nextClosed,
+      } : item));
+
+      setWorkerPointsOverride(prev => {
+        const updated = {
+          ...prev,
+          [workerId]: {
+            pointsToday: nextPtsToday,
+            pointsMonth: nextPtsMonth,
+            dayClosedToday: nextClosed,
+          },
+        };
+        saveState('workerPointsOverride', updated);
+        if (isSupabaseConfigured) {
+          markLocalWrite();
+          void saveShared('workerPointsOverride', updated);
+        }
+        return updated;
+      });
+
+      if (isSupabaseConfigured && supabase) {
+        await supabase.from('profiles').update({
+          points_today: nextPtsToday,
+          points_month: nextPtsMonth,
+          day_closed_today: nextClosed,
+        }).eq('id', workerId);
+      }
+    }
+  }, [getWorkerGoals, markLocalWrite]);
 
   const togglePaid50 = useCallback((videoId: string) => {
     const v = findVideo(videoId);
@@ -1110,7 +1235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
 
@@ -1134,7 +1259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const worker = workersRef.current.find(w => w.id === workerId);
     if (!worker) return;
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
     pushNotification(targetRole, 'trabajo_asignado', msg, workerId);
@@ -1215,7 +1340,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
     addCorrection, updateCorrectionTime, uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,
-    sendChat, closeDay, togglePaid50, approveFinal, toggleOnline,
+    sendChat, closeDay, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals,
+    togglePaid50, approveFinal, toggleOnline,
     calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent, updateWorkerProfile,
     classroomModules, addClassroomModule, deleteClassroomModule, addClassroomLesson, deleteClassroomLesson,
     lessonCompletions, markLessonComplete,

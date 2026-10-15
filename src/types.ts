@@ -76,6 +76,11 @@ export interface Brand {
   videos: Video[];
 }
 
+export interface WorkerCustomGoals {
+  daily: number;
+  monthly: number;
+}
+
 export interface Worker {
   id: string;
   name: string;
@@ -97,14 +102,14 @@ export interface Worker {
   restDay?: string;
   emailNotifications?: boolean;
   dailyCapacity?: number;
+  customGoalDaily?: number;
+  customGoalMonthly?: number;
 }
 
 export interface CalendarEvent {
   id: string;
   day: number;
-  /** Mes (0 = Enero ... 11 = Diciembre) al que pertenece el evento */
   month: number;
-  /** Año (ej. 2026) al que pertenece el evento */
   year: number;
   label: string;
   color: string;

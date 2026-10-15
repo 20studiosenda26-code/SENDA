@@ -11,7 +11,7 @@ const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] =
   { key: 'calendario', label: 'Calendario', icon: Calendar, roles: ['clipper', 'editor', 'admin'] },
   { key: 'classroom', label: 'Classroom', icon: GraduationCap, roles: ['clipper', 'editor', 'admin'] },
   { key: 'contratos', label: 'Contratos', icon: FileText, roles: ['clipper', 'editor'] },
-  { key: 'perfil', label: 'Perfil', icon: User, roles: ['clipper', 'editor', 'admin'] },
+  { key: 'perfil', label: 'Perfil', icon: User, roles: ['clipper', 'editor'] },
   { key: 'administracion', label: 'Admin', icon: Shield, roles: ['admin'] },
   { key: 'configuracion', label: 'Config', icon: Settings, roles: ['admin'] },
 ];

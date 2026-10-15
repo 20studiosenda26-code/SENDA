@@ -3,7 +3,7 @@ import { Flame, TrendingUp, Target, CheckCircle2, Award, Star, Phone, Mail, Land
 import { useState, useEffect } from 'react';
 
 export function ProfileView() {
-  const { workers, currentWorkerId, brands, config, role, updateWorkerProfile } = useStore();
+  const { workers, currentWorkerId, brands, getWorkerGoals, role, updateWorkerProfile } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
 
   const [phone, setPhone] = useState('');
@@ -36,7 +36,7 @@ export function ProfileView() {
     role === 'admin' ? true : role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId
   );
   const completed = myVideos.filter(v => v.qc === 'aprobado_cliente');
-  const goals = config.goals[worker.role];
+  const goals = getWorkerGoals(worker.id, worker.role);
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-5">
@@ -87,24 +87,24 @@ export function ProfileView() {
       </div>
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
-        <h3 className="font-display text-base font-semibold mb-4">Metas</h3>
+        <h3 className="font-display text-base font-semibold mb-4">Metas asignadas</h3>
         <div className="space-y-3">
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span>Diaria</span>
-              <span className="text-muted">{worker.pointsToday} / {goals.daily}</span>
+              <span className="text-muted font-tech">{worker.pointsToday} / {goals.daily}</span>
             </div>
             <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-              <div className="h-full bg-accent rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsToday / goals.daily) * 100)}%` }} />
+              <div className="h-full bg-accent rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsToday / Math.max(goals.daily, 1)) * 100)}%` }} />
             </div>
           </div>
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span>Mensual</span>
-              <span className="text-muted">{worker.pointsMonth} / {goals.monthly}</span>
+              <span className="text-muted font-tech">{worker.pointsMonth} / {goals.monthly}</span>
             </div>
             <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-              <div className="h-full bg-mint rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsMonth / goals.monthly) * 100)}%` }} />
+              <div className="h-full bg-mint rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsMonth / Math.max(goals.monthly, 1)) * 100)}%` }} />
             </div>
           </div>
         </div>

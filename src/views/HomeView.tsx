@@ -6,9 +6,9 @@ import { AdminHomePanels } from './AdminHomePanels';
 import { pendingRoleSuffix } from '../lib/qcLabel';
 
 export function HomeView() {
-  const { role, workers, currentWorkerId, brands, setView, config, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
+  const { role, workers, currentWorkerId, brands, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
-  const goals = role === 'admin' ? config.goals.clipper : config.goals[role as 'clipper' | 'editor'];
+  const goals = getWorkerGoals(currentWorkerId, role === 'admin' ? 'clipper' : (role as 'clipper' | 'editor'));
 
   const myVideos = brands.flatMap(b => b.videos).filter(v =>
     role === 'clipper' ? v.clipperId === currentWorkerId : role === 'editor' ? v.editorId === currentWorkerId : true
@@ -18,9 +18,6 @@ export function HomeView() {
 
   const greeting = role === 'admin' ? 'Panel de administración' : `Hola, ${worker?.name?.split(' ')[0] || ''}`;
 
-  // El Inicio del Admin es un panel totalmente distinto al de clíper/editor
-  // (estado del equipo, utilidad, carga del equipo, QC pendiente y orden de
-  // entrega), así que se delega por completo en AdminHomePanels.
   if (role === 'admin') {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -213,7 +210,7 @@ function StatCard({ icon: Icon, label, value, target, sub, accent, onClick }: { 
         <div className="flex items-end justify-between gap-1.5 mt-4">
           {streakDays.map((day, index) => (
             <div key={`${day.label}-${index}`} className="flex flex-col items-center gap-1.5">
-              <div className={`w-7 h-7 rounded-md flex items-center justify-center border ${day.active ? `${colors.soft} ${colors.text} ${colors.border}` : 'bg-surface-3 text-muted-2 border-line'}`}>
+              <div className={`w-7 h-7 rounded-md flex items-center justify-center border ${day.active ? `\${colors.soft} ${colors.text}${colors.border}` : 'bg-surface-3 text-muted-2 border-line'}`}>
                 {day.active ? <Flame size={14} /> : <CalendarDays size={13} />}
               </div>
               <span className="text-[10px] text-muted-2">{day.label}</span>
