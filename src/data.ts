@@ -41,7 +41,6 @@ export const INITIAL_BRANDS: Brand[] = [
   },
 ];
 
-/** Volumen máximo de proyectos activos por defecto para un clíper/editor nuevo. */
 export const DEFAULT_DAILY_CAPACITY = 10;
 
 export const INITIAL_WORKERS: Worker[] = [
@@ -72,15 +71,8 @@ export const INITIAL_PAID_HISTORY: PaidHistoryEntry[] = [
   { videoName: 'Nexora · Demo Reel', clipperId: 'w1', editorId: 'w2', durationKey: '00:45', date: '2026-09-20', paid100: false, tierSnapshot: TIERS[1] },
 ];
 
-export const CALENDAR_EVENTS: CalendarEvent[] = [
-  { id: 'ev1', day: 19, label: 'Vortex · Launch', color: 'mint' },
-  { id: 'ev2', day: 22, label: 'Auralis · Case Study', color: 'accent' },
-  { id: 'ev3', day: 22, label: 'Auralis · Promo', color: 'violet' },
-  { id: 'ev4', day: 25, label: 'Reunión cliente (Zoom)', color: 'amber', link: 'https://zoom.us/j/1234567890', note: 'Reunión de seguimiento con el cliente' },
-  { id: 'ev5', day: 30, label: 'Día de pago', color: 'mint', note: 'Se liberan los pagos de la quincena' },
-  { id: 'ev6', day: 22, label: 'Descanso: Sofía M. (Clipper)', color: 'violet', note: 'Día de descanso semanal asignado' },
-  { id: 'ev7', day: 23, label: 'Descanso: Diego T. (Editor)', color: 'violet', note: 'Día de descanso semanal asignado' },
-];
+/** Sin eventos predeterminados en ninguna fecha ni mes. */
+export const CALENDAR_EVENTS: CalendarEvent[] = [];
 
 const SAMPLE_VIDEO = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 
@@ -125,11 +117,6 @@ export const CLASSROOM_MODULES: ClassroomModule[] = [
   },
 ];
 
-// --- Pedidos / Proyectos disponibles (panel de Admin) ---
-// 5 proyectos "borrador" sin asignar (lo que el Admin ve primero en la lista,
-// ordenados por hora de entrega) + 2 proyectos ya en curso, usados solo para
-// que la carga de trabajo de cada clíper/editor se vea distinta al ordenar
-// por volumen en el paso de asignación.
 export const INITIAL_ORDERS: Order[] = [
   {
     id: 'ord1', brand: 'Avon', videoCount: 25, deliveryDate: '2026-09-26', deliveryTime: '20:00',
@@ -182,7 +169,6 @@ export const INITIAL_ORDERS: Order[] = [
     clientNotes: null,
     createdAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
   },
-  // --- En curso (ya asignados), solo para variar la carga de trabajo ---
   {
     id: 'ord2', brand: 'Nexora', videoCount: 10, deliveryDate: '2026-09-26', deliveryTime: '18:00',
     status: 'asignado', assignedWorkerIds: ['w1', 'w2'], clipperId: 'w1', editorId: 'w2',

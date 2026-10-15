@@ -5,8 +5,6 @@ import { useState, useEffect } from 'react';
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
-// Cuántas celdas se pintan siempre (6 semanas): así la grilla nunca "salta"
-// de tamaño entre meses de 4 y 5 semanas, se ve estable y prolija.
 const TOTAL_CELLS = 42;
 
 interface CalendarCell {
@@ -19,12 +17,8 @@ function capitalize(s: string) {
 }
 
 export function CalendarView() {
-  const { brands, role, calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent } = useStore();
+  const { role, calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent } = useStore();
 
-  // "now" es la fecha/hora real, y se refresca sola mientras la pantalla
-  // sigue abierta (cada minuto), para que el día de hoy resaltado en el
-  // calendario esté siempre en vivo y nunca se quede desactualizado si
-  // alguien deja la pestaña abierta pasada la medianoche.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60 * 1000);
@@ -61,8 +55,6 @@ export function CalendarView() {
     setShowForm(true);
   };
 
-  // Navegación de mes que sí cruza de año (antes diciembre <-> enero se
-  // quedaba pegado porque el mes estaba limitado a 0-11 sin tocar el año).
   const goPrevMonth = () => {
     if (month === 0) { setMonth(11); setYear(y => y - 1); } else { setMonth(m => m - 1); }
   };
@@ -76,13 +68,8 @@ export function CalendarView() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const prevMonthDays = new Date(year, month, 0).getDate();
 
-  const allEvents = [...calendarEvents];
-  brands.forEach(b => b.videos.forEach(v => {
-    const d = parseInt(v.date.slice(8));
-    if (d <= daysInMonth && !allEvents.some(e => e.day === d && e.label === v.name)) {
-      allEvents.push({ id: `auto-${v.id}`, day: d, label: v.name, color: 'accent' });
-    }
-  }));
+  // Únicamente muestra los eventos creados para el mes y año activos (sin eventos predeterminados ni repetidos en otros meses)
+  const monthEvents = calendarEvents.filter(e => e.month === month && e.year === year);
 
   const colorMap: Record<string, string> = {
     accent: 'bg-accent/20 text-accent border-accent/30',
@@ -91,9 +78,6 @@ export function CalendarView() {
     violet: 'bg-violet/20 text-violet border-violet/30',
   };
 
-  // Celdas de días "fantasma" del mes anterior/siguiente, para que la
-  // grilla siempre se vea completa y ordenada (look de calendario real,
-  // no un mes flotando con huecos en blanco al inicio/final).
   const cells: CalendarCell[] = [];
   for (let i = offset - 1; i >= 0; i--) cells.push({ day: prevMonthDays - i, inMonth: false });
   for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, inMonth: true });
@@ -109,7 +93,9 @@ export function CalendarView() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold">Administrar calendario</p>
-              <p className="text-xs text-muted mt-0.5">Solo el admin puede agregar, modificar y dejar mensajes o enlaces (ej. reuniones de Zoom).</p>
+              <p className="text-xs text-muted mt-0.5">
+                Solo el admin puede agregar, modificar o eliminar eventos. Cada evento se guarda únicamente en el mes seleccionado ({MONTHS[month]} {year}).
+              </p>
             </div>
             <button onClick={() => { if (showForm) resetForm(); setShowForm(s => !s); }} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1 shrink-0">
               {showForm ? <X size={14} /> : <Plus size={14} />} {showForm ? 'Cerrar' : 'Agregar evento'}
@@ -117,10 +103,12 @@ export function CalendarView() {
           </div>
           {showForm && (
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 animate-fadeIn">
-              {editingId && (
-                <p className="sm:col-span-2 text-xs text-accent font-medium">Editando: "{fLabel || 'evento'}"</p>
+              {editingId ? (
+                <p className="sm:col-span-2 text-xs text-accent font-medium">Editando: "{fLabel || 'evento'}" ({MONTHS[month]} {year})</p>
+              ) : (
+                <p className="sm:col-span-2 text-xs text-muted-2">Creando evento para <span className="text-text font-medium">{MONTHS[month]} {year}</span></p>
               )}
-              <input value={fDay} onChange={e => setFDay(e.target.value)} type="number" min={1} max={31} placeholder="Día del mes" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
+              <input value={fDay} onChange={e => setFDay(e.target.value)} type="number" min={1} max={daysInMonth} placeholder={`Día de ${MONTHS[month]} (1 - ${daysInMonth})`} className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
               <select value={fColor} onChange={e => setFColor(e.target.value)} className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent">
                 <option value="accent">Accent</option>
                 <option value="mint">Mint</option>
@@ -132,12 +120,28 @@ export function CalendarView() {
               <input value={fNote} onChange={e => setFNote(e.target.value)} placeholder="Mensaje / nota - opcional" className="bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent sm:col-span-2" />
               <button
                 onClick={() => {
-                  const day = parseInt(fDay);
-                  if (day && fLabel) {
+                  const day = parseInt(fDay, 10);
+                  if (day >= 1 && day <= daysInMonth && fLabel.trim()) {
                     if (editingId) {
-                      updateCalendarEvent(editingId, { day, label: fLabel, color: fColor, link: fLink || undefined, note: fNote || undefined });
+                      updateCalendarEvent(editingId, {
+                        day,
+                        month,
+                        year,
+                        label: fLabel.trim(),
+                        color: fColor,
+                        link: fLink.trim() || undefined,
+                        note: fNote.trim() || undefined,
+                      });
                     } else {
-                      addCalendarEvent({ day, label: fLabel, color: fColor, link: fLink || undefined, note: fNote || undefined });
+                      addCalendarEvent({
+                        day,
+                        month,
+                        year,
+                        label: fLabel.trim(),
+                        color: fColor,
+                        link: fLink.trim() || undefined,
+                        note: fNote.trim() || undefined,
+                      });
                     }
                     resetForm();
                     setShowForm(false);
@@ -163,13 +167,6 @@ export function CalendarView() {
           )}
         </div>
       )}
-
-      <div className="flex flex-wrap gap-2 text-xs">
-        <span className="text-muted-2">Ejemplos:</span>
-        <span className="px-2 py-1 rounded border bg-mint/20 text-mint border-mint/30">Día de pago</span>
-        <span className="px-2 py-1 rounded border bg-violet/20 text-violet border-violet/30">Descanso semanal (clipper / editor)</span>
-        <span className="px-2 py-1 rounded border bg-amber/20 text-amber border-amber/30 flex items-center gap-1">Reunión cliente (Zoom) <ExternalLink size={11} /></span>
-      </div>
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
         <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
@@ -207,7 +204,7 @@ export function CalendarView() {
         </div>
         <div key={`${year}-${month}`} className="grid grid-cols-7 gap-1.5 animate-fadeIn">
           {cells.map((cell, i) => {
-            const events = cell.inMonth ? allEvents.filter(e => e.day === cell.day) : [];
+            const events = cell.inMonth ? monthEvents.filter(e => e.day === cell.day) : [];
             const isTodayCell = cell.inMonth && isViewingCurrentMonth && cell.day === now.getDate();
             const isWeekendCol = i % 7 >= 5;
 
@@ -233,20 +230,29 @@ export function CalendarView() {
                 </div>
                 <div className="mt-1 space-y-1">
                   {events.map(e => {
-                    const isEditable = isAdmin && calendarEvents.some(ce => ce.id === e.id);
                     const content = (
                       <div className={`group/ev relative text-xs px-1.5 py-0.5 rounded border truncate flex items-center gap-1 transition-opacity ${colorMap[e.color] || colorMap.accent} ${e.link ? 'cursor-pointer hover:opacity-80' : ''}`} title={e.note || e.label}>
                         {e.link && <ExternalLink size={9} className="shrink-0" />}
                         <span className="truncate flex-1">{e.label}</span>
-                        {isEditable && (
-                          <button
-                            type="button"
-                            onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); startEdit(e.id); }}
-                            className="shrink-0 opacity-0 group-hover/ev:opacity-100 hover:text-text transition-opacity"
-                            title="Editar"
-                          >
-                            <Pencil size={10} />
-                          </button>
+                        {isAdmin && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); startEdit(e.id); }}
+                              className="shrink-0 opacity-0 group-hover/ev:opacity-100 hover:text-text transition-opacity"
+                              title="Editar evento"
+                            >
+                              <Pencil size={10} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); deleteCalendarEvent(e.id); }}
+                              className="shrink-0 opacity-0 group-hover/ev:opacity-100 hover:text-red-400 transition-opacity"
+                              title="Eliminar evento"
+                            >
+                              <Trash2 size={10} />
+                            </button>
+                          </>
                         )}
                       </div>
                     );

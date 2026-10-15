@@ -26,21 +26,13 @@ export interface Clip {
   note: string;
   fileName?: string | null;
   fileUrl?: string | null;
-  /** Estado de revisión del clip por parte del Admin. */
   status?: ClipStatus;
-  /** Motivo escrito por el Admin cuando el clip se rechaza. */
   rejectionReason?: string | null;
-  /** Nota interna del Admin asociada al clip (no necesariamente un rechazo). */
   adminNote?: string | null;
-  /** Quién revisó el clip (por ahora siempre "Admin", no hay login de admins individuales). */
   reviewedBy?: string | null;
-  /** Fecha/hora ISO de la última revisión (aprobación o rechazo). */
   reviewedAt?: string | null;
-  /** Momento (en segundos) señalado por el Admin dentro del video del clip. */
   markerTime?: number | null;
-  /** Número de versión actual (1 = original, sube con cada resubida). */
   version?: number;
-  /** Historial de versiones anteriores, si el Clipper resubió el video. */
   previousVersions?: ClipVersion[];
 }
 
@@ -103,15 +95,17 @@ export interface Worker {
   bankInfo?: string;
   country?: string;
   restDay?: string;
-  /** Si el trabajador activó recibir notificaciones de Senda en su correo */
   emailNotifications?: boolean;
-  /** Volumen máximo de videos/proyectos activos que puede tener a la vez (configurado por el Admin). */
   dailyCapacity?: number;
 }
 
 export interface CalendarEvent {
   id: string;
   day: number;
+  /** Mes (0 = Enero ... 11 = Diciembre) al que pertenece el evento */
+  month: number;
+  /** Año (ej. 2026) al que pertenece el evento */
+  year: number;
   label: string;
   color: string;
   link?: string;
@@ -132,11 +126,9 @@ export type NotificationCategory =
 export interface NotificationItem {
   id: string;
   role: Role;
-  /** Si se define, la notificación es solo para este trabajador. Si no, es para todos los del rol (ej. todos los admins). */
   workerId?: string | null;
   category: NotificationCategory;
   text: string;
-  /** Fecha/hora ISO de creación */
   t: string;
   read?: boolean;
 }
@@ -189,12 +181,10 @@ export interface Config {
   };
 }
 
-// --- Contratos ---
 export interface Contract {
   id: string;
   title: string;
   role: 'clipper' | 'editor';
-  /** Si es null, es una plantilla general para todo el rol. Si no, es solo para esa persona. */
   workerId: string | null;
   fileName: string;
   fileUrl: string;
@@ -211,10 +201,8 @@ export interface ContractSignedUpload {
   uploadedAt: string;
 }
 
-// --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
 export type OrderStatus = 'aprobado_senda' | 'aprobado_cliente' | 'sin_asignar' | 'asignado' | 'finalizado' | 'incompleto';
 
-/** Archivo de referencia dejado por el cliente para un proyecto (imagen, video, link, etc.). */
 export interface OrderReference {
   id: string;
   name: string;
@@ -229,27 +217,19 @@ export interface Order {
   deliveryTime: string;
   status: OrderStatus;
   assignedWorkerIds: string[];
-  /** Clíper asignado a este proyecto (paso 1 de la asignación). */
   clipperId?: string | null;
-  /** Editor(a) asignado a este proyecto (paso 2 de la asignación). */
   editorId?: string | null;
   briefFileName?: string | null;
   briefFileUrl?: string | null;
-  /** Avatar/personaje elegido por el cliente para el proyecto. */
   avatarName?: string | null;
   avatarFileUrl?: string | null;
-  /** Referencias que el cliente dejó para este proyecto, si las hay. */
   references?: OrderReference[];
-  /** Notas escritas por el cliente para este proyecto, si las hay. */
   clientNotes?: string | null;
   createdAt: string;
-  /** true en cuanto el pedido quedó con clíper Y editor(a) asignados y ya se creó su tarjeta en "Proyectos iniciados" (tablero de QC). Evita duplicarla. */
   promotedToBoard?: boolean;
-  /** id del video creado en el tablero de "Proyectos iniciados" cuando el pedido se asignó por completo. */
   boardVideoId?: string | null;
 }
 
-// --- Chat (grupos + privados) ---
 export interface ChatGroup {
   id: string;
   name: string;

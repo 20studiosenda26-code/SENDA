@@ -9,6 +9,26 @@ export interface AdminProfile { id: string; name: string; }
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const HEARTBEAT_TTL_MS = 35 * 1000;
 
+// IDs de los antiguos eventos predeterminados para descartarlos siempre
+const LEGACY_DEFAULT_EVENT_IDS = new Set(['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6', 'ev7']);
+
+function sanitizeCalendarEvents(list: unknown): CalendarEvent[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter((e): e is CalendarEvent => {
+    if (!e || typeof e !== 'object') return false;
+    const item = e as Record<string, unknown>;
+    if (typeof item.id !== 'string' || LEGACY_DEFAULT_EVENT_IDS.has(item.id) || item.id.startsWith('auto-')) {
+      return false;
+    }
+    return (
+      typeof item.day === 'number' &&
+      typeof item.month === 'number' &&
+      typeof item.year === 'number' &&
+      typeof item.label === 'string'
+    );
+  });
+}
+
 function workerFromProfileRow(p: Record<string, unknown>): Worker {
   return {
     id: p.id as string,
@@ -34,7 +54,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-type SharedKey = 'brands' | 'notifications' | 'orders';
+type SharedKey = 'brands' | 'notifications' | 'orders' | 'calendarEvents';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -193,7 +213,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [selectedClassroomModuleId, setSelectedClassroomModuleId] = useState<string | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => loadState('calendarEvents', CALENDAR_EVENTS));
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() =>
+    sanitizeCalendarEvents(loadState('calendarEvents', CALENDAR_EVENTS))
+  );
   const [classroomModules, setClassroomModules] = useState<ClassroomModule[]>(() => loadState('classroomModules', CLASSROOM_MODULES));
   const [lessonCompletions, setLessonCompletions] = useState<Record<string, string[]>>(() => loadState('lessonCompletions', {} as Record<string, string[]>));
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -205,7 +227,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
   const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
 
-  // Evita que un evento realtime de platform_kv pise cambios locales que aún se están guardando
   const localWriteLockUntil = useRef<number>(0);
   const markLocalWrite = useCallback(() => {
     localWriteLockUntil.current = Date.now() + 2500;
@@ -224,7 +245,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('workers', workers); }, [workers]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
-  useEffect(() => { saveState('calendarEvents', calendarEvents); }, [calendarEvents]);
+  useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
   useEffect(() => { persistShared('notifications', notifications); }, [notifications, persistShared]);
   useEffect(() => { saveState('emailLog', emailLog); }, [emailLog]);
   useEffect(() => { saveState('classroomModules', classroomModules); }, [classroomModules]);
@@ -250,6 +271,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
       const remoteOrders = await loadShared<Order[]>('orders');
       if (active && remoteOrders) setOrders(remoteOrders);
+      const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
+      if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -263,7 +286,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsub = subscribeToTable('platform_kv', () => {
       void (async () => {
         await refreshOnlineHeartbeats();
-        // Si este cliente acaba de escribir hace menos de 2.5s, no pisamos su estado local con lecturas en vuelo
         if (Date.now() < localWriteLockUntil.current) return;
         const remoteBrands = await loadShared<Brand[]>('brands');
         if (remoteBrands) setBrands(remoteBrands);
@@ -271,6 +293,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
         const remoteOrders = await loadShared<Order[]>('orders');
         if (remoteOrders) setOrders(remoteOrders);
+        const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
+        if (remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
       })();
     });
     return unsub;
@@ -783,7 +807,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addCalendarEvent = useCallback((e: Omit<CalendarEvent, 'id'>) => {
-    setCalendarEvents(prev => [...prev, { ...e, id: `ev-${Date.now()}` }]);
+    setCalendarEvents(prev => [...prev, { ...e, id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }]);
   }, []);
 
   const updateCalendarEvent = useCallback((id: string, patch: Partial<Omit<CalendarEvent, 'id'>>) => {
@@ -998,7 +1022,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const videoId = existingVideoId || order.boardVideoId || `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     setBrands(prev => {
-      // Si el video ya existe en alguna marca, solo actualizamos su clipper/editor
       const alreadyExists = prev.some(b => b.videos.some(v => v.id === videoId));
       let nextBrands: Brand[];
       if (alreadyExists) {
@@ -1087,7 +1110,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
 
@@ -1111,7 +1134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const worker = workersRef.current.find(w => w.id === workerId);
     if (!worker) return;
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
     pushNotification(targetRole, 'trabajo_asignado', msg, workerId);
