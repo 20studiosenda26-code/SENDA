@@ -1,11 +1,9 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Worker, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS, DEFAULT_DAILY_CAPACITY } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 
-// --- Perfil "admin" liviano, usado para armar grupos de chat (el Admin
-// necesita ver/incluir a los administradores además de clíper/editores). ---
 export interface AdminProfile { id: string; name: string; }
 
 function workerFromProfileRow(p: Record<string, unknown>): Worker {
@@ -22,7 +20,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
     bestStreak: (p.best_streak as number) || 0,
     streakLog: (Array.isArray(p.streak_log) ? p.streak_log : []) as ('on' | 'off')[],
     dayClosedToday: !!p.day_closed_today,
-    online: !!p.online,
+    online: false,
     phone: (p.phone as string) || '',
     email: (p.contact_email as string) || '',
     bankInfo: (p.bank_info as string) || '',
@@ -32,18 +30,6 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
   };
 }
 
-// --- Persistencia ---
-// Las tareas/videos (con sus clips, imágenes principales, notas, estados de
-// aprobación/rechazo) y las notificaciones son la información que Clipper y
-// Admin comparten entre sí, y por eso viven en Supabase (tabla `platform_kv`,
-// ver supabase/migrations): un mismo dato se ve igual desde cualquier
-// dispositivo, navegador o sesión. El resto de la plataforma (equipo, chat,
-// calendario, academia) no fue parte de esta corrección y sigue igual que
-// antes, guardado en localStorage.
-//
-// Si Supabase todavía no está configurado (faltan las variables de entorno),
-// la app no se rompe: sigue guardando en localStorage como respaldo, tal
-// como funcionaba antes, hasta que se configure la conexión.
 const STORAGE_PREFIX = 'senda_platform_';
 type SharedKey = 'brands' | 'notifications' | 'orders';
 
@@ -65,18 +51,11 @@ function saveState<T>(key: string, value: T) {
   }
 }
 
-// Guarda un dato compartido (brands/notifications): siempre en localStorage
-// como respaldo instantáneo, y además en Supabase cuando está configurado,
-// que es la fuente real compartida entre dispositivos.
 function persistShared<T>(key: SharedKey, value: T) {
   saveState(key, value);
   if (isSupabaseConfigured) void saveShared(key, value);
 }
 
-// --- Notificaciones ---
-// Cada rol solo puede recibir ciertas categorías de notificación, tal como
-// se definió con el cliente: el clíper y el editor reciben únicamente lo
-// que les corresponde a su flujo de trabajo; el admin recibe todo.
 const CATEGORIES_BY_ROLE: Record<Role, NotificationCategory[]> = {
   clipper: ['trabajo_asignado', 'qc_clip', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   editor: ['trabajo_asignado', 'clips_enviados', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
@@ -85,9 +64,6 @@ const CATEGORIES_BY_ROLE: Record<Role, NotificationCategory[]> = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Las notificaciones de clíper y editor se reinician cada 24 horas (se
-// guardan todas mientras tanto). Las del admin nunca se reinician solas:
-// solo se borran manualmente desde el panel de administración.
 function applyNotificationReset(list: NotificationItem[]): NotificationItem[] {
   const now = Date.now();
   const resetRoles: Role[] = ['clipper', 'editor'];
@@ -156,14 +132,12 @@ interface Store {
   deleteCalendarEvent: (id: string) => void;
   updateWorkerProfile: (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => void;
 
-  // --- Contratos ---
   contracts: Contract[];
   contractSignedUploads: ContractSignedUpload[];
   uploadContract: (title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => void;
   deleteContract: (contractId: string) => void;
   uploadSignedContract: (contractId: string, fileName: string, fileUrl: string) => void;
 
-  // --- Chat (grupos + privados) ---
   chatGroups: ChatGroup[];
   chatMessages: ChatMsg[];
   adminProfiles: AdminProfile[];
@@ -173,10 +147,8 @@ interface Store {
   startAdminDm: (workerId: string) => Promise<string | null>;
   deleteChatGroup: (groupId: string) => Promise<void>;
 
-  // --- Notificaciones permanentes (para la pestaña "Notificaciones" del chat) ---
   notificationsArchive: NotificationItem[];
 
-  // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
   orders: Order[];
   addOrder: (o: Omit<Order, 'id' | 'createdAt'>) => void;
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
@@ -207,6 +179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<ViewKey>('home');
   const [brands, setBrands] = useState<Brand[]>(() => loadState('brands', INITIAL_BRANDS));
   const [workers, setWorkers] = useState<Worker[]>(() => loadState('workers', INITIAL_WORKERS));
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(() => new Set());
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => applyNotificationReset(loadState('notifications', INITIAL_NOTIFICATIONS)));
   const [emailLog, setEmailLog] = useState<EmailLogEntry[]>(() => loadState('emailLog', [] as EmailLogEntry[]));
   const [chat, setChat] = useState<ChatMessage[]>(() => loadState('chat', INITIAL_CHAT));
@@ -214,10 +187,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [config] = useState<Config>(CONFIG);
   const [currentWorkerId, setCurrentWorkerId] = useState('w1');
 
-  // El "trabajador actual" siempre debe ser la persona que inició sesión
-  // (no un usuario de ejemplo fijo). Así el nombre, cargo, puntos y demás
-  // datos que se muestran en Perfil/Inicio/Tareas corresponden siempre a
-  // la cuenta con la que se entró, sea quien sea.
   useEffect(() => {
     if (user?.id) setCurrentWorkerId(user.id);
   }, [user?.id]);
@@ -233,15 +202,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [adminProfiles, setAdminProfiles] = useState<AdminProfile[]>([]);
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
-  // Volumen máximo de proyectos activos configurado por el Admin para cada
-  // clíper/editor. Vive aparte de `workers` porque cuando Supabase está
-  // configurado, `workers` se recarga desde la tabla `profiles` (que no
-  // tiene esta columna) y no debe borrar lo que el Admin configuró aquí.
   const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
 
-  // Guarda automáticamente cualquier cambio (archivos subidos, notas,
-  // correcciones, imágenes, videos finales) para que quede visible para
-  // quien corresponda incluso después de recargar la página.
   useEffect(() => { persistShared('brands', brands); }, [brands]);
   useEffect(() => { persistShared('orders', orders); }, [orders]);
   useEffect(() => { saveState('workers', workers); }, [workers]);
@@ -254,11 +216,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
   useEffect(() => { saveState('workerCapacities', workerCapacities); }, [workerCapacities]);
 
-  // Al abrir la plataforma (o entrar desde otro dispositivo/navegador),
-  // se trae la versión real y compartida de tareas/clips/imágenes y
-  // notificaciones desde Supabase, para que se vea lo mismo en todos lados.
-  // Si Supabase no está configurado, se queda con lo que ya se cargó de
-  // localStorage arriba (comportamiento anterior).
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     let active = true;
@@ -273,9 +230,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, []);
 
-  // --- Todo en vivo: cuando algo cambia en Supabase (en cualquier sesión,
-  // dispositivo o navegador), se refleja automáticamente aquí, sin que
-  // nadie tenga que recargar la página. ---
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     const unsub = subscribeToTable('platform_kv', () => {
@@ -291,8 +245,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, []);
 
-  // Revisa cada minuto si ya pasaron 24 horas para reiniciar las
-  // notificaciones de clíper/editor mientras la app sigue abierta.
   useEffect(() => {
     const id = setInterval(() => {
       setNotifications(prev => applyNotificationReset(prev));
@@ -300,9 +252,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, []);
 
-  // --- Trabajadores reales: se cargan desde `profiles` (usuarios de verdad
-  // registrados por el Admin), con toda su información (nombre, cargo,
-  // puntos, teléfono, banco, etc.) y se mantienen sincronizados en vivo. ---
   const loadWorkersFromProfiles = useCallback(async () => {
     if (!supabase) return;
     const { data } = await supabase.from('profiles').select('*');
@@ -318,39 +267,94 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    // Se vuelve a cargar cada vez que cambia la sesión (login/logout), no
-    // solo al montar la app: si esto se ejecuta antes de que la sesión de
-    // Supabase termine de restaurarse, la consulta a `profiles` (protegida
-    // por RLS) puede no traer nada, y sin este re-disparo el perfil de
-    // quien inició sesión (sobre todo cliper/editor) se quedaba "vacío"
-    // hasta que algo más disparara una recarga.
     void loadWorkersFromProfiles();
     const unsub = subscribeToTable('profiles', () => { void loadWorkersFromProfiles(); });
     return unsub;
   }, [loadWorkersFromProfiles, user?.id]);
 
-  // --- Estado "en línea" automático ---
-  // Al iniciar sesión, el cliper/editor debe verse "En línea" de inmediato
-  // (antes había que activarlo a mano). Al cerrar sesión o cerrar la
-  // pestaña, se marca "No en línea" para que el admin siempre vea el
-  // estado real del equipo.
+  // --- Estado "En línea" en tiempo real (Supabase Realtime Presence) ---
+  // Mantiene al usuario "En línea" únicamente mientras tenga la página abierta
+  // en su navegador (aunque esté navegando en otra pestaña). Al cerrar la
+  // página o pestaña en su navegador, pasa a "No en línea" en tiempo real.
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !user?.id || role === 'admin') return;
-    const workerId = user.id;
-    setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, online: true } : w));
-    void supabase.from('profiles').update({ online: true }).eq('id', workerId);
+    if (!isSupabaseConfigured || !supabase || !user?.id) {
+      setOnlineUserIds(new Set());
+      return;
+    }
 
-    const markOffline = () => {
-      if (!supabase) return;
-      void supabase.from('profiles').update({ online: false }).eq('id', workerId);
+    const currentUserId = user.id;
+    const channel = supabase.channel('senda_online_presence', {
+      config: {
+        presence: { key: currentUserId },
+      },
+    });
+
+    const syncOnlineUsers = () => {
+      const state = channel.presenceState<{ user_id?: string }>();
+      const nextIds = new Set<string>();
+      for (const [key, presences] of Object.entries(state)) {
+        if (Array.isArray(presences) && presences.length > 0) {
+          nextIds.add(key);
+          for (const p of presences) {
+            if (p && typeof p.user_id === 'string') {
+              nextIds.add(p.user_id);
+            }
+          }
+        }
+      }
+      if (role !== 'admin') {
+        nextIds.add(currentUserId);
+      }
+      setOnlineUserIds(nextIds);
     };
-    window.addEventListener('beforeunload', markOffline);
+
+    channel
+      .on('presence', { event: 'sync' }, syncOnlineUsers)
+      .on('presence', { event: 'join' }, syncOnlineUsers)
+      .on('presence', { event: 'leave' }, syncOnlineUsers)
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          if (role !== 'admin') {
+            await channel.track({
+              user_id: currentUserId,
+              role,
+              online_at: new Date().toISOString(),
+            });
+            void supabase.from('profiles').update({ online: true }).eq('id', currentUserId);
+          }
+          syncOnlineUsers();
+        }
+      });
+
+    const handlePageClose = () => {
+      if (role !== 'admin') {
+        void channel.untrack();
+        void supabase.from('profiles').update({ online: false }).eq('id', currentUserId);
+      }
+    };
+
+    window.addEventListener('pagehide', handlePageClose);
+    window.addEventListener('beforeunload', handlePageClose);
+
     return () => {
-      window.removeEventListener('beforeunload', markOffline);
+      window.removeEventListener('pagehide', handlePageClose);
+      window.removeEventListener('beforeunload', handlePageClose);
+      if (role !== 'admin') {
+        void channel.untrack();
+        void supabase.from('profiles').update({ online: false }).eq('id', currentUserId);
+      }
+      void supabase.removeChannel(channel);
     };
   }, [user?.id, role]);
 
-  // --- Contratos: carga inicial + tiempo real ---
+  const workersWithOnline = useMemo(() => {
+    if (!isSupabaseConfigured) return workers;
+    return workers.map(w => ({
+      ...w,
+      online: onlineUserIds.has(w.id),
+    }));
+  }, [workers, onlineUserIds]);
+
   const loadContracts = useCallback(async () => {
     if (!supabase) return;
     const { data } = await supabase.from('contracts').select('*').order('created_at', { ascending: false });
@@ -378,7 +382,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { unsub1(); unsub2(); };
   }, [loadContracts, user]);
 
-  // --- Chat: grupos, miembros y mensajes, con tiempo real ---
   const loadChat = useCallback(async () => {
     if (!supabase || !user) return;
     const { data: groups } = await supabase.from('chat_groups').select('*').order('created_at', { ascending: true });
@@ -415,8 +418,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [loadChat, user]);
 
-  // Cada persona (clíper/editor) siempre debe tener un chat privado con el
-  // Admin listo, sin que nadie tenga que crearlo a mano.
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !user || role === 'admin') return;
     (async () => {
@@ -443,7 +444,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })();
   }, [user, role, chatGroups, loadChat]);
 
-  // --- Notificaciones permanentes (pestaña "Notificaciones" del chat) ---
   const loadNotificationsArchive = useCallback(async () => {
     if (!supabase) return;
     const { data } = await supabase.from('notifications_log').select('*').order('created_at', { ascending: false }).limit(500);
@@ -462,11 +462,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [loadNotificationsArchive, user]);
 
-  // Referencia siempre actualizada a `workers`, para poder leer el correo y
-  // la preferencia de notificaciones dentro de callbacks sin generar
-  // dependencias circulares ni funciones desactualizadas.
-  const workersRef = useRef<Worker[]>(workers);
-  useEffect(() => { workersRef.current = workers; }, [workers]);
+  const workersRef = useRef<Worker[]>(workersWithOnline);
+  useEffect(() => { workersRef.current = workersWithOnline; }, [workersWithOnline]);
   const brandsRef = useRef<Brand[]>(brands);
   useEffect(() => { brandsRef.current = brands; }, [brands]);
   const ordersRef = useRef<Order[]>(orders);
@@ -475,10 +472,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return brandsRef.current.flatMap(b => b.videos).find(v => v.id === videoId) || null;
   }, []);
 
-  // Crea una notificación respetando qué categorías puede recibir cada rol,
-  // la guarda (se acumulan todas) y, si el trabajador destino activó
-  // "recibir notificaciones al correo", deja registro en el log de correos
-  // simulado (ver nota en sendEmailNotification más abajo).
   const pushNotification = useCallback((role: Role, category: NotificationCategory, text: string, workerId?: string | null) => {
     if (!CATEGORIES_BY_ROLE[role].includes(category)) return;
     const item: NotificationItem = {
@@ -497,13 +490,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (workerId) {
       const w = workersRef.current.find(x => x.id === workerId);
       if (w && w.emailNotifications && w.email) {
-        // NOTA IMPORTANTE: esta app es un front-end (SPA) sin servidor propio,
-        // por lo que no puede enviar correos reales desde el navegador. Aquí
-        // se deja el correo "listo para enviar" en un registro (emailLog),
-        // simulando el envío. Para que llegue de verdad a la bandeja de
-        // entrada del clíper/editor/admin hace falta conectar un servicio de
-        // envío (ej. una función backend con Resend, SendGrid o SMTP) que
-        // lea este mismo registro y lo despache.
         setEmailLog(prev => [{
           id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           workerId, to: w.email!, subject: 'Notificación de SENDA', body: text,
@@ -564,10 +550,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateVideo]);
 
-  // El Clipper reemplaza el archivo de un clip que ya subió (por ejemplo,
-  // tras un rechazo). Se conserva el mismo clip (mismo id), se guarda la
-  // versión anterior en el historial y vuelve a quedar "pending" para que
-  // el Admin lo revise de nuevo.
   const replaceClip = useCallback((videoId: string, clipId: string, fileName: string, fileUrl: string) => {
     updateVideo(videoId, v => ({
       ...v,
@@ -588,8 +570,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateVideo]);
 
-  // El Admin marca un momento concreto (en segundos) dentro del video del
-  // clip que está revisando.
   const setClipMarkerTime = useCallback((videoId: string, clipId: string, time: number) => {
     updateVideo(videoId, v => ({
       ...v,
@@ -597,8 +577,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateVideo]);
 
-  // El Admin aprueba o rechaza un clip puntual, con motivo opcional (obligatorio
-  // en la interfaz cuando se rechaza). Notifica al Clipper correspondiente.
   const setClipStatus = useCallback((videoId: string, clipId: string, status: ClipStatus, reason?: string) => {
     updateVideo(videoId, v => ({
       ...v,
@@ -621,8 +599,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
-  // El Admin acepta de una vez todos los clips pendientes de esta tarea
-  // (y solo de esta tarea). Notifica al Clipper una sola vez.
   const acceptAllClips = useCallback((videoId: string) => {
     const v = findVideo(videoId);
     const clipsToApprove = v ? v.clips.filter(c => c.fileUrl && c.status !== 'approved') : [];
@@ -701,9 +677,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const sendChat = useCallback((text: string) => {
     setChat(prev => [...prev, { id: `c-${Date.now()}`, type: 'out', text }]);
-    // Notifica el mensaje enviado en la bandeja de mensajes: al admin
-    // siempre (supervisa todos los canales) y también queda visible como
-    // "movimiento" en su panel.
     pushNotification('admin', 'mensaje', `Nuevo mensaje en el chat: "${text}"`);
   }, [pushNotification]);
 
@@ -764,7 +737,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // --- Contratos ---
   const uploadContract = useCallback((title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => {
     if (!isSupabaseConfigured || !supabase) return;
     void supabase.from('contracts').insert({
@@ -784,7 +756,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, { onConflict: 'contract_id,worker_id' }).then(() => loadContracts());
   }, [user, loadContracts]);
 
-  // --- Chat ---
   const createChatGroup = useCallback(async (name: string, memberIds: string[]) => {
     if (!isSupabaseConfigured || !supabase || !user) return;
     const { data: group } = await supabase.from('chat_groups').insert({ name, is_dm: false, created_by: user.id }).select('id').single();
@@ -825,10 +796,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return newGroup.id as string;
   }, [user, chatGroups, loadChat]);
 
-  // Elimina una conversación completa (grupo o privado) junto con sus
-  // miembros y mensajes (cascada por FK). Las políticas de Supabase ya
-  // restringen esta operación a administradores; aquí además se evita
-  // llamarla si por alguna razón el rol activo no es admin.
   const deleteChatGroup = useCallback(async (groupId: string) => {
     if (!isSupabaseConfigured || !supabase || !user || role !== 'admin') return;
     await supabase.from('chat_groups').delete().eq('id', groupId);
@@ -860,7 +827,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
-  // --- Classroom (Academia Senda) ---
   const addClassroomModule = useCallback((title: string, desc: string, color: string) => {
     setClassroomModules(prev => [...prev, { id: `mod-${Date.now()}`, title, desc, color, lessons: [] }]);
   }, []);
@@ -891,25 +857,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // --- Pedidos / Proyectos (panel de Admin: Inicio y Tareas) ---
   const assignClipper = useCallback((videoId: string, workerId: string) => {
     setBrands(prev => prev.map(b => ({
       ...b,
       videos: b.videos.map(v => v.id === videoId ? {
         ...v,
         clipperId: workerId,
-        clipperName: workers.find(w => w.id === workerId)?.name || 'Desconocido',
+        clipperName: workersWithOnline.find(w => w.id === workerId)?.name || 'Desconocido',
         qc: 'pendiente'
       } : v),
     })));
 
     const v = brands.flatMap(b => b.videos).find(vid => vid.id === videoId);
-    const w = workers.find(wrk => wrk.id === workerId);
+    const w = workersWithOnline.find(wrk => wrk.id === workerId);
     if (v && w) {
       pushNotification('clipper', 'trabajo_asignado', `Nuevo trabajo asignado: "${v.name}"`, workerId);
       pushNotification('admin', 'trabajo_asignado', `El proyecto "${v.name}" ha sido asignado a ${w.name}`);
     }
-  }, [brands, workers, pushNotification]);
+  }, [brands, workersWithOnline, pushNotification]);
 
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
     setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
@@ -923,10 +888,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setOrders(prev => prev.filter(o => o.id !== id));
   }, []);
 
-  // El Admin arma un pedido nuevo (marca + brief + fecha/hora de entrega) y
-  // lo asigna a uno o varios clíper/editores disponibles. Queda visible en
-  // "Proyectos disponibles" y cada persona asignada recibe la notificación
-  // de trabajo asignado de inmediato.
   const assignProject = useCallback((brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => {
     addOrder({
       brand, videoCount: workerIds.length || 1, deliveryDate, deliveryTime,
@@ -941,9 +902,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pushNotification('admin', 'trabajo_asignado', `Pedido de "${brand}" asignado a ${workerIds.length} persona(s)`);
   }, [addOrder, pushNotification]);
 
-  // Volumen máximo de proyectos activos configurado por el Admin para un
-  // clíper/editor puntual. Si nunca se configuró, se usa el valor por
-  // defecto (ver DEFAULT_DAILY_CAPACITY en data.ts).
   const getWorkerCapacity = useCallback((workerId: string): number => {
     return workerCapacities[workerId] ?? DEFAULT_DAILY_CAPACITY;
   }, [workerCapacities]);
@@ -952,20 +910,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setWorkerCapacities(prev => ({ ...prev, [workerId]: Math.max(1, Math.round(capacity) || 1) }));
   }, []);
 
-  // Cuántos proyectos activos (no finalizados) tiene hoy un clíper/editor.
-  // Esto es lo que decide el orden en el que aparecen al momento de
-  // asignar: primero el que menos carga tiene.
   const getWorkerWorkload = useCallback((workerId: string): number => {
     return ordersRef.current.filter(o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId)).length;
   }, []);
 
-  // Cuando un pedido queda con clíper Y editor(a) asignados, se "promueve"
-  // automáticamente: se crea su tarjeta de video dentro de la marca
-  // correspondiente (se crea la marca si no existía todavía), con estado
-  // "sin_iniciar", para que aparezca de inmediato en "Proyectos iniciados"
-  // (el tablero de estados: sin iniciar, pendiente, revisión, etc.). El
-  // pedido en sí no se borra (queda como historial), pero se filtra de
-  // "Proyectos disponibles" en cuanto tiene ambos roles asignados.
   const createBoardVideoForOrder = useCallback((order: Order, clipperId: string, editorId: string): string => {
     const clipper = workersRef.current.find(w => w.id === clipperId);
     const editor = workersRef.current.find(w => w.id === editorId);
@@ -1007,14 +955,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return videoId;
   }, []);
 
-  // Paso 2 del flujo de "Proyectos disponibles": ya con el brief, el avatar,
-  // las referencias y las notas del cliente a la vista, el Admin elige un
-  // clíper y un editor (ambos ordenados por volumen de trabajo) y confirma
-  // con "Asignar trabajo". A partir de ahí: (1) el pedido queda marcado como
-  // asignado, (2) cada persona recibe la notificación en la app y, si activó
-  // el correo, también por email (pushNotification ya hace ambas cosas), y
-  // (3) además les llega un mensaje del Admin en Mensajes con el detalle de
-  // entrega, aprovechando el chat privado Admin↔persona que ya existe.
   const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
     const order = ordersRef.current.find(o => o.id === orderId);
     if (!order) return;
@@ -1031,7 +971,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
 
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
 
@@ -1046,22 +986,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (groupId) await sendChatGroupMessage(groupId, msg);
         }
       } catch {
-        // Si el mensaje de chat falla (p.ej. sin conexión), la notificación
-        // y el correo ya quedaron registrados arriba, así que no se pierde.
+        // Si el mensaje de chat falla, la notificación ya quedó registrada.
       }
     }
   }, [updateOrder, pushNotification, startAdminDm, sendChatGroupMessage, createBoardVideoForOrder]);
 
-  // --- Asignación por pasos: el Admin puede asignar primero solo el
-  // clíper y, más tarde (en otro momento), asignar el editor(a) al mismo
-  // proyecto, sin tener que elegir ambos a la vez. El pedido pasa a
-  // "asignado" recién cuando ambos roles quedan cubiertos; mientras tanto
-  // sigue mostrando la opción de completar el rol que falte. ---
   const notifyPersonAssigned = useCallback(async (order: Order, role: 'clipper' | 'editor', workerId: string) => {
     const worker = workersRef.current.find(w => w.id === workerId);
     if (!worker) return;
     const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
+      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las \${order.deliveryTime}` : ''}`
       : 'sin fecha de entrega definida todavía';
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
     pushNotification(role, 'trabajo_asignado', msg, workerId);
@@ -1071,7 +1005,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const groupId = await startAdminDm(workerId);
         if (groupId) await sendChatGroupMessage(groupId, msg);
       } catch {
-        // Si el mensaje de chat falla, la notificación y el correo ya quedaron registrados arriba.
+        // Si el mensaje de chat falla, la notificación ya quedó registrada.
       }
     }
   }, [pushNotification, startAdminDm, sendChatGroupMessage]);
@@ -1106,7 +1040,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const store: Store = {
     role, theme, toggleTheme, view, setView,
-    brands, workers, notifications, deleteNotification, clearNotifications, emailLog,
+    brands, workers: workersWithOnline, notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,
     selectedVideo, setSelectedVideo,

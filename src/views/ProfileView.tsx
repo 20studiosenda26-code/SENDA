@@ -3,7 +3,7 @@ import { Flame, TrendingUp, Target, CheckCircle2, Award, Star, Phone, Mail, Land
 import { useState, useEffect } from 'react';
 
 export function ProfileView() {
-  const { workers, currentWorkerId, brands, config, role, updateWorkerProfile, toggleOnline } = useStore();
+  const { workers, currentWorkerId, brands, config, role, updateWorkerProfile } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
 
   const [phone, setPhone] = useState('');
@@ -51,13 +51,10 @@ export function ProfileView() {
             <div className="flex items-center gap-3 mt-1">
               <span className="inline-flex items-center gap-1 text-xs text-mint"><CheckCircle2 size={12} /> {worker.estado}</span>
               {role !== 'admin' && (
-                <button
-                  onClick={() => toggleOnline(worker.id)}
-                  className={`inline-flex items-center gap-1.5 text-xs font-medium ${worker.online ? 'text-mint' : 'text-muted-2'}`}
-                >
+                <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${worker.online ? 'text-mint' : 'text-muted-2'}`}>
                   <span className={`w-2 h-2 rounded-full ${worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
                   {worker.online ? 'En línea' : 'No en línea'}
-                </button>
+                </span>
               )}
             </div>
           </div>
