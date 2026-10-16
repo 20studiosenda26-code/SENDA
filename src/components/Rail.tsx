@@ -1,12 +1,13 @@
 import { useStore } from '../store';
 import type { ViewKey, Role } from '../types';
 import { useAuth } from '../lib/auth';
-import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, DollarSign, Wallet, Gauge, Shield, Moon, Sun, LogOut } from 'lucide-react';
+import { Home, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Briefcase, DollarSign, Wallet, Gauge, Shield, Moon, Sun, LogOut } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 
 const NAV: { key: ViewKey; label: string; icon: typeof Home; roles: Role[] }[] = [
   { key: 'home', label: 'Inicio', icon: Home, roles: ['clipper', 'editor', 'admin'] },
   { key: 'tareas', label: 'Tareas', icon: CheckSquare, roles: ['clipper', 'editor', 'admin'] },
+  { key: 'clientes', label: 'Clientes', icon: Briefcase, roles: ['admin'] },
   { key: 'chat', label: 'Chat', icon: MessageSquare, roles: ['clipper', 'editor', 'admin'] },
   { key: 'calendario', label: 'Calendario', icon: Calendar, roles: ['clipper', 'editor', 'admin'] },
   { key: 'classroom', label: 'Classroom', icon: GraduationCap, roles: ['clipper', 'editor', 'admin'] },

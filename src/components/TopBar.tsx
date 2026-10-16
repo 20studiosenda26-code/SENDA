@@ -38,6 +38,7 @@ const ROLE_LABELS: Record<Role, string> = {
 const VIEW_TITLES: Record<string, string> = {
   home: 'Inicio',
   tareas: 'Tareas',
+  clientes: 'Clientes y Pedidos Comerciales',
   chat: 'Chat',
   calendario: 'Calendario',
   classroom: 'Classroom',

@@ -5,6 +5,7 @@ import { TopBar } from './components/TopBar';
 import { BrandBackground } from './components/BrandBackground';
 import { HomeView } from './views/HomeView';
 import { TasksView } from './views/TasksView';
+import { ClientsView } from './views/ClientsView';
 import { ChatView } from './views/ChatView';
 import { CalendarView } from './views/CalendarView';
 import { ClassroomView } from './views/ClassroomView';
@@ -49,6 +50,7 @@ function Shell() {
     switch (view) {
       case 'home': return <HomeView />;
       case 'tareas': return <TasksView />;
+      case 'clientes': return user.role === 'admin' ? <ClientsView /> : <HomeView />;
       case 'chat': return <ChatView />;
       case 'calendario': return <CalendarView />;
       case 'classroom': return <ClassroomView />;

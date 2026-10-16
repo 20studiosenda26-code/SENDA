@@ -68,7 +68,6 @@ export function FinancesView() {
   const [dateTo, setDateTo] = useState<string>(() => todayIso());
   const [reportTab, setReportTab] = useState<ReportTab>('aprobado_cliente');
 
-  // Todo el registro y listado de Apps/Créditos vive dentro de su propio recuadro al hacer clic
   const [appsBoxOpen, setAppsBoxOpen] = useState(false);
   const [expLabel, setExpLabel] = useState('');
   const [expAmount, setExpAmount] = useState('');
@@ -115,10 +114,10 @@ export function FinancesView() {
       if (hasBothAssigned || o.promotedToBoard || o.status === 'finalizado') continue;
 
       const count = Math.max(1, o.videoCount || 1);
-      const pricePerVid = o.unitPriceClient || unitPrice;
+      const pricePerVid = o.unitPriceClient ?? unitPrice;
       const gross = count * pricePerVid;
-      const clipperCost = count * defClipper;
-      const editorCost = count * defEditor;
+      const clipperCost = count * (o.unitClipperPay ?? defClipper);
+      const editorCost = count * (o.unitEditorPay ?? defEditor);
       const totalCreatorCost = clipperCost + editorCost;
       const clipperW = workers.find(w => w.id === o.clipperId);
       const editorW = workers.find(w => w.id === o.editorId);
@@ -150,11 +149,11 @@ export function FinancesView() {
       for (const v of b.videos) {
         const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(b.name.trim().toLowerCase());
         const count = linked ? Math.max(1, linked.videoCount || 1) : 1;
-        const pricePerVid = linked?.unitPriceClient || unitPrice;
+        const pricePerVid = linked?.unitPriceClient ?? unitPrice;
         const gross = count * pricePerVid;
 
-        const unitClipperPay = v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper;
-        const unitEditorPay = v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor;
+        const unitClipperPay = linked?.unitClipperPay ?? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper);
+        const unitEditorPay = linked?.unitEditorPay ?? (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
         const clipperCost = count * unitClipperPay;
         const editorCost = count * unitEditorPay;
         const totalCreatorCost = clipperCost + editorCost;
@@ -494,7 +493,6 @@ export function FinancesView() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
-      {/* Cabecera */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-mint-dim border border-mint/30 text-mint flex items-center justify-center shadow-[0_0_20px_-4px_rgba(111,231,200,0.35)]">
@@ -515,7 +513,6 @@ export function FinancesView() {
         </button>
       </div>
 
-      {/* Selector de Períodos */}
       <div className="bg-surface-2 border border-line rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-muted flex items-center gap-1.5 mr-1">
@@ -566,9 +563,8 @@ export function FinancesView() {
         )}
       </div>
 
-      {/* HERO: Ingreso Neto Realizado con animación de pulso y partículas de circuito SENDA */}
+      {/* HERO: Ingreso Neto Realizado */}
       <div className="relative bg-surface-2 border border-mint/40 rounded-2xl p-6 sm:p-7 overflow-hidden shadow-[0_0_50px_-14px_rgba(111,231,200,0.32)]">
-        {/* Halo respirante */}
         <div
           className="absolute -left-16 -top-16 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-30 animate-pulse"
           style={{ background: 'radial-gradient(circle, var(--mint), transparent 70%)' }}
@@ -578,7 +574,6 @@ export function FinancesView() {
           style={{ background: 'radial-gradient(circle, var(--accent), transparent 70%)' }}
         />
 
-        {/* Circuito de marca con pulsos viajeros */}
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
           viewBox="0 0 900 260"
@@ -602,9 +597,7 @@ export function FinancesView() {
             </filter>
           </defs>
 
-          {/* Ramas base estilo isotipo Senda */}
           <path
-            id="circuitPathMain"
             d="M 280 225 L 430 225 L 485 165 L 610 165 L 665 105 L 790 105"
             stroke="url(#sendaNetGrad1)"
             strokeWidth="2.5"
@@ -612,7 +605,6 @@ export function FinancesView() {
             strokeLinejoin="round"
           />
           <path
-            id="circuitPathTop"
             d="M 390 35 L 510 35 L 560 85 L 695 85 L 740 50 L 835 50"
             stroke="url(#sendaNetGrad2)"
             strokeWidth="2"
@@ -628,7 +620,6 @@ export function FinancesView() {
             strokeLinejoin="round"
           />
 
-          {/* Partículas de energía viajando por las ramas */}
           <circle r="4" fill="var(--mint)" filter="url(#sendaGlow)">
             <animateMotion dur="4.2s" repeatCount="indefinite" path="M 280 225 L 430 225 L 485 165 L 610 165 L 665 105 L 790 105" />
           </circle>
@@ -636,7 +627,6 @@ export function FinancesView() {
             <animateMotion dur="5.1s" repeatCount="indefinite" path="M 390 35 L 510 35 L 560 85 L 695 85 L 740 50 L 835 50" />
           </circle>
 
-          {/* Nodos de circuito */}
           <circle cx="430" cy="225" r="4" fill="#E7ECEF" fillOpacity="0.7" />
           <circle cx="485" cy="165" r="5" fill="none" stroke="var(--accent)" strokeWidth="2" />
           <circle cx="610" cy="165" r="4" fill="var(--mint)" />
@@ -644,7 +634,6 @@ export function FinancesView() {
           <circle cx="695" cy="85" r="4" fill="var(--accent)" />
           <circle cx="635" cy="205" r="3.5" fill="var(--accent)" />
 
-          {/* Nodo receptor con anillo orbital animado */}
           <g transform="translate(790, 105)">
             <circle r="16" fill="none" stroke="var(--mint)" strokeWidth="1.2" strokeDasharray="6 5" opacity="0.65">
               <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="10s" repeatCount="indefinite" />
@@ -658,7 +647,6 @@ export function FinancesView() {
         </svg>
 
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          {/* Bloque izquierdo: Ingreso Neto Realizado */}
           <div className="lg:col-span-7 space-y-4">
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-mint-dim border border-mint/30 text-mint text-xs font-semibold tracking-wide">
@@ -701,7 +689,6 @@ export function FinancesView() {
             </div>
           </div>
 
-          {/* Bloque derecho: Nómina Creadores */}
           <div className="lg:col-span-5 bg-surface/85 backdrop-blur-md border border-line rounded-xl p-4 space-y-3 relative overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-text flex items-center gap-1.5">
@@ -752,9 +739,8 @@ export function FinancesView() {
         </div>
       </div>
 
-      {/* 3 Tarjetas: Ingreso Diferido | Ingreso Bruto (Aprobado Senda) | Apps, Créditos y Material (con desplegable interno) */}
+      {/* 3 Tarjetas: Ingreso Diferido | Ingreso Bruto | Apps, Créditos y Material */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-        {/* 1. Ingreso Diferido */}
         <button
           type="button"
           onClick={() => setReportTab('no_iniciados')}
@@ -775,7 +761,6 @@ export function FinancesView() {
           </p>
         </button>
 
-        {/* 2. Ingreso Bruto (Aprobado Senda) */}
         <button
           type="button"
           onClick={() => setReportTab('aprobado_senda')}
@@ -796,7 +781,6 @@ export function FinancesView() {
           </p>
         </button>
 
-        {/* 3. Apps, Créditos y Material (Todo se despliega aquí adentro al hacer clic) */}
         <div
           className={`relative bg-surface-2 border rounded-xl p-5 overflow-hidden transition-all ${
             appsBoxOpen ? 'border-violet ring-1 ring-violet/30' : 'border-line hover:border-violet/40'
@@ -834,7 +818,6 @@ export function FinancesView() {
             </div>
           </div>
 
-          {/* Contenido interno desplegable solo al hacer clic */}
           {appsBoxOpen && (
             <div className="mt-4 pt-3.5 border-t border-line space-y-3 animate-fadeIn">
               <form onSubmit={handleAddExpense} className="space-y-2 bg-surface-3 p-3 rounded-lg border border-line">
@@ -1027,7 +1010,6 @@ export function FinancesView() {
         )}
       </div>
 
-      {/* Historial compacto de cierres PDF */}
       {financeClosings.length > 0 && (
         <div className="bg-surface-2 border border-line rounded-xl p-4 space-y-2.5">
           <h3 className="font-display text-sm font-semibold flex items-center gap-2 text-muted">

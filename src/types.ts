@@ -1,6 +1,6 @@
 export type Role = 'clipper' | 'editor' | 'admin';
 export type ThemeMode = 'dark' | 'light';
-export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'finanzas' | 'nominas' | 'capacidad' | 'administracion';
+export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'clientes' | 'finanzas' | 'nominas' | 'capacidad' | 'administracion';
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
@@ -234,6 +234,9 @@ export interface Order {
   promotedToBoard?: boolean;
   boardVideoId?: string | null;
   unitPriceClient?: number;
+  unitClipperPay?: number;
+  unitEditorPay?: number;
+  clipsPerVideo?: number;
   priority?: 'normal' | 'prioritario' | 'urgente' | 'critico';
   complexity?: 'simple' | 'estandar' | 'alta';
 }
@@ -290,23 +293,14 @@ export interface PayrollPayment {
   paidAt: string;
 }
 
-/** Configuración del Motor de Capacidad y Protocolo Operativo */
 export interface CapacityProtocolConfig {
-  /** Porcentaje de margen de seguridad comercial (ej. 15% => capacidad segura = 85% de la física) */
   safetyMarginPct: number;
-  /** Capacidad teórica base de videos/día por cada Clipper activo */
   defaultClipperDailyVideos: number;
-  /** Capacidad teórica base de videos/día por cada Editor activo */
   defaultEditorDailyVideos: number;
-  /** Hora de inicio del bloque operativo (ej. 8 = 08:00) */
   workdayStartHour: number;
-  /** Hora de cierre del bloque operativo (ej. 20 = 20:00) */
   workdayEndHour: number;
-  /** Minutos máximos sin respuesta antes de disparar recordatorio */
   maxNoResponseMinutes: number;
-  /** Horas máximas sin movimiento antes de sugerir reasignación */
   maxStalledHours: number;
-  /** Horas antes del vencimiento para escalar a Urgente / Crítico */
   urgentThresholdHours: number;
 }
 
