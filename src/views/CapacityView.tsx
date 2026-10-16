@@ -5,7 +5,7 @@ import { CardNodeDeco } from '../components/BrandBackground';
 import {
   Gauge, Scissors, Film, AlertTriangle, CheckCircle2, Clock,
   Sliders, Sparkles, RefreshCw, ShieldAlert, TrendingUp,
-  UserPlus, Eye, Zap, Calendar, PlusCircle, LayoutGrid, X,
+  UserPlus, Zap, Calendar, LayoutGrid, X, Users, Layers,
 } from 'lucide-react';
 
 type ActiveScreen = 'dashboard' | '1' | '2' | '3' | '4';
@@ -63,21 +63,15 @@ function formatHour(h: number): string {
 export function CapacityView() {
   const {
     workers, orders, brands, capacityConfig, updateCapacityConfig,
-    getWorkerCapacity, setWorkerCapacity, addOrder, assignOrderClipper, assignOrderEditor,
+    getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor,
   } = useStore();
 
   const [screen, setScreen] = useState<ActiveScreen>('dashboard');
-  const [clientMode, setClientMode] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
 
-  // --- Estado Punto 1 (Cotizador / Evaluador) ---
-  const [evalBrand, setEvalBrand] = useState('Nuevo Pedido');
-  const [evalVideos, setEvalVideos] = useState<number>(25);
-  const [evalClipsPerVideo, setEvalClipsPerVideo] = useState<number>(3);
-  const [evalDate, setEvalDate] = useState<string>(() => todayIso());
+  // --- Estado Punto 1 (Cotizador y Tandas: solo volumen 1..200 y complejidad) ---
+  const [evalVideos, setEvalVideos] = useState<number>(30);
   const [evalComplexity, setEvalComplexity] = useState<'simple' | 'estandar' | 'alta'>('estandar');
-  const [evalPriority, setEvalPriority] = useState<'normal' | 'prioritario' | 'urgente' | 'critico'>('normal');
-  const [orderCreatedToast, setOrderCreatedToast] = useState<string | null>(null);
 
   // --- Estado Punto 2 (Simulador) ---
   const [simExtraVideos, setSimExtraVideos] = useState<number>(40);
@@ -86,7 +80,10 @@ export function CapacityView() {
   const [simUnavailablePct, setSimUnavailablePct] = useState<number>(0);
   const [simEditorDemandBoostPct, setSimEditorDemandBoostPct] = useState<number>(0);
 
-  // --- Estado Punto 3 (Protocolo) ---
+  // --- Estado Punto 3 (Protocolo y Asignación Inteligente) ---
+  const [protocolRoleFilter, setProtocolRoleFilter] = useState<'todos' | 'clipper' | 'editor'>('todos');
+  const [selectedClipperByOrder, setSelectedClipperByOrder] = useState<Record<string, string>>({});
+  const [selectedEditorByOrder, setSelectedEditorByOrder] = useState<Record<string, string>>({});
   const [reassignedToastId, setReassignedToastId] = useState<string | null>(null);
 
   const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
@@ -97,25 +94,20 @@ export function CapacityView() {
   const engine = useMemo(() => {
     const safetyFactor = Math.max(0.5, (100 - capacityConfig.safetyMarginPct) / 100);
 
-    // 1. Capacidad Física = suma de las capacidades individuales de cada Clipper y Editor
     const physicalClippingDaily = clippers.reduce((sum, w) => sum + getWorkerCapacity(w.id), 0);
     const physicalEditingDaily = editors.reduce((sum, w) => sum + getWorkerCapacity(w.id), 0);
 
-    // Promedio real por persona
     const avgClipperDaily = clippers.length > 0 ? Math.round(physicalClippingDaily / clippers.length) : 10;
     const avgEditorDaily = editors.length > 0 ? Math.round(physicalEditingDaily / editors.length) : 10;
 
-    // 2. Capacidad Segura = Capacidad Física * (100% - margen de seguridad)
     const safeClippingDaily = Math.max(1, Math.floor(physicalClippingDaily * safetyFactor));
     const safeEditingDaily = Math.max(1, Math.floor(physicalEditingDaily * safetyFactor));
 
-    // 3. Cuello de Botella = la etapa con menor capacidad segura
     const bottleneckStage: 'Clipping' | 'Edición' =
       safeEditingDaily <= safeClippingDaily ? 'Edición' : 'Clipping';
     const physicalBottleneckDaily = Math.min(physicalClippingDaily, physicalEditingDaily);
     const safeBottleneckDaily = Math.min(safeClippingDaily, safeEditingDaily);
 
-    // 4. Comprometidos = Pedidos activos en Tareas (orders no finalizados) + videos en progreso
     const activeOrders = orders.filter(o => o.status !== 'finalizado');
     const committedByDate: Record<string, number> = {};
     for (const o of activeOrders) {
@@ -138,10 +130,8 @@ export function CapacityView() {
     else if (overallUtilPct >= 78) alertLevel = 'cerca_limite';
     else if (overallUtilPct >= 58) alertLevel = 'elevada';
 
-    // 5. Máximo Adicional Aceptable Hoy = Capacidad Segura - Comprometidos Hoy
     const remainingSafeToday = Math.max(0, safeBottleneckDaily - committedToday);
 
-    // 6. Retrabajo real (videos con correcciones o clips rechazados)
     const videosWithRework = allVideos.filter(
       v => v.qc === 'correcciones' || v.corrections.length > 0 || v.clips.some(c => c.status === 'rejected')
     ).length;
@@ -173,11 +163,11 @@ export function CapacityView() {
     };
   }, [clippers, editors, allVideos, orders, capacityConfig.safetyMarginPct, getWorkerCapacity]);
 
-  // EVALUADOR DE PEDIDOS Y TANDAS (PUNTO 1)
+  // COTIZADOR Y TANDAS (PUNTO 1: Evalúa desde hoy según volumen 1..200 y complejidad)
   const evaluation = useMemo(() => {
+    const baseDate = todayIso();
     const complexityMultiplier = evalComplexity === 'alta' ? 1.3 : evalComplexity === 'simple' ? 0.85 : 1.0;
-    const committedOnTargetDate =
-      evalDate === todayIso() ? engine.committedToday : (engine.committedByDate[evalDate] || 0);
+    const committedOnTargetDate = engine.committedToday;
     const availableSafeOnTargetDate = Math.max(0, engine.safeBottleneckDaily - committedOnTargetDate);
     const maxImmediateAcceptable = Math.floor(availableSafeOnTargetDate / complexityMultiplier);
     const canAcceptFullOnDate = evalVideos <= maxImmediateAcceptable;
@@ -186,10 +176,10 @@ export function CapacityView() {
     let remainingToSchedule = Math.max(1, evalVideos);
     let cursorDay = 0;
 
-    while (remainingToSchedule > 0 && cursorDay < 14) {
-      const dateStr = addDaysIso(evalDate, cursorDay);
+    while (remainingToSchedule > 0 && cursorDay < 20) {
+      const dateStr = addDaysIso(baseDate, cursorDay);
       const alreadyCommitted =
-        dateStr === todayIso() ? engine.committedToday : (engine.committedByDate[dateStr] || 0);
+        cursorDay === 0 ? engine.committedToday : (engine.committedByDate[dateStr] || 0);
       const freeSafeRaw = Math.max(0, engine.safeBottleneckDaily - alreadyCommitted);
       const maxVideosThisDay = Math.max(
         cursorDay === 0 ? 0 : 1,
@@ -209,21 +199,18 @@ export function CapacityView() {
       cursorDay++;
     }
 
-    const finalCompletionDate = batches.length > 0 ? batches[batches.length - 1].date : evalDate;
+    const finalCompletionDate = batches.length > 0 ? batches[batches.length - 1].date : baseDate;
     const workHoursPerDay = Math.max(4, capacityConfig.workdayEndHour - capacityConfig.workdayStartHour);
-    const prioritySpeedFactor =
-      evalPriority === 'critico' ? 0.65 : evalPriority === 'urgente' ? 0.8 : evalPriority === 'prioritario' ? 0.9 : 1.0;
-
     const lastBatch = batches[batches.length - 1];
     const loadRatio = lastBatch ? Math.min(1, lastBatch.videos / Math.max(1, engine.safeBottleneckDaily)) : 0.5;
-    const rawStartHour = capacityConfig.workdayStartHour + Math.max(1.5, loadRatio * (workHoursPerDay - 2) * prioritySpeedFactor);
+    const rawStartHour = capacityConfig.workdayStartHour + Math.max(1.5, loadRatio * (workHoursPerDay - 2));
     const windowStart = Math.min(capacityConfig.workdayEndHour - 2, Math.max(capacityConfig.workdayStartHour + 1, rawStartHour));
     const windowEnd = Math.min(capacityConfig.workdayEndHour, windowStart + 2);
 
     const dayWord =
-      finalCompletionDate === todayIso()
+      finalCompletionDate === baseDate
         ? 'Hoy'
-        : finalCompletionDate === addDaysIso(todayIso(), 1)
+        : finalCompletionDate === addDaysIso(baseDate, 1)
         ? 'Mañana'
         : finalCompletionDate;
 
@@ -238,7 +225,7 @@ export function CapacityView() {
       finalCompletionDate,
       etaWindowText,
     };
-  }, [evalVideos, evalDate, evalComplexity, evalPriority, engine, capacityConfig]);
+  }, [evalVideos, evalComplexity, engine, capacityConfig]);
 
   // SIMULADOR (PUNTO 2)
   const simulation = useMemo(() => {
@@ -286,89 +273,128 @@ export function CapacityView() {
     capacityConfig.safetyMarginPct,
   ]);
 
-  // PROTOCOLO (PUNTO 3)
-  const ordersProtocolList = useMemo(() => {
-    const now = Date.now();
-    return engine.activeOrders.map(o => {
-      const targetTs = o.deliveryDate
-        ? new Date(`${o.deliveryDate}T${o.deliveryTime || '18:00'}`).getTime()
-        : now + 24 * 3600 * 1000;
-      const hoursLeft = (targetTs - now) / (1000 * 3600);
-      const ageHours = (now - new Date(o.createdAt).getTime()) / (1000 * 3600);
+  // CARGA DIARIA DETALLADA POR CADA CLIPPER Y EDITOR (Volumen hoy + Complejidad de sus videos)
+  const workersWorkloadToday = useMemo(() => {
+    return workers.map(w => {
+      const cap = getWorkerCapacity(w.id);
 
-      let protocolState: 'normal' | 'prioritario' | 'urgente' | 'critico' = o.priority || 'normal';
+      // Pedidos asignados a este trabajador
+      const myOrders = engine.activeOrders.filter(o =>
+        w.role === 'clipper'
+          ? o.clipperId === w.id || o.assignedWorkerIds.includes(w.id)
+          : o.editorId === w.id || o.assignedWorkerIds.includes(w.id)
+      );
 
-      if (hoursLeft <= 1.5 || (hoursLeft <= capacityConfig.urgentThresholdHours && (!o.clipperId || !o.editorId))) {
-        protocolState = 'critico';
-      } else if (hoursLeft <= capacityConfig.urgentThresholdHours) {
-        protocolState = 'urgente';
-      } else if (ageHours >= capacityConfig.maxStalledHours && (!o.clipperId || !o.editorId)) {
-        protocolState = 'prioritario';
+      // Videos activos en el tablero de marcas para este trabajador
+      const myActiveBoardVideos = allVideos.filter(v =>
+        (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
+        v.qc !== 'aprobado_cliente' &&
+        v.qc !== 'sin_iniciar'
+      );
+
+      let simpleVideos = 0;
+      let estandarVideos = 0;
+      let altaVideos = 0;
+
+      for (const o of myOrders) {
+        const count = Math.max(1, o.videoCount || 1);
+        const comp = o.complexity || (count >= 12 ? 'alta' : count <= 4 ? 'simple' : 'estandar');
+        if (comp === 'simple') simpleVideos += count;
+        else if (comp === 'alta') altaVideos += count;
+        else estandarVideos += count;
       }
 
+      // Si tiene videos en el tablero que no venían de un order con complejidad, se suman según su duración/correcciones
+      for (const v of myActiveBoardVideos) {
+        const alreadyInOrders = myOrders.some(o => o.boardVideoId === v.id);
+        if (alreadyInOrders) continue;
+        if (v.corrections.length > 0 || v.durationSeconds > 60) altaVideos += 1;
+        else if (v.durationSeconds > 0 && v.durationSeconds <= 20) simpleVideos += 1;
+        else estandarVideos += 1;
+      }
+
+      const totalVideosToday = simpleVideos + estandarVideos + altaVideos;
+      const freeCapacity = Math.max(0, cap - totalVideosToday);
+      const utilPct = Math.min(100, Math.round((totalVideosToday / Math.max(1, cap)) * 100));
+
       return {
-        order: o,
-        hoursLeft: Math.round(hoursLeft * 10) / 10,
-        protocolState,
+        worker: w,
+        capacity: cap,
+        totalVideosToday,
+        freeCapacity,
+        utilPct,
+        simpleVideos,
+        estandarVideos,
+        altaVideos,
+        activeBrands: Array.from(new Set([
+          ...myOrders.map(o => o.brand),
+          ...myActiveBoardVideos.map(v => v.name),
+        ])),
       };
     });
-  }, [engine.activeOrders, capacityConfig]);
+  }, [workers, engine.activeOrders, allVideos, getWorkerCapacity]);
 
-  const bestAvailableClipper = useMemo(() => [...clippers].sort((a, b) => a.pointsToday - b.pointsToday)[0] || null, [clippers]);
-  const bestAvailableEditor = useMemo(() => [...editors].sort((a, b) => a.pointsToday - b.pointsToday)[0] || null, [editors]);
+  // COLA DE PEDIDOS EN PROTOCOLO (Solo pedidos con configuración de alerta / riesgo según su complejidad y entrega)
+  const protocolAlertOrders = useMemo(() => {
+    const now = Date.now();
+    return engine.activeOrders
+      .map(o => {
+        const targetTs = o.deliveryDate
+          ? new Date(`${o.deliveryDate}T${o.deliveryTime || '18:00'}`).getTime()
+          : now + 24 * 3600 * 1000;
+        const hoursLeft = (targetTs - now) / (1000 * 3600);
+        const count = Math.max(1, o.videoCount || 1);
+        const complexity: 'simple' | 'estandar' | 'alta' =
+          o.complexity || (count >= 12 ? 'alta' : count <= 4 ? 'simple' : 'estandar');
 
-  const handleSmartReassign = async (order: Order) => {
-    if (bestAvailableClipper && !order.clipperId) {
-      await assignOrderClipper(order.id, bestAvailableClipper.id);
+        // Umbral automático determinado por la complejidad y volumen del pedido
+        const requiredLeadHours =
+          (complexity === 'alta' ? 8 : complexity === 'estandar' ? 5 : 3) + Math.ceil(count * 0.4);
+
+        let level: 'normal' | 'prioritario' | 'urgente' | 'critico' = o.priority || 'normal';
+
+        if (hoursLeft <= 2 || (hoursLeft <= requiredLeadHours * 0.6 && (!o.clipperId || !o.editorId))) {
+          level = 'critico';
+        } else if (hoursLeft <= requiredLeadHours) {
+          level = 'urgente';
+        } else if (!o.clipperId || !o.editorId || complexity === 'alta') {
+          level = 'prioritario';
+        }
+
+        const currentClipper = workers.find(w => w.id === o.clipperId) || null;
+        const currentEditor = workers.find(w => w.id === o.editorId) || null;
+
+        return {
+          order: o,
+          hoursLeft: Math.round(hoursLeft * 10) / 10,
+          complexity,
+          level,
+          currentClipper,
+          currentEditor,
+        };
+      })
+      .filter(item => item.level !== 'normal')
+      .sort((a, b) => {
+        const rank = { critico: 0, urgente: 1, prioritario: 2, normal: 3 };
+        return rank[a.level] - rank[b.level] || a.hoursLeft - b.hoursLeft;
+      });
+  }, [engine.activeOrders, workers]);
+
+  const handleAssignFromProtocol = async (order: Order) => {
+    const chosenClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';
+    const chosenEditorId = selectedEditorByOrder[order.id] ?? order.editorId ?? '';
+
+    if (chosenClipperId && chosenClipperId !== order.clipperId) {
+      await assignOrderClipper(order.id, chosenClipperId);
     }
-    if (bestAvailableEditor) {
-      await assignOrderEditor(order.id, bestAvailableEditor.id);
+    if (chosenEditorId && chosenEditorId !== order.editorId) {
+      await assignOrderEditor(order.id, chosenEditorId);
     }
     setReassignedToastId(order.id);
     setTimeout(() => setReassignedToastId(prev => (prev === order.id ? null : prev)), 2500);
   };
 
-  const handleCreateOrderFromEvaluator = () => {
-    if (!evalBrand.trim() || evalVideos <= 0) return;
-
-    if (evaluation.canAcceptFullOnDate || evaluation.batches.length <= 1) {
-      addOrder({
-        brand: evalBrand.trim(),
-        videoCount: evalVideos,
-        deliveryDate: evalDate,
-        deliveryTime: '18:00',
-        status: 'sin_asignar',
-        assignedWorkerIds: [],
-        clipperId: null,
-        editorId: null,
-        priority: evalPriority,
-        complexity: evalComplexity,
-        clientNotes: `ETA: ${evaluation.etaWindowText} · (${evalClipsPerVideo} clips/video)`,
-      });
-      setOrderCreatedToast(`Enviado a Tareas (${evalVideos} vid)`);
-    } else {
-      evaluation.batches.forEach(b => {
-        addOrder({
-          brand: `${evalBrand.trim()} · Tanda ${b.dayIndex}/${evaluation.batches.length}`,
-          videoCount: b.videos,
-          deliveryDate: b.date,
-          deliveryTime: '18:00',
-          status: 'sin_asignar',
-          assignedWorkerIds: [],
-          clipperId: null,
-          editorId: null,
-          priority: evalPriority,
-          complexity: evalComplexity,
-          clientNotes: `Tanda ${b.dayIndex}: ${b.videos} videos · ETA: ${evaluation.etaWindowText}`,
-        });
-      });
-      setOrderCreatedToast(`${evaluation.batches.length} tandas enviadas a Tareas`);
-    }
-    setTimeout(() => setOrderCreatedToast(null), 3500);
-  };
-
   const alertMeta = ALERT_META[engine.alertLevel];
-  const activeScreen: ActiveScreen = clientMode ? '1' : screen;
 
   const DOCK_ITEMS: { id: ActiveScreen; badge: string; title: string; icon: typeof Gauge }[] = [
     { id: 'dashboard', badge: '0', title: 'Dashboard Central', icon: LayoutGrid },
@@ -378,15 +404,20 @@ export function CapacityView() {
     { id: '4', badge: '4', title: 'Rendimiento y Equipo', icon: TrendingUp },
   ];
 
-  // Medidor circular grande para el Dashboard
   const bigRadius = 62;
   const bigCircumference = 2 * Math.PI * bigRadius;
   const bigOffset = bigCircumference - (Math.min(100, engine.overallUtilPct) / 100) * bigCircumference;
 
+  const filteredWorkloads = useMemo(() => {
+    if (protocolRoleFilter === 'clipper') return workersWorkloadToday.filter(w => w.worker.role === 'clipper');
+    if (protocolRoleFilter === 'editor') return workersWorkloadToday.filter(w => w.worker.role === 'editor');
+    return workersWorkloadToday;
+  }, [workersWorkloadToday, protocolRoleFilter]);
+
   return (
     <div className="p-6 max-w-6xl mx-auto min-h-[calc(100vh-4.5rem)] flex flex-col justify-between gap-6">
       {/* =====================================================================
-          BARRA SUPERIOR MINIMALISTA: Título + Dock Sutil de Iconos (1, 2, 3, 4) + Ajustes
+          BARRA SUPERIOR MINIMALISTA: Título + Dock Sutil de Iconos (0, 1, 2, 3, 4) + Ajustes
          ===================================================================== */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -396,11 +427,9 @@ export function CapacityView() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-display text-xl sm:text-2xl font-bold">
-                {clientMode
-                  ? 'Cotizador de Entrega'
-                  : activeScreen === 'dashboard'
+                {screen === 'dashboard'
                   ? 'Capacidad Operativa'
-                  : DOCK_ITEMS.find(d => d.id === activeScreen)?.title}
+                  : DOCK_ITEMS.find(d => d.id === screen)?.title}
               </h2>
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold ${alertMeta.badgeClass}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${alertMeta.dotClass} animate-pulse`} />
@@ -410,75 +439,57 @@ export function CapacityView() {
           </div>
         </div>
 
-        {/* DOCK SUTIL DE ICONOS (Puntos 0, 1, 2, 3, 4 como logos compactos) */}
+        {/* DOCK SUTIL DE ICONOS (Sin botón Modo Cliente) */}
         <div className="flex items-center gap-2">
-          {!clientMode && (
-            <div className="flex items-center gap-1.5 bg-surface-2 border border-line rounded-2xl p-1.5 shadow-lg">
-              {DOCK_ITEMS.map(item => {
-                const Icon = item.icon;
-                const isActive = activeScreen === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setScreen(item.id)}
-                    title={item.title}
-                    className={`group relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 ${
-                      isActive
-                        ? 'bg-accent text-on-accent shadow-[0_0_18px_-3px_rgba(53,214,228,0.65)] scale-105'
-                        : 'bg-surface-3/60 text-muted hover:text-text hover:bg-surface-3'
-                    }`}
-                  >
-                    <Icon size={18} strokeWidth={isActive ? 2.4 : 2} />
-                    {item.id !== 'dashboard' && (
-                      <span
-                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full font-tech text-[9px] font-bold flex items-center justify-center border ${
-                          isActive
-                            ? 'bg-ink text-accent border-accent'
-                            : 'bg-surface-2 text-muted-2 border-line group-hover:text-text'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {!clientMode && (
-            <button
-              type="button"
-              onClick={() => setShowConfigModal(true)}
-              title="Capacidad individual y margen"
-              className="w-10 h-10 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-accent transition-colors"
-            >
-              <Sliders size={17} />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 bg-surface-2 border border-line rounded-2xl p-1.5 shadow-lg">
+            {DOCK_ITEMS.map(item => {
+              const Icon = item.icon;
+              const isActive = screen === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setScreen(item.id)}
+                  title={item.title}
+                  className={`group relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 ${
+                    isActive
+                      ? 'bg-accent text-on-accent shadow-[0_0_18px_-3px_rgba(53,214,228,0.65)] scale-105'
+                      : 'bg-surface-3/60 text-muted hover:text-text hover:bg-surface-3'
+                  }`}
+                >
+                  <Icon size={18} strokeWidth={isActive ? 2.4 : 2} />
+                  {item.id !== 'dashboard' && (
+                    <span
+                      className={`absolute -top-1 -right-1 w-4 h-4 rounded-full font-tech text-[9px] font-bold flex items-center justify-center border ${
+                        isActive
+                          ? 'bg-ink text-accent border-accent'
+                          : 'bg-surface-2 text-muted-2 border-line group-hover:text-text'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           <button
             type="button"
-            onClick={() => setClientMode(c => !c)}
-            title="Vista limpia para mostrar al cliente"
-            className={`h-10 px-3.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              clientMode
-                ? 'bg-mint text-on-accent border-mint shadow-[0_0_16px_-4px_rgba(111,231,200,0.5)]'
-                : 'bg-surface-2 hover:bg-surface-3 border-line text-muted hover:text-text'
-            }`}
+            onClick={() => setShowConfigModal(true)}
+            title="Capacidad individual y margen"
+            className="w-10 h-10 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-accent transition-colors"
           >
-            <Eye size={14} /> {clientMode ? 'Salir Cliente' : 'Modo Cliente'}
+            <Sliders size={17} />
           </button>
         </div>
       </div>
 
       {/* =====================================================================
-          PANTALLA 0: DASHBOARD PRINCIPAL (TODA LA PANTALLA DEDICADA AL RADAR)
+          PANTALLA 0: DASHBOARD PRINCIPAL
          ===================================================================== */}
-      {activeScreen === 'dashboard' && (
+      {screen === 'dashboard' && (
         <div className="flex-1 flex flex-col justify-between gap-5 animate-fadeIn">
-          {/* Bloque Central: Reactor Radial + Ecuación Visual de Capacidad */}
           <div className="relative flex-1 bg-surface-2 border border-accent/35 rounded-3xl p-6 sm:p-8 overflow-hidden flex flex-col justify-between shadow-[0_0_60px_-18px_rgba(53,214,228,0.28)]">
             <div
               className="absolute -left-20 -top-20 w-96 h-96 rounded-full pointer-events-none blur-3xl opacity-20 animate-pulse"
@@ -489,7 +500,6 @@ export function CapacityView() {
               style={{ background: 'radial-gradient(circle, var(--mint), transparent 70%)' }}
             />
 
-            {/* Circuito animado de fondo */}
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none opacity-35"
               viewBox="0 0 1000 420"
@@ -520,7 +530,6 @@ export function CapacityView() {
             </svg>
 
             <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center my-auto">
-              {/* Columna Izquierda: Medidor Radial Gigante */}
               <div className="lg:col-span-4 flex flex-col items-center justify-center text-center">
                 <div className="relative w-44 h-44 flex items-center justify-center">
                   <svg className="w-44 h-44 -rotate-90" viewBox="0 0 148 148">
@@ -555,10 +564,8 @@ export function CapacityView() {
                 </div>
               </div>
 
-              {/* Columna Derecha: Ecuación Visual Directa (Segura - Comprometidos = Disponible Hoy) */}
               <div className="lg:col-span-8 space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
-                  {/* 1. Capacidad Segura */}
                   <div className="bg-surface/90 backdrop-blur-md border border-accent/35 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden">
                     <CardNodeDeco color="var(--accent)" />
                     <span className="text-[11px] font-tech uppercase text-accent">1. Capacidad Segura</span>
@@ -574,7 +581,6 @@ export function CapacityView() {
                     </div>
                   </div>
 
-                  {/* 2. Comprometidos */}
                   <div className="bg-surface/90 backdrop-blur-md border border-amber/35 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden">
                     <CardNodeDeco color="var(--amber)" />
                     <span className="text-[11px] font-tech uppercase text-amber">2. En Cola / Comprometidos</span>
@@ -590,7 +596,6 @@ export function CapacityView() {
                     </div>
                   </div>
 
-                  {/* 3. Disponible Hoy */}
                   <div className="bg-mint-dim/30 backdrop-blur-md border-2 border-mint/60 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-[0_0_30px_-8px_rgba(111,231,200,0.35)]">
                     <CardNodeDeco color="var(--mint)" />
                     <span className="text-[11px] font-tech uppercase text-mint font-semibold">3. Aceptable Hoy</span>
@@ -605,12 +610,11 @@ export function CapacityView() {
                       onClick={() => setScreen('1')}
                       className="text-[11px] font-semibold text-on-accent bg-mint rounded-lg py-1.5 px-3 text-center hover:opacity-90 transition-opacity"
                     >
-                      Cotizar pedido →
+                      Ir al Cotizador →
                     </button>
                   </div>
                 </div>
 
-                {/* Barras de Etapa: Clipping vs Edición */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="bg-surface/80 border border-line rounded-2xl p-4 space-y-2">
                     <div className="flex items-center justify-between text-xs">
@@ -653,84 +657,58 @@ export function CapacityView() {
       )}
 
       {/* =====================================================================
-          PANTALLA 1: COTIZADOR DE PEDIDOS, TANDAS Y VENTANA ETA (PANTALLA COMPLETA)
+          PANTALLA 1: COTIZADOR Y TANDAS (SIMPLIFICADO: VOLUMEN 1..200 + COMPLEJIDAD)
          ===================================================================== */}
-      {activeScreen === '1' && (
+      {screen === '1' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
-          {/* Panel izquierdo: Controles interactivos grandes */}
-          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5">
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
-                  <Zap size={14} /> Simulador de Entrada
+          {/* Panel izquierdo: Solo Volumen (1..200) y Complejidad */}
+          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-6">
+            <div className="flex items-center justify-between">
+              <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
+                <Zap size={14} /> Parámetros de Cotización
+              </span>
+              <span className="font-tech text-xs text-muted-2">Máx. 200 videos</span>
+            </div>
+
+            {/* Slider grande de 1 a 200 videos */}
+            <div className="bg-surface-3 border border-line rounded-2xl p-5 space-y-4 my-auto">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs font-medium text-muted">Volumen a cotizar</span>
+                <span className="font-display text-5xl font-bold font-tech text-accent">
+                  {evalVideos} <span className="text-xs font-normal text-muted">videos</span>
                 </span>
-                <span className="font-tech text-xs text-muted-2">Paso 1</span>
               </div>
 
-              <div>
-                <label className="text-xs text-muted block mb-1.5">Marca / Cliente</label>
-                <input
-                  value={evalBrand}
-                  onChange={e => setEvalBrand(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="w-full bg-surface-3 border border-line rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:border-accent"
-                />
-              </div>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                value={evalVideos}
+                onChange={e => setEvalVideos(Number(e.target.value))}
+                className="w-full accent-accent"
+              />
 
-              {/* Slider visual grande para Cantidad de Videos */}
-              <div className="bg-surface-3 border border-line rounded-2xl p-4 space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-muted">Volumen del pedido</span>
-                  <span className="font-display text-3xl font-bold font-tech text-accent">{evalVideos} <span className="text-xs font-normal text-muted">videos</span></span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={150}
-                  value={evalVideos}
-                  onChange={e => setEvalVideos(Number(e.target.value))}
-                  className="w-full accent-accent"
-                />
-                <div className="flex justify-between text-[10px] font-tech text-muted-2">
-                  <span>1 video</span>
-                  <span>50 videos</span>
-                  <span>100 videos</span>
-                  <span>150 videos</span>
-                </div>
+              <div className="flex justify-between text-[10px] font-tech text-muted-2">
+                <span>1</span>
+                <span>50</span>
+                <span>100</span>
+                <span>150</span>
+                <span>200</span>
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface-3 border border-line rounded-xl p-3">
-                  <label className="text-[11px] text-muted-2 block mb-1">Fecha objetivo</label>
-                  <input
-                    type="date"
-                    value={evalDate}
-                    onChange={e => setEvalDate(e.target.value)}
-                    className="w-full bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs font-tech outline-none focus:border-accent"
-                  />
-                </div>
-                <div className="bg-surface-3 border border-line rounded-xl p-3">
-                  <label className="text-[11px] text-muted-2 block mb-1">Clips por video</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={evalClipsPerVideo}
-                    onChange={e => setEvalClipsPerVideo(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs font-tech outline-none focus:border-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
+            {/* Selector de Complejidad */}
+            <div className="space-y-2">
+              <span className="text-xs text-muted block">Complejidad del proyecto</span>
+              <div className="grid grid-cols-3 gap-2.5">
                 {(['simple', 'estandar', 'alta'] as const).map(c => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setEvalComplexity(c)}
-                    className={`py-2 rounded-xl text-xs font-semibold capitalize border transition-all ${
+                    className={`py-3 rounded-xl text-xs font-semibold capitalize border transition-all ${
                       evalComplexity === c
-                        ? 'bg-accent text-on-accent border-accent'
+                        ? 'bg-accent text-on-accent border-accent shadow-[0_0_16px_-4px_rgba(53,214,228,0.5)]'
                         : 'bg-surface-3 text-muted border-line hover:text-text'
                     }`}
                   >
@@ -739,26 +717,12 @@ export function CapacityView() {
                 ))}
               </div>
             </div>
-
-            {!clientMode && (
-              <button
-                type="button"
-                onClick={handleCreateOrderFromEvaluator}
-                className="w-full py-3 bg-accent text-on-accent rounded-xl text-xs sm:text-sm font-bold hover:bg-accent-strong transition-all flex items-center justify-center gap-2 shadow-[0_8px_24px_-6px_rgba(53,214,228,0.5)]"
-              >
-                <PlusCircle size={16} />
-                {evaluation.batches.length > 1
-                  ? `Inyectar ${evaluation.batches.length} Tandas en Tareas`
-                  : 'Inyectar Pedido en Tareas'}
-              </button>
-            )}
           </div>
 
-          {/* Panel derecho: Resultado Visual (Dictamen + ETA + Línea de Tiempo de Tandas) */}
+          {/* Panel derecho: Resultado Visual de la Cotización y Tandas */}
           <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden">
             <CardNodeDeco color={evaluation.canAcceptFullOnDate ? 'var(--mint)' : 'var(--amber)'} />
 
-            {/* Dictamen Gigante + Ventana ETA */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className={`rounded-2xl p-5 border flex flex-col justify-between ${
                 evaluation.canAcceptFullOnDate
@@ -772,16 +736,16 @@ export function CapacityView() {
                     <AlertTriangle size={20} className="text-amber" />
                   )}
                   <span className="font-tech text-xs uppercase font-bold">
-                    {evaluation.canAcceptFullOnDate ? 'Entrega en 1 Día' : 'Requiere Tandas'}
+                    {evaluation.canAcceptFullOnDate ? 'Entrega en 1 Día' : 'Entrega por Tandas'}
                   </span>
                 </div>
                 <p className="font-display text-3xl font-bold mt-3">
                   {evaluation.canAcceptFullOnDate
-                    ? `${evalVideos} vid aceptables`
+                    ? `${evalVideos} vid hoy`
                     : `Máx. hoy: ${evaluation.maxImmediateAcceptable} vid`}
                 </p>
                 <span className="text-xs text-muted mt-1 font-tech">
-                  Libre en fecha: {evaluation.availableSafeOnTargetDate} de {engine.safeBottleneckDaily} vid
+                  Capacidad libre hoy: {evaluation.availableSafeOnTargetDate} de {engine.safeBottleneckDaily} vid
                 </span>
               </div>
 
@@ -793,25 +757,19 @@ export function CapacityView() {
                   {evaluation.etaWindowText}
                 </p>
                 <span className="text-xs text-muted mt-1 font-tech">
-                  Cierre total: {evaluation.finalCompletionDate}
+                  Finalización total: {evaluation.finalCompletionDate}
                 </span>
               </div>
             </div>
 
-            {/* Línea de Tiempo Visual de Tandas */}
             <div className="flex-1 flex flex-col justify-center space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase font-tech text-muted flex items-center gap-1.5">
                   <Calendar size={14} className="text-accent" /> Distribución por Tandas ({evaluation.batches.length})
                 </span>
-                {orderCreatedToast && (
-                  <span className="text-xs text-mint font-semibold flex items-center gap-1">
-                    <CheckCircle2 size={13} /> {orderCreatedToast}
-                  </span>
-                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto pr-1">
                 {evaluation.batches.map(b => {
                   const pctOfOrder = Math.round((b.videos / Math.max(1, evalVideos)) * 100);
                   return (
@@ -846,11 +804,10 @@ export function CapacityView() {
       )}
 
       {/* =====================================================================
-          PANTALLA 2: SIMULADOR INTERACTIVO («¿QUÉ PASARÍA SI...?») (PANTALLA COMPLETA)
+          PANTALLA 2: SIMULADOR INTERACTIVO («¿QUÉ PASARÍA SI...?»)
          ===================================================================== */}
-      {activeScreen === '2' && !clientMode && (
+      {screen === '2' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
-          {/* Sliders de Escenario */}
           <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-4">
             <div className="flex items-center justify-between">
               <span className="font-tech text-xs uppercase tracking-wider text-mint flex items-center gap-1.5">
@@ -962,7 +919,6 @@ export function CapacityView() {
             </div>
           </div>
 
-          {/* Resultado Visual del Simulador */}
           <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
             <CardNodeDeco color={simulation.simDeficit > 0 ? 'var(--amber)' : 'var(--mint)'} />
 
@@ -1016,125 +972,240 @@ export function CapacityView() {
       )}
 
       {/* =====================================================================
-          PANTALLA 3: PROTOCOLO OPERATIVO Y REASIGNACIÓN EN 1 CLIC (PANTALLA COMPLETA)
+          PANTALLA 3: PROTOCOLO Y ALERTAS (RADAR DE CARGA INDIVIDUAL HOY + ASIGNACIÓN INTELIGENTE)
          ===================================================================== */}
-      {activeScreen === '3' && !clientMode && (
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fadeIn">
-          {/* Reglas rápidas */}
-          <div className="lg:col-span-4 bg-surface-2 border border-line rounded-3xl p-6 space-y-4">
-            <span className="font-tech text-xs uppercase tracking-wider text-amber flex items-center gap-1.5">
-              <ShieldAlert size={14} /> Reglas de Disparo
-            </span>
+      {screen === '3' && (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
+          {/* Columna Izquierda (6 cols): Estado de Carga Hoy de TODOS los Clippers y Editores + Complejidad */}
+          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
+                  <Users size={14} /> Carga de Trabajo Hoy por Creador
+                </span>
+                <p className="text-xs text-muted mt-0.5">
+                  Volumen asignado hoy y complejidad de sus videos activos
+                </p>
+              </div>
 
-            <div className="space-y-3">
-              <label className="bg-surface-3 border border-line rounded-2xl p-4 block">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-muted">Sin respuesta máx.</span>
-                  <span className="font-tech font-bold text-accent">{capacityConfig.maxNoResponseMinutes} min</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={180}
-                  step={5}
-                  value={capacityConfig.maxNoResponseMinutes}
-                  onChange={e => updateCapacityConfig({ maxNoResponseMinutes: Number(e.target.value) })}
-                  className="w-full accent-accent"
-                />
-              </label>
-
-              <label className="bg-surface-3 border border-line rounded-2xl p-4 block">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-muted">Sin movimiento máx.</span>
-                  <span className="font-tech font-bold text-amber">{capacityConfig.maxStalledHours} h</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={24}
-                  value={capacityConfig.maxStalledHours}
-                  onChange={e => updateCapacityConfig({ maxStalledHours: Number(e.target.value) })}
-                  className="w-full accent-amber"
-                />
-              </label>
-
-              <label className="bg-surface-3 border border-line rounded-2xl p-4 block">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-muted">Alerta antes de entrega</span>
-                  <span className="font-tech font-bold text-red-400">{capacityConfig.urgentThresholdHours} h</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={12}
-                  value={capacityConfig.urgentThresholdHours}
-                  onChange={e => updateCapacityConfig({ urgentThresholdHours: Number(e.target.value) })}
-                  className="w-full accent-red-500"
-                />
-              </label>
-            </div>
-          </div>
-
-          {/* Radar de Pedidos y Reasignación */}
-          <div className="lg:col-span-8 bg-surface-2 border border-line rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-base font-semibold">Cola de Pedidos y Reasignación Instantánea</h3>
-              <span className="font-tech text-xs text-muted-2">{ordersProtocolList.length} activos</span>
+              <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
+                {(['todos', 'clipper', 'editor'] as const).map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setProtocolRoleFilter(r)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                      protocolRoleFilter === r ? 'bg-accent text-on-accent' : 'text-muted hover:text-text'
+                    }`}
+                  >
+                    {r === 'todos' ? 'Todos' : r === 'clipper' ? 'Clippers' : 'Editores'}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
-              {ordersProtocolList.map(({ order, hoursLeft, protocolState }) => {
-                const badgeStyles = {
-                  normal: 'bg-mint-dim text-mint border-mint/30',
-                  prioritario: 'bg-accent-dim text-accent border-accent/30',
-                  urgente: 'bg-amber-dim text-amber border-amber/30',
-                  critico: 'bg-red-500/15 text-red-400 border-red-500/30',
-                }[protocolState];
+            <div className="space-y-2.5 max-h-[450px] overflow-y-auto pr-1 my-auto">
+              {filteredWorkloads.map(item => {
+                const isClipper = item.worker.role === 'clipper';
+                const barColor =
+                  item.utilPct >= 90 ? 'bg-red-500' : item.utilPct >= 70 ? 'bg-amber' : isClipper ? 'bg-accent' : 'bg-mint';
 
                 return (
                   <div
-                    key={order.id}
-                    className="bg-surface-3 border border-line rounded-2xl p-4 flex items-center justify-between gap-4 flex-wrap"
+                    key={item.worker.id}
+                    className="bg-surface-3 border border-line rounded-2xl p-4 space-y-2.5"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`text-[10px] font-tech uppercase px-2.5 py-1 rounded-full border font-bold ${badgeStyles}`}>
-                        {protocolState}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold truncate">{order.brand} · {order.videoCount} videos</p>
-                        <p className="text-xs text-muted-2 font-tech">
-                          {order.deliveryDate} · {hoursLeft > 0 ? `${hoursLeft}h restantes` : 'Plazo vencido'}
-                        </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${item.worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
+                        <p className="text-sm font-bold truncate">{item.worker.name}</p>
+                        <span className={`text-[10px] font-tech px-2 py-0.5 rounded-md ${
+                          isClipper ? 'bg-accent-dim text-accent' : 'bg-mint-dim text-mint'
+                        }`}>
+                          {isClipper ? 'Clipper' : 'Editor(a)'}
+                        </span>
+                      </div>
+
+                      <div className="text-right font-tech text-xs shrink-0">
+                        <strong className="text-text text-sm">{item.totalVideosToday}</strong>
+                        <span className="text-muted-2"> / {item.capacity} vid hoy</span>
+                        <span className="ml-2 text-[11px] text-mint">({item.freeCapacity} libres)</span>
                       </div>
                     </div>
 
-                    {reassignedToastId === order.id ? (
-                      <span className="text-xs text-mint font-semibold flex items-center gap-1">
-                        <CheckCircle2 size={14} /> Reasignado
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void handleSmartReassign(order)}
-                        className="flex items-center gap-1.5 bg-surface-2 hover:bg-accent-dim text-accent border border-accent/30 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors"
-                      >
-                        <RefreshCw size={13} /> Reasignar a {bestAvailableEditor?.name || bestAvailableClipper?.name || 'Libre'}
-                      </button>
-                    )}
+                    {/* Barra de saturación del día */}
+                    <div className="h-2 bg-surface-2 rounded-full overflow-hidden border border-line">
+                      <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{ width: `${item.utilPct}%` }} />
+                    </div>
+
+                    {/* Desglose de complejidad de los videos que tiene hoy */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5 text-[11px] font-tech">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
+                          Simple: <strong className="text-mint">{item.simpleVideos}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
+                          Estándar: <strong className="text-accent">{item.estandarVideos}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
+                          Compleja: <strong className="text-amber">{item.altaVideos}</strong>
+                        </span>
+                      </div>
+
+                      {item.activeBrands.length > 0 && (
+                        <span className="text-muted-2 truncate max-w-[170px]">
+                          {item.activeBrands.join(', ')}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
+
+          {/* Columna Derecha (6 cols): Cola de Pedidos con Alerta Activa y Asignación Inteligente */}
+          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-tech text-xs uppercase tracking-wider text-amber flex items-center gap-1.5">
+                  <ShieldAlert size={14} /> Pedidos con Alerta Activa ({protocolAlertOrders.length})
+                </span>
+                <p className="text-xs text-muted mt-0.5">
+                  Clasificados automáticamente según su configuración de entrega y complejidad
+                </p>
+              </div>
+            </div>
+
+            {protocolAlertOrders.length === 0 ? (
+              <div className="my-auto text-center py-12 bg-surface-3/40 border border-dashed border-line rounded-2xl">
+                <CheckCircle2 size={28} className="text-mint mx-auto mb-2" />
+                <p className="text-sm font-semibold">Sin pedidos en riesgo ni alertas activas</p>
+                <p className="text-xs text-muted mt-1">Todos los pedidos cumplen con su configuración de entrega.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1 my-auto">
+                {protocolAlertOrders.map(({ order, hoursLeft, complexity, level, currentClipper, currentEditor }) => {
+                  const badgeStyles = {
+                    prioritario: 'bg-accent-dim text-accent border-accent/30',
+                    urgente: 'bg-amber-dim text-amber border-amber/30',
+                    critico: 'bg-red-500/15 text-red-400 border-red-500/30',
+                    normal: 'bg-mint-dim text-mint border-mint/30',
+                  }[level];
+
+                  const complexityBadge = {
+                    simple: 'text-mint border-mint/30 bg-mint-dim/40',
+                    estandar: 'text-accent border-accent/30 bg-accent-dim/40',
+                    alta: 'text-amber border-amber/30 bg-amber-dim/40',
+                  }[complexity];
+
+                  const selectedClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';
+                  const selectedEditorId = selectedEditorByOrder[order.id] ?? order.editorId ?? '';
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="bg-surface-3 border border-line rounded-2xl p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-tech uppercase px-2.5 py-0.5 rounded-full border font-bold ${badgeStyles}`}>
+                              {level}
+                            </span>
+                            <span className={`text-[10px] font-tech uppercase px-2 py-0.5 rounded-md border ${complexityBadge}`}>
+                              Complejidad {complexity === 'alta' ? 'Compleja' : complexity}
+                            </span>
+                            <span className="font-tech text-xs text-muted-2">
+                              {hoursLeft > 0 ? `${hoursLeft}h para entrega` : 'Plazo vencido'}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold mt-1.5">
+                            {order.brand} · <span className="text-accent font-tech">{order.videoCount} videos</span>
+                          </p>
+                        </div>
+
+                        <span className="font-tech text-[11px] text-muted-2">
+                          {order.deliveryDate} {order.deliveryTime}
+                        </span>
+                      </div>
+
+                      {/* Selectores para elegir a qué Clipper y Editor asignar según su carga de hoy */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <div>
+                          <label className="text-[10px] font-tech uppercase text-muted-2 block mb-1">
+                            Clipper ({currentClipper ? `Actual: ${currentClipper.name}` : 'Sin asignar'})
+                          </label>
+                          <select
+                            value={selectedClipperId}
+                            onChange={e =>
+                              setSelectedClipperByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
+                            }
+                            className="w-full bg-surface-2 border border-line rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-accent"
+                          >
+                            <option value="">Seleccionar Clipper...</option>
+                            {workersWorkloadToday
+                              .filter(x => x.worker.role === 'clipper')
+                              .map(x => (
+                                <option key={x.worker.id} value={x.worker.id}>
+                                  {x.worker.name} ({x.totalVideosToday}/{x.capacity} vid hoy · {x.freeCapacity} libres)
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-tech uppercase text-muted-2 block mb-1">
+                            Editor(a) ({currentEditor ? `Actual: ${currentEditor.name}` : 'Sin asignar'})
+                          </label>
+                          <select
+                            value={selectedEditorId}
+                            onChange={e =>
+                              setSelectedEditorByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
+                            }
+                            className="w-full bg-surface-2 border border-line rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-mint"
+                          >
+                            <option value="">Seleccionar Editor(a)...</option>
+                            {workersWorkloadToday
+                              .filter(x => x.worker.role === 'editor')
+                              .map(x => (
+                                <option key={x.worker.id} value={x.worker.id}>
+                                  {x.worker.name} ({x.totalVideosToday}/{x.capacity} vid hoy · {x.freeCapacity} libres)
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end pt-1">
+                        {reassignedToastId === order.id ? (
+                          <span className="text-xs text-mint font-semibold flex items-center gap-1">
+                            <CheckCircle2 size={14} /> Asignación actualizada
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleAssignFromProtocol(order)}
+                            className="flex items-center gap-1.5 bg-accent text-on-accent rounded-xl px-3.5 py-1.5 text-xs font-semibold hover:bg-accent-strong transition-colors"
+                          >
+                            <RefreshCw size={12} /> Aplicar Asignación Inteligente
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* =====================================================================
-          PANTALLA 4: RENDIMIENTO REAL, RETRABAJO Y CONTRATACIÓN (PANTALLA COMPLETA)
+          PANTALLA 4: RENDIMIENTO REAL, RETRABAJO Y CONTRATACIÓN
          ===================================================================== */}
-      {activeScreen === '4' && !clientMode && (
+      {screen === '4' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
-          {/* Calidad / Retrabajo */}
           <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5">
             <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
               <Clock size={14} /> Calidad vs. Velocidad Real
@@ -1169,7 +1240,6 @@ export function CapacityView() {
             </div>
           </div>
 
-          {/* Contratación Basada en Datos */}
           <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
             <CardNodeDeco color="var(--mint)" />
 
