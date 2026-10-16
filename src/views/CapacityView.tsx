@@ -1,11 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
 import type { Order } from '../types';
 import { CardNodeDeco } from '../components/BrandBackground';
 import {
   Gauge, Scissors, Film, AlertTriangle, CheckCircle2, Clock,
   Sliders, Sparkles, RefreshCw, ShieldAlert, TrendingUp,
-  UserPlus, Zap, Calendar, LayoutGrid, X, Users, Layers,
+  UserPlus, Zap, Calendar, LayoutGrid, X, Users, ChevronDown, Timer,
 } from 'lucide-react';
 
 type ActiveScreen = 'dashboard' | '1' | '2' | '3' | '4';
@@ -60,16 +60,35 @@ function formatHour(h: number): string {
   return `${String(clamped).padStart(2, '0')}:${mins >= 30 ? '30' : '00'}`;
 }
 
+function isPlaceholderTestOrder(o: Order): boolean {
+  const clean = (o.brand || '').trim().toLowerCase();
+  return (
+    clean === 'nuevo pedido' ||
+    clean === 'nuevo cliente' ||
+    clean.startsWith('nuevo pedido ') ||
+    clean.startsWith('nuevo cliente ')
+  );
+}
+
 export function CapacityView() {
   const {
-    workers, orders, brands, capacityConfig, updateCapacityConfig,
+    workers, orders, deleteOrder, brands, capacityConfig, updateCapacityConfig,
     getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor,
   } = useStore();
 
   const [screen, setScreen] = useState<ActiveScreen>('dashboard');
   const [showConfigModal, setShowConfigModal] = useState(false);
 
-  // --- Estado Punto 1 (Cotizador y Tandas: solo volumen 1..200 y complejidad) ---
+  // Purga automática de cualquier pedido fantasma "Nuevo Pedido" / "Nuevo Cliente" creado en pruebas anteriores
+  useEffect(() => {
+    for (const o of orders) {
+      if (isPlaceholderTestOrder(o)) {
+        deleteOrder(o.id);
+      }
+    }
+  }, [orders, deleteOrder]);
+
+  // --- Estado Punto 1 (Cotizador y Tandas: volumen 1..200 y complejidad) ---
   const [evalVideos, setEvalVideos] = useState<number>(30);
   const [evalComplexity, setEvalComplexity] = useState<'simple' | 'estandar' | 'alta'>('estandar');
 
@@ -80,8 +99,10 @@ export function CapacityView() {
   const [simUnavailablePct, setSimUnavailablePct] = useState<number>(0);
   const [simEditorDemandBoostPct, setSimEditorDemandBoostPct] = useState<number>(0);
 
-  // --- Estado Punto 3 (Protocolo y Asignación Inteligente) ---
+  // --- Estado Punto 3 (Protocolo y Alertas con filas desplegables para ahorrar espacio) ---
   const [protocolRoleFilter, setProtocolRoleFilter] = useState<'todos' | 'clipper' | 'editor'>('todos');
+  const [expandedWorkerId, setExpandedWorkerId] = useState<string | null>(null);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [selectedClipperByOrder, setSelectedClipperByOrder] = useState<Record<string, string>>({});
   const [selectedEditorByOrder, setSelectedEditorByOrder] = useState<Record<string, string>>({});
   const [reassignedToastId, setReassignedToastId] = useState<string | null>(null);
@@ -108,7 +129,7 @@ export function CapacityView() {
     const physicalBottleneckDaily = Math.min(physicalClippingDaily, physicalEditingDaily);
     const safeBottleneckDaily = Math.min(safeClippingDaily, safeEditingDaily);
 
-    const activeOrders = orders.filter(o => o.status !== 'finalizado');
+    const activeOrders = orders.filter(o => o.status !== 'finalizado' && !isPlaceholderTestOrder(o));
     const committedByDate: Record<string, number> = {};
     for (const o of activeOrders) {
       const d = o.deliveryDate || todayIso();
@@ -163,7 +184,7 @@ export function CapacityView() {
     };
   }, [clippers, editors, allVideos, orders, capacityConfig.safetyMarginPct, getWorkerCapacity]);
 
-  // COTIZADOR Y TANDAS (PUNTO 1: Evalúa desde hoy según volumen 1..200 y complejidad)
+  // COTIZADOR Y TANDAS (PUNTO 1)
   const evaluation = useMemo(() => {
     const baseDate = todayIso();
     const complexityMultiplier = evalComplexity === 'alta' ? 1.3 : evalComplexity === 'simple' ? 0.85 : 1.0;
@@ -273,19 +294,17 @@ export function CapacityView() {
     capacityConfig.safetyMarginPct,
   ]);
 
-  // CARGA DIARIA DETALLADA POR CADA CLIPPER Y EDITOR (Volumen hoy + Complejidad de sus videos)
+  // CARGA DIARIA DETALLADA POR CADA CLIPPER Y EDITOR
   const workersWorkloadToday = useMemo(() => {
     return workers.map(w => {
       const cap = getWorkerCapacity(w.id);
 
-      // Pedidos asignados a este trabajador
       const myOrders = engine.activeOrders.filter(o =>
         w.role === 'clipper'
           ? o.clipperId === w.id || o.assignedWorkerIds.includes(w.id)
           : o.editorId === w.id || o.assignedWorkerIds.includes(w.id)
       );
 
-      // Videos activos en el tablero de marcas para este trabajador
       const myActiveBoardVideos = allVideos.filter(v =>
         (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
         v.qc !== 'aprobado_cliente' &&
@@ -304,7 +323,6 @@ export function CapacityView() {
         else estandarVideos += count;
       }
 
-      // Si tiene videos en el tablero que no venían de un order con complejidad, se suman según su duración/correcciones
       for (const v of myActiveBoardVideos) {
         const alreadyInOrders = myOrders.some(o => o.boardVideoId === v.id);
         if (alreadyInOrders) continue;
@@ -334,28 +352,59 @@ export function CapacityView() {
     });
   }, [workers, engine.activeOrders, allVideos, getWorkerCapacity]);
 
-  // COLA DE PEDIDOS EN PROTOCOLO (Solo pedidos con configuración de alerta / riesgo según su complejidad y entrega)
+  // COLA DE PEDIDOS CON ALERTA ACTIVA + CÁLCULO DE HORA MÁXIMA DE REASIGNACIÓN
   const protocolAlertOrders = useMemo(() => {
     const now = Date.now();
+    const workHoursPerDay = Math.max(4, capacityConfig.workdayEndHour - capacityConfig.workdayStartHour);
+    // Velocidad real por hora de un par Clipper+Editor según el promedio de tu equipo y el margen de seguridad
+    const pairThroughputPerHour = Math.max(
+      0.6,
+      (Math.min(engine.avgClipperDaily, engine.avgEditorDaily) * ((100 - capacityConfig.safetyMarginPct) / 100)) / workHoursPerDay
+    );
+
     return engine.activeOrders
       .map(o => {
+        const deliveryTimeStr = o.deliveryTime || '18:00';
         const targetTs = o.deliveryDate
-          ? new Date(`${o.deliveryDate}T${o.deliveryTime || '18:00'}`).getTime()
+          ? new Date(`${o.deliveryDate}T${deliveryTimeStr}`).getTime()
           : now + 24 * 3600 * 1000;
         const hoursLeft = (targetTs - now) / (1000 * 3600);
         const count = Math.max(1, o.videoCount || 1);
         const complexity: 'simple' | 'estandar' | 'alta' =
           o.complexity || (count >= 12 ? 'alta' : count <= 4 ? 'simple' : 'estandar');
 
-        // Umbral automático determinado por la complejidad y volumen del pedido
-        const requiredLeadHours =
-          (complexity === 'alta' ? 8 : complexity === 'estandar' ? 5 : 3) + Math.ceil(count * 0.4);
+        const complexityFactor = complexity === 'alta' ? 1.35 : complexity === 'simple' ? 0.8 : 1.0;
+
+        // Horas mínimas necesarias de producción + margen de revisión QC (0.75h) para entregar a tiempo
+        const productionHoursNeeded = Math.max(
+          1.2,
+          Math.round(((count * complexityFactor) / pairThroughputPerHour + 0.75) * 10) / 10
+        );
+
+        // Timestamp exacto de la Hora Máxima de Reasignación (Entrega menos Horas Necesarias de Producción)
+        const maxReassignTs = targetTs - productionHoursNeeded * 3600 * 1000;
+        const maxReassignDate = new Date(maxReassignTs);
+        const maxReassignTimeStr = maxReassignDate.toLocaleTimeString('es-CO', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        const maxReassignDayIso = maxReassignDate.toISOString().slice(0, 10);
+        const maxReassignDayLabel =
+          maxReassignDayIso === todayIso()
+            ? 'Hoy'
+            : maxReassignDayIso === addDaysIso(todayIso(), 1)
+            ? 'Mañana'
+            : maxReassignDayIso;
+
+        const hoursUntilMaxReassign = Math.round(((maxReassignTs - now) / (1000 * 3600)) * 10) / 10;
+        const isPastMaxReassign = hoursUntilMaxReassign <= 0;
 
         let level: 'normal' | 'prioritario' | 'urgente' | 'critico' = o.priority || 'normal';
 
-        if (hoursLeft <= 2 || (hoursLeft <= requiredLeadHours * 0.6 && (!o.clipperId || !o.editorId))) {
+        if (isPastMaxReassign || hoursLeft <= 2) {
           level = 'critico';
-        } else if (hoursLeft <= requiredLeadHours) {
+        } else if (hoursUntilMaxReassign <= 2.5) {
           level = 'urgente';
         } else if (!o.clipperId || !o.editorId || complexity === 'alta') {
           level = 'prioritario';
@@ -371,14 +420,18 @@ export function CapacityView() {
           level,
           currentClipper,
           currentEditor,
+          productionHoursNeeded,
+          maxReassignLabel: `${maxReassignDayLabel} ${maxReassignTimeStr}`,
+          hoursUntilMaxReassign,
+          isPastMaxReassign,
         };
       })
       .filter(item => item.level !== 'normal')
       .sort((a, b) => {
         const rank = { critico: 0, urgente: 1, prioritario: 2, normal: 3 };
-        return rank[a.level] - rank[b.level] || a.hoursLeft - b.hoursLeft;
+        return rank[a.level] - rank[b.level] || a.hoursUntilMaxReassign - b.hoursUntilMaxReassign;
       });
-  }, [engine.activeOrders, workers]);
+  }, [engine.activeOrders, engine.avgClipperDaily, engine.avgEditorDaily, capacityConfig, workers]);
 
   const handleAssignFromProtocol = async (order: Order) => {
     const chosenClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';
@@ -391,7 +444,10 @@ export function CapacityView() {
       await assignOrderEditor(order.id, chosenEditorId);
     }
     setReassignedToastId(order.id);
-    setTimeout(() => setReassignedToastId(prev => (prev === order.id ? null : prev)), 2500);
+    setTimeout(() => {
+      setReassignedToastId(prev => (prev === order.id ? null : prev));
+      setExpandedOrderId(prev => (prev === order.id ? null : prev));
+    }, 1800);
   };
 
   const alertMeta = ALERT_META[engine.alertLevel];
@@ -439,7 +495,6 @@ export function CapacityView() {
           </div>
         </div>
 
-        {/* DOCK SUTIL DE ICONOS (Sin botón Modo Cliente) */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-surface-2 border border-line rounded-2xl p-1.5 shadow-lg">
             {DOCK_ITEMS.map(item => {
@@ -661,7 +716,6 @@ export function CapacityView() {
          ===================================================================== */}
       {screen === '1' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
-          {/* Panel izquierdo: Solo Volumen (1..200) y Complejidad */}
           <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-6">
             <div className="flex items-center justify-between">
               <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
@@ -670,7 +724,6 @@ export function CapacityView() {
               <span className="font-tech text-xs text-muted-2">Máx. 200 videos</span>
             </div>
 
-            {/* Slider grande de 1 a 200 videos */}
             <div className="bg-surface-3 border border-line rounded-2xl p-5 space-y-4 my-auto">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium text-muted">Volumen a cotizar</span>
@@ -697,7 +750,6 @@ export function CapacityView() {
               </div>
             </div>
 
-            {/* Selector de Complejidad */}
             <div className="space-y-2">
               <span className="text-xs text-muted block">Complejidad del proyecto</span>
               <div className="grid grid-cols-3 gap-2.5">
@@ -719,7 +771,6 @@ export function CapacityView() {
             </div>
           </div>
 
-          {/* Panel derecho: Resultado Visual de la Cotización y Tandas */}
           <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden">
             <CardNodeDeco color={evaluation.canAcceptFullOnDate ? 'var(--mint)' : 'var(--amber)'} />
 
@@ -972,21 +1023,16 @@ export function CapacityView() {
       )}
 
       {/* =====================================================================
-          PANTALLA 3: PROTOCOLO Y ALERTAS (RADAR DE CARGA INDIVIDUAL HOY + ASIGNACIÓN INTELIGENTE)
+          PANTALLA 3: PROTOCOLO Y ALERTAS (FILAS COMPACTAS DESPLEGABLES + HORA MÁXIMA DE REASIGNACIÓN)
          ===================================================================== */}
       {screen === '3' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
-          {/* Columna Izquierda (6 cols): Estado de Carga Hoy de TODOS los Clippers y Editores + Complejidad */}
-          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-4">
+          {/* Columna Izquierda (5 cols): Carga Diaria Compacta con desplegable de Complejidad por Creador */}
+          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-5 flex flex-col justify-between space-y-4">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div>
-                <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
-                  <Users size={14} /> Carga de Trabajo Hoy por Creador
-                </span>
-                <p className="text-xs text-muted mt-0.5">
-                  Volumen asignado hoy y complejidad de sus videos activos
-                </p>
-              </div>
+              <span className="font-tech text-xs uppercase tracking-wider text-accent flex items-center gap-1.5">
+                <Users size={14} /> Carga Hoy por Creador
+              </span>
 
               <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
                 {(['todos', 'clipper', 'editor'] as const).map(r => (
@@ -1004,88 +1050,122 @@ export function CapacityView() {
               </div>
             </div>
 
-            <div className="space-y-2.5 max-h-[450px] overflow-y-auto pr-1 my-auto">
+            <div className="space-y-2 max-h-[470px] overflow-y-auto pr-1 my-auto">
               {filteredWorkloads.map(item => {
                 const isClipper = item.worker.role === 'clipper';
+                const isOpen = expandedWorkerId === item.worker.id;
                 const barColor =
                   item.utilPct >= 90 ? 'bg-red-500' : item.utilPct >= 70 ? 'bg-amber' : isClipper ? 'bg-accent' : 'bg-mint';
 
                 return (
                   <div
                     key={item.worker.id}
-                    className="bg-surface-3 border border-line rounded-2xl p-4 space-y-2.5"
+                    className={`bg-surface-3 border rounded-2xl transition-all overflow-hidden ${
+                      isOpen ? 'border-accent/50' : 'border-line hover:border-line/80'
+                    }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    {/* Fila compacta principal */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedWorkerId(prev => (prev === item.worker.id ? null : item.worker.id))}
+                      className="w-full px-3.5 py-3 flex items-center justify-between gap-3 text-left"
+                    >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className={`w-2 h-2 rounded-full shrink-0 ${item.worker.online ? 'bg-mint' : 'bg-muted-2'}`} />
-                        <p className="text-sm font-bold truncate">{item.worker.name}</p>
-                        <span className={`text-[10px] font-tech px-2 py-0.5 rounded-md ${
+                        <p className="text-xs sm:text-sm font-bold truncate">{item.worker.name}</p>
+                        <span className={`text-[10px] font-tech px-1.5 py-0.5 rounded ${
                           isClipper ? 'bg-accent-dim text-accent' : 'bg-mint-dim text-mint'
                         }`}>
-                          {isClipper ? 'Clipper' : 'Editor(a)'}
+                          {isClipper ? 'C' : 'E'}
                         </span>
                       </div>
 
-                      <div className="text-right font-tech text-xs shrink-0">
-                        <strong className="text-text text-sm">{item.totalVideosToday}</strong>
-                        <span className="text-muted-2"> / {item.capacity} vid hoy</span>
-                        <span className="ml-2 text-[11px] text-mint">({item.freeCapacity} libres)</span>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <div className="w-16 h-1.5 bg-surface-2 rounded-full overflow-hidden hidden sm:block">
+                          <div className={`h-full ${barColor} rounded-full`} style={{ width: `${item.utilPct}%` }} />
+                        </div>
+                        <span className="font-tech text-xs">
+                          <strong className="text-text">{item.totalVideosToday}</strong>
+                          <span className="text-muted-2">/{item.capacity}</span>
+                        </span>
+                        <span className="font-tech text-[10px] px-1.5 py-0.5 rounded bg-mint-dim/50 text-mint">
+                          +{item.freeCapacity} lib
+                        </span>
+                        <ChevronDown
+                          size={14}
+                          className={`text-muted transition-transform duration-200 ${isOpen ? 'rotate-180 text-accent' : ''}`}
+                        />
                       </div>
-                    </div>
+                    </button>
 
-                    {/* Barra de saturación del día */}
-                    <div className="h-2 bg-surface-2 rounded-full overflow-hidden border border-line">
-                      <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{ width: `${item.utilPct}%` }} />
-                    </div>
+                    {/* Panel desplegable de detalle (ahorra espacio hasta que se abre) */}
+                    {isOpen && (
+                      <div className="px-3.5 pb-3.5 pt-2 border-t border-line/60 bg-surface-2/60 space-y-2 animate-fadeIn">
+                        <div className="grid grid-cols-3 gap-1.5 text-[11px] font-tech text-center">
+                          <div className="bg-surface-3 border border-line rounded-lg py-1.5">
+                            <span className="text-muted-2 block text-[10px]">Simple</span>
+                            <strong className="text-mint">{item.simpleVideos} vid</strong>
+                          </div>
+                          <div className="bg-surface-3 border border-line rounded-lg py-1.5">
+                            <span className="text-muted-2 block text-[10px]">Estándar</span>
+                            <strong className="text-accent">{item.estandarVideos} vid</strong>
+                          </div>
+                          <div className="bg-surface-3 border border-line rounded-lg py-1.5">
+                            <span className="text-muted-2 block text-[10px]">Compleja</span>
+                            <strong className="text-amber">{item.altaVideos} vid</strong>
+                          </div>
+                        </div>
 
-                    {/* Desglose de complejidad de los videos que tiene hoy */}
-                    <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5 text-[11px] font-tech">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
-                          Simple: <strong className="text-mint">{item.simpleVideos}</strong>
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
-                          Estándar: <strong className="text-accent">{item.estandarVideos}</strong>
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-surface-2 border border-line text-muted">
-                          Compleja: <strong className="text-amber">{item.altaVideos}</strong>
-                        </span>
+                        {item.activeBrands.length > 0 && (
+                          <p className="text-[11px] text-muted-2 font-tech truncate">
+                            Activos: <span className="text-text">{item.activeBrands.join(' · ')}</span>
+                          </p>
+                        )}
                       </div>
-
-                      {item.activeBrands.length > 0 && (
-                        <span className="text-muted-2 truncate max-w-[170px]">
-                          {item.activeBrands.join(', ')}
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Columna Derecha (6 cols): Cola de Pedidos con Alerta Activa y Asignación Inteligente */}
-          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="font-tech text-xs uppercase tracking-wider text-amber flex items-center gap-1.5">
-                  <ShieldAlert size={14} /> Pedidos con Alerta Activa ({protocolAlertOrders.length})
-                </span>
-                <p className="text-xs text-muted mt-0.5">
-                  Clasificados automáticamente según su configuración de entrega y complejidad
-                </p>
-              </div>
+          {/* Columna Derecha (7 cols): Pedidos con Alerta Activa + Hora Máxima de Reasignación + Desplegable de Reasignación */}
+          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-5 flex flex-col justify-between space-y-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="font-tech text-xs uppercase tracking-wider text-amber flex items-center gap-1.5">
+                <ShieldAlert size={14} /> Pedidos con Alerta Activa ({protocolAlertOrders.length})
+              </span>
+              <span className="text-[11px] text-muted font-tech">
+                Haz clic en un pedido para desplegar su reasignación
+              </span>
             </div>
 
             {protocolAlertOrders.length === 0 ? (
-              <div className="my-auto text-center py-12 bg-surface-3/40 border border-dashed border-line rounded-2xl">
+              <div className="my-auto text-center py-14 bg-surface-3/40 border border-dashed border-line rounded-2xl">
                 <CheckCircle2 size={28} className="text-mint mx-auto mb-2" />
-                <p className="text-sm font-semibold">Sin pedidos en riesgo ni alertas activas</p>
-                <p className="text-xs text-muted mt-1">Todos los pedidos cumplen con su configuración de entrega.</p>
+                <p className="text-sm font-semibold">Sin pedidos con alerta activa</p>
+                <p className="text-xs text-muted mt-1">
+                  Aquí solo aparecen los pedidos reales de clientes cuya configuración requiera atención o reasignación.
+                </p>
               </div>
             ) : (
-              <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1 my-auto">
-                {protocolAlertOrders.map(({ order, hoursLeft, complexity, level, currentClipper, currentEditor }) => {
+              <div className="space-y-2.5 max-h-[470px] overflow-y-auto pr-1 my-auto">
+                {protocolAlertOrders.map(item => {
+                  const {
+                    order,
+                    hoursLeft,
+                    complexity,
+                    level,
+                    currentClipper,
+                    currentEditor,
+                    productionHoursNeeded,
+                    maxReassignLabel,
+                    hoursUntilMaxReassign,
+                    isPastMaxReassign,
+                  } = item;
+
+                  const isExpanded = expandedOrderId === order.id;
+
                   const badgeStyles = {
                     prioritario: 'bg-accent-dim text-accent border-accent/30',
                     urgente: 'bg-amber-dim text-amber border-amber/30',
@@ -1105,93 +1185,135 @@ export function CapacityView() {
                   return (
                     <div
                       key={order.id}
-                      className="bg-surface-3 border border-line rounded-2xl p-4 space-y-3"
+                      className={`bg-surface-3 border rounded-2xl transition-all overflow-hidden ${
+                        isExpanded ? 'border-accent/60 shadow-md' : 'border-line hover:border-accent/30'
+                      }`}
                     >
-                      <div className="flex items-start justify-between gap-2 flex-wrap">
-                        <div>
+                      {/* Cabecera compacta del pedido con Hora Máxima de Reasignación siempre visible */}
+                      <div className="p-3.5 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`text-[10px] font-tech uppercase px-2.5 py-0.5 rounded-full border font-bold ${badgeStyles}`}>
+                            <span className={`text-[10px] font-tech uppercase px-2 py-0.5 rounded-full border font-bold ${badgeStyles}`}>
                               {level}
                             </span>
-                            <span className={`text-[10px] font-tech uppercase px-2 py-0.5 rounded-md border ${complexityBadge}`}>
-                              Complejidad {complexity === 'alta' ? 'Compleja' : complexity}
-                            </span>
-                            <span className="font-tech text-xs text-muted-2">
-                              {hoursLeft > 0 ? `${hoursLeft}h para entrega` : 'Plazo vencido'}
+                            <p className="text-sm font-bold truncate">
+                              {order.brand} · <span className="text-accent font-tech">{order.videoCount} vid</span>
+                            </p>
+                            <span className={`text-[10px] font-tech uppercase px-2 py-0.5 rounded border ${complexityBadge}`}>
+                              {complexity === 'alta' ? 'Compleja' : complexity}
                             </span>
                           </div>
-                          <p className="text-sm font-bold mt-1.5">
-                            {order.brand} · <span className="text-accent font-tech">{order.videoCount} videos</span>
-                          </p>
+
+                          {/* Píldora destacada de Hora Máxima de Reasignación */}
+                          <div className="flex items-center gap-3 flex-wrap text-[11px] font-tech">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-semibold ${
+                              isPastMaxReassign
+                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                : 'bg-amber-dim/60 text-amber border-amber/30'
+                            }`}>
+                              <Timer size={12} />
+                              Hora máx. reasignar: {maxReassignLabel}
+                              {isPastMaxReassign
+                                ? ' (Límite superado)'
+                                : ` (en ${hoursUntilMaxReassign}h)`}
+                            </span>
+
+                            <span className="text-muted-2">
+                              Entrega: {order.deliveryDate} {order.deliveryTime || '18:00'} ({hoursLeft > 0 ? `${hoursLeft}h` : 'Vencido'})
+                            </span>
+                          </div>
                         </div>
 
-                        <span className="font-tech text-[11px] text-muted-2">
-                          {order.deliveryDate} {order.deliveryTime}
-                        </span>
-                      </div>
-
-                      {/* Selectores para elegir a qué Clipper y Editor asignar según su carga de hoy */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        <div>
-                          <label className="text-[10px] font-tech uppercase text-muted-2 block mb-1">
-                            Clipper ({currentClipper ? `Actual: ${currentClipper.name}` : 'Sin asignar'})
-                          </label>
-                          <select
-                            value={selectedClipperId}
-                            onChange={e =>
-                              setSelectedClipperByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
-                            }
-                            className="w-full bg-surface-2 border border-line rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-accent"
-                          >
-                            <option value="">Seleccionar Clipper...</option>
-                            {workersWorkloadToday
-                              .filter(x => x.worker.role === 'clipper')
-                              .map(x => (
-                                <option key={x.worker.id} value={x.worker.id}>
-                                  {x.worker.name} ({x.totalVideosToday}/{x.capacity} vid hoy · {x.freeCapacity} libres)
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-tech uppercase text-muted-2 block mb-1">
-                            Editor(a) ({currentEditor ? `Actual: ${currentEditor.name}` : 'Sin asignar'})
-                          </label>
-                          <select
-                            value={selectedEditorId}
-                            onChange={e =>
-                              setSelectedEditorByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
-                            }
-                            className="w-full bg-surface-2 border border-line rounded-xl px-2.5 py-1.5 text-xs outline-none focus:border-mint"
-                          >
-                            <option value="">Seleccionar Editor(a)...</option>
-                            {workersWorkloadToday
-                              .filter(x => x.worker.role === 'editor')
-                              .map(x => (
-                                <option key={x.worker.id} value={x.worker.id}>
-                                  {x.worker.name} ({x.totalVideosToday}/{x.capacity} vid hoy · {x.freeCapacity} libres)
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-end pt-1">
-                        {reassignedToastId === order.id ? (
-                          <span className="text-xs text-mint font-semibold flex items-center gap-1">
-                            <CheckCircle2 size={14} /> Asignación actualizada
-                          </span>
-                        ) : (
+                        {/* Botón compacto para desplegar el cajón de reasignación */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {reassignedToastId === order.id && (
+                            <span className="text-xs text-mint font-semibold flex items-center gap-1">
+                              <CheckCircle2 size={13} /> Listo
+                            </span>
+                          )}
                           <button
                             type="button"
-                            onClick={() => void handleAssignFromProtocol(order)}
-                            className="flex items-center gap-1.5 bg-accent text-on-accent rounded-xl px-3.5 py-1.5 text-xs font-semibold hover:bg-accent-strong transition-colors"
+                            onClick={() => setExpandedOrderId(prev => (prev === order.id ? null : order.id))}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all ${
+                              isExpanded
+                                ? 'bg-accent text-on-accent border-accent'
+                                : 'bg-surface-2 text-muted hover:text-text border-line'
+                            }`}
                           >
-                            <RefreshCw size={12} /> Aplicar Asignación Inteligente
+                            <RefreshCw size={12} />
+                            {isExpanded ? 'Cerrar' : 'Reasignar'}
+                            <ChevronDown size={13} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           </button>
-                        )}
+                        </div>
                       </div>
+
+                      {/* Cajón desplegable para elegir Clipper / Editor (solo ocupa espacio cuando se abre) */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 pt-3 border-t border-line/70 bg-surface-2/70 space-y-3 animate-fadeIn">
+                          <div className="flex items-center justify-between text-[11px] font-tech text-muted-2">
+                            <span>Tiempo estimado de producción requerido: <strong className="text-text">{productionHoursNeeded}h netas</strong></span>
+                            <span>
+                              Actual: {currentClipper?.name || 'Sin Clipper'} / {currentEditor?.name || 'Sin Editor'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="text-[10px] font-tech uppercase text-accent block mb-1">
+                                Asignar Clipper
+                              </label>
+                              <select
+                                value={selectedClipperId}
+                                onChange={e =>
+                                  setSelectedClipperByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
+                                }
+                                className="w-full bg-surface-3 border border-line rounded-xl px-2.5 py-2 text-xs outline-none focus:border-accent"
+                              >
+                                <option value="">Seleccionar Clipper...</option>
+                                {workersWorkloadToday
+                                  .filter(x => x.worker.role === 'clipper')
+                                  .map(x => (
+                                    <option key={x.worker.id} value={x.worker.id}>
+                                      {x.worker.name} ({x.totalVideosToday}/{x.capacity} hoy · {x.freeCapacity} libres)
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-tech uppercase text-mint block mb-1">
+                                Asignar Editor(a)
+                              </label>
+                              <select
+                                value={selectedEditorId}
+                                onChange={e =>
+                                  setSelectedEditorByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
+                                }
+                                className="w-full bg-surface-3 border border-line rounded-xl px-2.5 py-2 text-xs outline-none focus:border-mint"
+                              >
+                                <option value="">Seleccionar Editor(a)...</option>
+                                {workersWorkloadToday
+                                  .filter(x => x.worker.role === 'editor')
+                                  .map(x => (
+                                    <option key={x.worker.id} value={x.worker.id}>
+                                      {x.worker.name} ({x.totalVideosToday}/{x.capacity} hoy · {x.freeCapacity} libres)
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => void handleAssignFromProtocol(order)}
+                              className="flex items-center gap-1.5 bg-mint text-on-accent rounded-xl px-4 py-2 text-xs font-bold hover:opacity-95 transition-opacity"
+                            >
+                              <CheckCircle2 size={13} /> Confirmar Reasignación
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
