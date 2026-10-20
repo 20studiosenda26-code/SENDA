@@ -239,6 +239,11 @@ export interface Order {
   clipsPerVideo?: number;
   priority?: 'normal' | 'prioritario' | 'urgente' | 'critico';
   complexity?: 'simple' | 'estandar' | 'alta';
+  paymentStatus?: 'completado' | 'incompleto';
+  invoiceNumber?: string | null;
+  invoiceDate?: string | null;
+  invoiceFileName?: string | null;
+  invoiceFileUrl?: string | null;
 }
 
 export interface FinanceSettings {
