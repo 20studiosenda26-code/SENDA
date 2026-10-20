@@ -1,0 +1,36 @@
+import { Sparkles, Loader2 } from "lucide-react";
+import React, { useState } from "react";
+export interface LiquidMetalButtonProps { label?: string; loadingLabel?: string; onClick?: (e?: any) => void; viewMode?: "text" | "icon"; icon?: any; disabled?: boolean; loading?: boolean; fullWidth?: boolean; variant?: string; size?: "sm" | "md" | "lg"; className?: string; type?: "button" | "submit" | "reset"; title?: string; children?: React.ReactNode; }
+%s\n
+export function LiquidMetalButton({ label = "Get Started", loadingLabel, onClick, viewMode = "text", icon: IconProp, disabled = false, loading = false, fullWidth = false, size = "md", className = "", type = "button", title, children }: LiquidMetalButtonProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const isIcon = viewMode === "icon";
+  const h = size === "sm" ? 36 : size === "lg" ? 50 : 46;
+  const renderIcon = () => { if (!IconProp) return isIcon ? <Sparkles size={16} className="text-[#35D6E4]" /> : null; if (React.isValidElement(IconProp)) return IconProp; if (typeof IconProp === "function" || typeof IconProp === "object") { const C = IconProp; return <C size={16} className="text-[#35D6E4] shrink-0" />; } return null; };
+%s\n
+  return (
+    <button type={type} title={title || label} disabled={disabled || loading} onClick={onClick} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => { setIsHovered(false); setIsPressed(false); }} onMouseDown={() => setIsPressed(true)} onMouseUp={() => setIsPressed(false)} aria-label={label} className={`relative inline-flex items-center justify-center rounded-full p-[2px] transition-all duration-300 select-none ${fullWidth ? "w-full" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${isPressed ? "scale-[0.98]" : isHovered ? "scale-[1.015]" : "scale-100"} ${className}`} style={{ minWidth: isIcon ? h : fullWidth ? "100%" : 140, height: h, boxShadow: isHovered ? "0 0 22px rgba(53,214,228,0.35)" : "0 6px 16px rgba(0,0,0,0.45)" }}>
+      <span className="absolute inset-0 rounded-full overflow-hidden"><span className="absolute -inset-[100%] animate-spin" style={{ animationDuration: isHovered ? "2.8s" : "6s", background: "conic-gradient(from 0deg, #131519, #35D6E4, #ffffff, #1A1D22, #22B4C2, #6FE7C8, #131519, #35D6E4)" }} /></span>
+      <span className="relative z-10 flex items-center justify-center gap-2 w-full h-full rounded-full bg-gradient-to-b from-[#1A1D22] to-[#131519] px-5 text-[13.5px] font-semibold text-slate-100" style={{ fontFamily: "Space Grotesk, sans-serif" }}>{loading ? <><Loader2 size={16} className="animate-spin text-[#35D6E4]" />{!isIcon && <span>{loadingLabel || label}</span>}</> : isIcon ? renderIcon() : <>{renderIcon()}<span className="whitespace-nowrap">{children || label}</span></>}</span>
+    </button>
+  );
+}
+import { Sparkles, Loader2 } from "lucide-react";
+import React, { useState } from "react";
+export interface LiquidMetalButtonProps { label?: string; loadingLabel?: string; onClick?: (e?: any) => void; viewMode?: "text" | "icon"; icon?: any; disabled?: boolean; loading?: boolean; fullWidth?: boolean; variant?: string; size?: "sm" | "md" | "lg"; className?: string; type?: "button" | "submit" | "reset"; title?: string; children?: React.ReactNode; }
+%s\n
+export function LiquidMetalButton({ label = "Get Started", loadingLabel, onClick, viewMode = "text", icon: IconProp, disabled = false, loading = false, fullWidth = false, size = "md", className = "", type = "button", title, children }: LiquidMetalButtonProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const isIcon = viewMode === "icon";
+  const h = size === "sm" ? 36 : size === "lg" ? 50 : 46;
+  const renderIcon = () => { if (!IconProp) return isIcon ? <Sparkles size={16} className="text-[#35D6E4]" /> : null; if (React.isValidElement(IconProp)) return IconProp; if (typeof IconProp === "function" || typeof IconProp === "object") { const C = IconProp; return <C size={16} className="text-[#35D6E4] shrink-0" />; } return null; };
+%s\n
+  return (
+    <button type={type} title={title || label} disabled={disabled || loading} onClick={onClick} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => { setIsHovered(false); setIsPressed(false); }} onMouseDown={() => setIsPressed(true)} onMouseUp={() => setIsPressed(false)} aria-label={label} className={`relative inline-flex items-center justify-center rounded-full p-[2px] transition-all duration-300 select-none ${fullWidth ? "w-full" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${isPressed ? "scale-[0.98]" : isHovered ? "scale-[1.015]" : "scale-100"} ${className}`} style={{ minWidth: isIcon ? h : fullWidth ? "100%" : 140, height: h, boxShadow: isHovered ? "0 0 22px rgba(53,214,228,0.35)" : "0 6px 16px rgba(0,0,0,0.45)" }}>
+      <span className="absolute inset-0 rounded-full overflow-hidden"><span className="absolute -inset-[100%] animate-spin" style={{ animationDuration: isHovered ? "2.8s" : "6s", background: "conic-gradient(from 0deg, #131519, #35D6E4, #ffffff, #1A1D22, #22B4C2, #6FE7C8, #131519, #35D6E4)" }} /></span>
+      <span className="relative z-10 flex items-center justify-center gap-2 w-full h-full rounded-full bg-gradient-to-b from-[#1A1D22] to-[#131519] px-5 text-[13.5px] font-semibold text-slate-100" style={{ fontFamily: "Space Grotesk, sans-serif" }}>{loading ? <><Loader2 size={16} className="animate-spin text-[#35D6E4]" />{!isIcon && <span>{loadingLabel || label}</span>}</> : isIcon ? renderIcon() : <>{renderIcon()}<span className="whitespace-nowrap">{children || label}</span></>}</span>
+    </button>
+  );
+}
