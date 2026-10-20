@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useStore } from '../store';
 import {
   Flame, TrendingUp, Target, CheckCircle2, Award, Star,
@@ -280,13 +281,12 @@ export function ProfileView() {
             </label>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSavePersonalInfo}
-            className="bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
-          >
-            Guardar información y cuenta bancaria
-          </button>
+          <LiquidMetalButton
+              type="button"
+              onClick={handleSavePersonalInfo}
+              label="Guardar información y cuenta bancaria"
+              variant="cyan"
+            />
         </div>
       )}
 

@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../store';
 import type { Order, OrderStatus, Worker } from '../types';
@@ -283,14 +284,15 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                       getWorkerWorkload={getWorkerWorkload} getWorkerCapacity={getWorkerCapacity} setWorkerCapacity={setWorkerCapacity}
                     />
                     <div className="flex items-center gap-3 pt-1 flex-wrap">
-                      <button
-                        onClick={handleAssignClipper}
-                        disabled={!clipperSel || assigningClipper}
-                        className="flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50"
-                      >
-                        {assigningClipper ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                        Asignar Clipper
-                      </button>
+                      <LiquidMetalButton
+              onClick={handleAssignClipper}
+              disabled={!clipperSel}
+              loading={assigningClipper}
+              label="Asignar Clipper"
+              loadingLabel="Asignando..."
+              icon={CheckCircle2}
+              variant="cyan"
+            />
                       {reassigningClipper && (
                         <button onClick={() => setReassigningClipper(false)} className="text-xs text-muted hover:text-text">Cancelar</button>
                       )}
@@ -321,14 +323,15 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                       getWorkerWorkload={getWorkerWorkload} getWorkerCapacity={getWorkerCapacity} setWorkerCapacity={setWorkerCapacity}
                     />
                     <div className="flex items-center gap-3 pt-1 flex-wrap">
-                      <button
-                        onClick={handleAssignEditor}
-                        disabled={!editorSel || assigningEditor}
-                        className="flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50"
-                      >
-                        {assigningEditor ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                        Asignar Editor(a)
-                      </button>
+                      <LiquidMetalButton
+              onClick={handleAssignEditor}
+              disabled={!editorSel}
+              loading={assigningEditor}
+              label="Asignar Editor(a)"
+              loadingLabel="Asignando..."
+              icon={CheckCircle2}
+              variant="cyan"
+            />
                       {reassigningEditor && (
                         <button onClick={() => setReassigningEditor(false)} className="text-xs text-muted hover:text-text">Cancelar</button>
                       )}

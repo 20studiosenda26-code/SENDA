@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
@@ -195,9 +196,15 @@ function AdminContracts() {
               <input type="file" className="hidden" onChange={handleFile} disabled={uploading} />
             </label>
           </div>
-          <button onClick={handleSubmit} disabled={uploading || !title.trim() || !fileUrl} className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50">
-            Guardar contrato
-          </button>
+          <LiquidMetalButton
+                onClick={handleSubmit}
+                disabled={!title.trim() || !fileUrl}
+                loading={uploading}
+                fullWidth
+                label="Guardar contrato"
+                loadingLabel="Subiendo..."
+                variant="cyan"
+              />
         </div>
       )}
 

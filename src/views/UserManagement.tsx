@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../lib/auth';
 import { useStore } from '../store';
@@ -228,9 +229,14 @@ export function UserManagement() {
                 </div>
               )}
               <div className="flex justify-end">
-                <button type="submit" disabled={loading} className="bg-accent text-on-accent rounded-lg px-4 py-2 text-xs sm:text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
-                  {loading ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />} Guardar usuario
-                </button>
+                <LiquidMetalButton
+                  type="submit"
+                  loading={loading}
+                  label="Guardar usuario"
+                  loadingLabel="Guardando..."
+                  icon={UserPlus}
+                  variant="cyan"
+                />
               </div>
             </form>
           )}

@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import type { Video, Order, AppExpense } from '../types';
@@ -854,12 +855,13 @@ export function FinancesView() {
                     onChange={e => setExpDate(e.target.value)}
                     className="flex-1 bg-surface-2 border border-line rounded-md px-2 py-1.5 text-xs font-tech outline-none focus:border-accent"
                   />
-                  <button
+                  <LiquidMetalButton
                     type="submit"
-                    className="bg-accent text-on-accent rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0"
-                  >
-                    Guardar
-                  </button>
+                    label="Guardar"
+                    height={36}
+                    width={120}
+                    variant="cyan"
+                  />
                 </div>
               </form>
 

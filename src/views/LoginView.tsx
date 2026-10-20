@@ -1,3 +1,4 @@
+import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { Mail, Lock, LogIn, AlertCircle, Loader2 } from 'lucide-react';
@@ -79,14 +80,17 @@ export function LoginView() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-accent text-on-accent rounded-lg py-2.5 font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_8px_24px_-8px_rgba(53,214,228,0.5)]"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <LogIn size={18} />}
-            {loading ? 'Ingresando...' : 'Iniciar sesión'}
-          </button>
+          <div className="pt-1 flex justify-center">
+            <LiquidMetalButton
+              type="submit"
+              fullWidth
+              loading={loading}
+              label="Iniciar sesión"
+              loadingLabel="Ingresando..."
+              icon={LogIn}
+              variant="cyan"
+            />
+          </div>
         </form>
 
         <p className="text-center text-xs text-muted-2 mt-6">
