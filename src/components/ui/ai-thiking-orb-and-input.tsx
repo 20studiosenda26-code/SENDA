@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "../../index.css";
 
-/* ───────────────────────────── copy ───────────────────────────── */
 const COPY = {
   placeholder: "Iniciando sesión…",
   labels: ["Verificando", "Sincronizando", "Cargando", "Preparando"],
@@ -22,12 +21,10 @@ export interface MorphOrbProps {
   onComplete?: () => void;
 }
 
-/* ─────────────────────────── geometry ─────────────────────────── */
 const PILL_H = 54, BALL_SMALL = 54, ORB_D = 132, ORB_R = 66, CANVAS = 220;
 const CARD_H = 134;
 const FLY_D = 138;
 
-// Toma exactamente el ancho y la posición Y del botón "Iniciar sesión"
 const pillW = () => {
   try {
     const savedW = Number(sessionStorage.getItem("senda_orb_start_w"));
@@ -46,42 +43,25 @@ const homeDy = () => {
       return savedY - stageCenterY;
     }
   } catch { /* ignorar */ }
-  // Fallback exacto donde se ubica el botón "Iniciar sesión" en el centro-bajo del formulario
   return 145;
 };
 
-/* ─────────────────── Voz / Audio de Bienvenida SENDA ─────────────────── */
-function playWelcomeVoice() {
-  try {
-    const audio = new Audio("/welcome.mp3");
-    audio.volume = 1.0;
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        speakFallback();
-      });
-    }
-  } catch {
-    speakFallback();
-  }
-}
-
-function speakFallback() {
+/* Reproduce ÚNICAMENTE el archivo MP3 subido (sin voz sintética) */
+function playUploadedMp3Now() {
   try {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance("Bienvenido a SENDA");
-      utter.lang = "es-ES";
-      utter.rate = 0.98;
-      utter.pitch = 1.0;
-      window.speechSynthesis.speak(utter);
     }
+    const w = window as unknown as { __sendaWelcomeAudio?: HTMLAudioElement };
+    const audio = w.__sendaWelcomeAudio || new Audio("/welcome.mp3");
+    audio.currentTime = 0;
+    audio.volume = 1.0;
+    void audio.play();
   } catch {
-    // ignorar si no está soportado
+    // ignorar
   }
 }
 
-/* ───────────────────────── math + easing ───────────────────────── */
 type Ease = (t: number) => number;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -140,7 +120,6 @@ const E = {
 
 const bez = (t: number, p0: number, c: number, p2: number) => (1 - t) * (1 - t) * p0 + 2 * (1 - t) * t * c + t * t * p2;
 
-/* ───────────────────────── timeline data ───────────────────────── */
 interface Track { ch: string; from: number; to: number; t0: number; t1: number; ease?: Ease }
 const T = (ch: string, from: number, to: number, t0: number, t1: number, ease: Ease = E.io): Track => ({ ch, from, to, t0, t1, ease });
 
@@ -243,8 +222,6 @@ const rCardIn = (tw: number): Track[] => [
   T("wp", 0, 1, 0, tw, E.lin),
   T("bloom", 1, 0.625, 0, 250, E.out),
 ];
-
-const FADE = ["oGlow", "oAur", "oPill", "oBall", "oGreen", "oCard", "oRing", "oInput", "oHalo", "sOp", "orb.alpha", "trail"];
 
 const INIT: Record<string, number> = {
   h: PILL_H, r: 999, oGlow: 1, oHalo: 0, oPill: 1, oBall: 0, oGreen: 0, oCard: 0, oRing: 1, oInput: 1, inScale: 1, oAur: 1,
@@ -653,6 +630,12 @@ function createRuntime(env: Env): Runtime {
     try {
       env.ui.setPhase("launch");
       hist.length = 0;
+
+      // Dispara tu audio MP3 justo cuando la píldora se convierte en bolita y empieza a subir (320ms)
+      window.setTimeout(() => {
+        if (!sig.aborted) playUploadedMp3Now();
+      }, Math.round(320 / env.getSpeed()));
+
       if (!reduced) {
         await go(launchTracks(geo));
         setNow("r", ORB_D / 2);
@@ -696,7 +679,6 @@ function createRuntime(env: Env): Runtime {
         wDur = 320;
         wStagger = n > 1 ? Math.min(45, 280 / (n - 1)) : 0;
         env.ui.setAnswer(body);
-        playWelcomeVoice();
         await go(unfoldTracks(geo, (n - 1) * wStagger + wDur));
       } else {
         env.ui.setPhase("resolve");
@@ -713,7 +695,6 @@ function createRuntime(env: Env): Runtime {
         wDur = 250;
         wStagger = 0;
         env.ui.setAnswer(body);
-        playWelcomeVoice();
         await go(R_GREEN_OUT);
         setNow("w", geo.cw); setNow("h", CARD_H); setNow("r", 22); setNow("dotS", 1);
         await go(rCardIn(wDur));
@@ -722,7 +703,7 @@ function createRuntime(env: Env): Runtime {
       env.ui.setPhase("answered");
       env.ui.live(body);
       env.ui.focusAnswer();
-      await sleep(1650 / env.getSpeed(), sig);
+      await sleep(1400 / env.getSpeed(), sig);
       if (!sig.aborted) env.ui.notifyComplete();
     } catch (e) {
       if (e === ABORT) return;

@@ -17,6 +17,19 @@ export function LoginView() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+
+    // Pre-desbloquea el archivo MP3 de ElevenLabs con el gesto del clic del usuario
+    try {
+      const w = window as unknown as { __sendaWelcomeAudio?: HTMLAudioElement };
+      const preAudio = new Audio('/welcome.mp3?v=' + Date.now());
+      preAudio.preload = 'auto';
+      preAudio.volume = 1.0;
+      preAudio.load();
+      w.__sendaWelcomeAudio = preAudio;
+    } catch {
+      // ignorar
+    }
+
     try {
       sessionStorage.setItem('senda_show_welcome_orb', '1');
       if (btnWrapRef.current) {
@@ -26,8 +39,9 @@ export function LoginView() {
         sessionStorage.setItem('senda_orb_start_w', String(rect.width));
       }
     } catch {
-      // ignorar si sessionStorage no está disponible
+      // ignorar
     }
+
     const result = await signIn(email, password);
     setLoading(false);
     if (result.error) {
