@@ -6,22 +6,42 @@ export const WelcomeAudio = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    const hasPlayed = sessionStorage.getItem('senda_welcome_played');
-    if (!hasPlayed) {
-      audioRef.current = new Audio(welcomeAudioFile);
-      audioRef.current.volume = 0.8;
+    // Usamos una nueva llave (v2) para ignorar el bloqueo anterior
+    const hasPlayed = sessionStorage.getItem('senda_welcome_played_v2');
+    if (hasPlayed === 'true') return;
+
+    const playAudio = () => {
+      if (!audioRef.current) {
+        audioRef.current = new Audio(welcomeAudioFile);
+        audioRef.current.volume = 0.8;
+      }
+      
       audioRef.current.play()
         .then(() => {
           setIsPlaying(true);
-          sessionStorage.setItem('senda_welcome_played', 'true');
+          sessionStorage.setItem('senda_welcome_played_v2', 'true');
+          // Limpiamos los eventos para que no intente sonar dos veces
+          document.removeEventListener('click', playAudio);
+          document.removeEventListener('keydown', playAudio);
         })
         .catch((err) => {
-          console.warn("Autoplay bloqueado:", err);
-          sessionStorage.setItem('senda_welcome_played', 'true');
+          console.warn("Navegador bloqueó el autoplay. Esperando un clic para forzar reproducción:", err);
+          // Si lo bloquea, no nos rendimos. Esperamos el próximo clic en cualquier parte de la pantalla.
+          document.addEventListener('click', playAudio, { once: true });
+          document.addEventListener('keydown', playAudio, { once: true });
         });
-      audioRef.current.onended = () => setIsPlaying(false);
-    }
+        
+      audioRef.current.onended = () => {
+        setIsPlaying(false);
+      };
+    };
+
+    // Intentamos reproducir de inmediato al entrar al dashboard
+    playAudio();
+
     return () => {
+      document.removeEventListener('click', playAudio);
+      document.removeEventListener('keydown', playAudio);
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
