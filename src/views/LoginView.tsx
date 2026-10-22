@@ -1,6 +1,7 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useRef } from 'react';
 import { useAuth } from '../lib/auth';
+import { WELCOME_AUDIO_DATA_URI } from '../lib/welcomeVoiceData';
 import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 import { BrandBackground } from '../components/BrandBackground';
@@ -18,18 +19,6 @@ export function LoginView() {
     setError(null);
     setLoading(true);
 
-    // Pre-desbloquea el archivo MP3 de ElevenLabs con el gesto del clic del usuario
-    try {
-      const w = window as unknown as { __sendaWelcomeAudio?: HTMLAudioElement };
-      const preAudio = new Audio('/welcome.mp3?v=' + Date.now());
-      preAudio.preload = 'auto';
-      preAudio.volume = 1.0;
-      preAudio.load();
-      w.__sendaWelcomeAudio = preAudio;
-    } catch {
-      // ignorar
-    }
-
     try {
       sessionStorage.setItem('senda_show_welcome_orb', '1');
       if (btnWrapRef.current) {
@@ -42,8 +31,13 @@ export function LoginView() {
       // ignorar
     }
 
+    // Preparamos el audio exacto de ElevenLabs incrustado en memoria
+    const welcomeAudio = new Audio(WELCOME_AUDIO_DATA_URI);
+    welcomeAudio.volume = 1.0;
+
     const result = await signIn(email, password);
     setLoading(false);
+
     if (result.error) {
       try {
         sessionStorage.removeItem('senda_show_welcome_orb');
@@ -51,6 +45,15 @@ export function LoginView() {
         // ignorar
       }
       setError(result.error);
+    } else {
+      // ¡Dispara la voz de ElevenLabs DE UNA apenas el login es correcto y arranca la bolita!
+      try {
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        welcomeAudio.currentTime = 0;
+        void welcomeAudio.play();
+      } catch {
+        // ignorar
+      }
     }
   };
 

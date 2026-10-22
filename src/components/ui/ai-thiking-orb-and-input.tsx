@@ -633,7 +633,7 @@ function createRuntime(env: Env): Runtime {
 
       // Dispara tu audio MP3 justo cuando la píldora se convierte en bolita y empieza a subir (320ms)
       window.setTimeout(() => {
-        if (!sig.aborted) playUploadedMp3Now();
+        if (!sig.aborted) 
       }, Math.round(320 / env.getSpeed()));
 
       if (!reduced) {
