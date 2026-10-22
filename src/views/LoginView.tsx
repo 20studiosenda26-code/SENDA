@@ -1,7 +1,6 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useRef } from 'react';
 import { useAuth } from '../lib/auth';
-import { WELCOME_AUDIO_DATA_URI } from '../lib/welcomeVoiceData';
 import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 import { BrandBackground } from '../components/BrandBackground';
@@ -31,9 +30,9 @@ export function LoginView() {
       // ignorar
     }
 
-    // Preparamos el audio exacto de ElevenLabs incrustado en memoria
-    const welcomeAudio = new Audio(WELCOME_AUDIO_DATA_URI);
+    const welcomeAudio = new Audio('/welcome.mp3');
     welcomeAudio.volume = 1.0;
+    welcomeAudio.preload = 'auto';
 
     const result = await signIn(email, password);
     setLoading(false);
@@ -46,7 +45,6 @@ export function LoginView() {
       }
       setError(result.error);
     } else {
-      // ¡Dispara la voz de ElevenLabs DE UNA apenas el login es correcto y arranca la bolita!
       try {
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         welcomeAudio.currentTime = 0;
