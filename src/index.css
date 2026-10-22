@@ -4,10 +4,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Paleta de marca: tomada directamente del logo de Senda (el árbol-circuito
-   blanco/cian sobre negro). El cian de acento y los grises casi-negros de
-   fondo están calibrados sobre los tonos reales del logo, no elegidos al
-   azar, para que la plataforma se sienta como una extensión del isotipo. */
 :root {
   --ink: #08090B;
   --surface: #131519;
@@ -60,11 +56,6 @@ body {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
-/* Vista de fondo con profundidad sutil: un leve viñeteado hacia las
-   esquinas + una malla de puntos finísima (lenguaje "circuito") detrás de
-   todo el contenido, casi imperceptible pero que le da textura al negro
-   plano. Vive en <body> para no interferir con BrandBackground (que ya
-   dibuja las ramas de marca por encima). */
 [data-theme="dark"] body {
   background-image:
     radial-gradient(circle at 1px 1px, rgba(241,243,245,0.05) 1px, transparent 0),
@@ -78,9 +69,6 @@ h1, h2, h3, .display {
   letter-spacing: -0.01em;
 }
 
-/* Detalles "técnicos" (badges de estado, ids, contadores, timestamps):
-   una mono discreta que reforza el lenguaje de circuito del logo sin
-   volver la interfaz fría — se usa con moderación, solo en metadatos. */
 .font-tech {
   font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   letter-spacing: 0.01em;
@@ -96,4 +84,419 @@ h1, h2, h3, .display {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--line);
+}
+
+/* ───────────── SENDA AI Thinking Orb & Welcome Styles ───────────── */
+@keyframes mo-spin {
+  to { --angle: 360deg; }
+}
+@keyframes mo-drift {
+  from { transform: translateX(-14%); }
+  to { transform: translateX(14%); }
+}
+@keyframes mo-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -100% 0; }
+}
+@keyframes mo-dot {
+  0%, 80%, 100% { opacity: .25; }
+  40% { opacity: 1; }
+}
+@keyframes mo-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mo-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes mo-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes mo-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes mo-shake {
+  0%, 100% { transform: translate(-50%, -50%); }
+  25% { transform: translate(calc(-50% - 4px), -50%); }
+  75% { transform: translate(calc(-50% + 4px), -50%); }
+}
+
+.mo-root {
+  --oCenter: 0;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: hidden;
+  background: #08090B;
+  color: #F1F3F5;
+  font-family: 'Inter', system-ui, sans-serif;
+  user-select: none;
+}
+
+.mo-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(53, 214, 228, 0.14), transparent 55%),
+    radial-gradient(circle at 50% 100%, rgba(34, 180, 194, 0.1), transparent 60%);
+  pointer-events: none;
+}
+
+.mo-halo {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 340px;
+  height: 340px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 214, 228, 0.35) 0%, rgba(34, 180, 194, 0.12) 45%, transparent 70%);
+  filter: blur(28px);
+  opacity: var(--oCenter, 0);
+  pointer-events: none;
+}
+
+.mo-mover {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  will-change: transform;
+}
+
+.mo-trail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 214, 228, 0.75) 0%, rgba(34, 180, 194, 0.25) 55%, transparent 75%);
+  filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.mo-actor {
+  --w: 520px;
+  --h: 60px;
+  --r: 999px;
+  --oGlow: 1;
+  --oHalo: 0;
+  --oPill: 1;
+  --oBall: 0;
+  --oGreen: 0;
+  --oCard: 0;
+  --oRing: 1;
+  --oInput: 1;
+  --inScale: 1;
+  --oAur: 1;
+  --gs: 0.55;
+  --cs: 1;
+  --hOp: 0;
+  --dotS: 0;
+  --bloom: 1;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--w);
+  height: var(--h);
+  border-radius: var(--r);
+  transform: translate(-50%, -50%) scale(var(--cs));
+  will-change: width, height, border-radius, transform;
+}
+
+.mo-actor[data-shake] {
+  animation: mo-shake 260ms ease;
+}
+
+.mo-underglow {
+  position: absolute;
+  inset: -14px;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 50% 60%, rgba(53, 214, 228, 0.35), rgba(34, 180, 194, 0.12) 55%, transparent 75%);
+  filter: blur(18px);
+  opacity: var(--oGlow);
+  pointer-events: none;
+}
+
+.mo-halo-green {
+  position: absolute;
+  inset: -26px;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(53, 214, 228, 0.55), rgba(111, 231, 200, 0.25) 55%, transparent 75%);
+  filter: blur(22px);
+  opacity: calc(var(--oHalo) * var(--bloom));
+  pointer-events: none;
+}
+
+.mo-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #131519;
+  border: 1px solid rgba(53, 214, 228, 0.28);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  opacity: var(--oPill);
+}
+
+.mo-aurora {
+  position: absolute;
+  inset: 0;
+  opacity: var(--oAur);
+  background: linear-gradient(90deg, transparent, rgba(53, 214, 228, 0.14), rgba(111, 231, 200, 0.12), transparent);
+  animation: mo-drift 5s ease-in-out infinite alternate;
+}
+
+.mo-ball {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #7FD9E8 0%, #35D6E4 45%, #0F2E33 100%);
+  box-shadow: 0 0 32px rgba(53, 214, 228, 0.65), inset 0 2px 6px rgba(255, 255, 255, 0.45);
+  opacity: var(--oBall);
+  pointer-events: none;
+}
+
+/* El orbe condensado ahora usa el Cian/Turquesa de SENDA en lugar de verde */
+.mo-green {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #F1F3F5 0%, #35D6E4 42%, #22B4C2 78%, #0F2E33 100%);
+  box-shadow: 0 0 42px rgba(53, 214, 228, 0.8), inset 0 2px 8px rgba(255, 255, 255, 0.6);
+  transform: scale(var(--gs));
+  opacity: var(--oGreen);
+  pointer-events: none;
+}
+
+.mo-card {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, #1A1D22 0%, #131519 100%);
+  border: 1px solid rgba(53, 214, 228, 0.45);
+  box-shadow: 0 24px 60px -15px rgba(0, 0, 0, 0.85), 0 0 36px -8px rgba(53, 214, 228, 0.35);
+  opacity: var(--oCard);
+  pointer-events: none;
+}
+
+.mo-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(53, 214, 228, 0.35);
+  opacity: var(--oRing);
+  pointer-events: none;
+}
+
+.mo-input {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 18px;
+  opacity: var(--oInput);
+  transform: scale(var(--inScale));
+}
+
+.mo-spark {
+  width: 20px;
+  height: 20px;
+  color: #35D6E4;
+  flex-shrink: 0;
+}
+
+.mo-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #F1F3F5;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.mo-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, #35D6E4, #22B4C2);
+  color: #03151A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mo-send svg {
+  width: 17px;
+  height: 17px;
+}
+
+.mo-orb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220px;
+  height: 220px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.mo-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #35D6E4;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mo-answer {
+  position: absolute;
+  inset: 0;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  opacity: var(--oCard);
+  outline: none;
+}
+
+.mo-a-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #35D6E4;
+  opacity: var(--hOp);
+  margin-bottom: 6px;
+}
+
+.mo-a-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #35D6E4;
+  box-shadow: 0 0 10px #35D6E4;
+  transform: scale(var(--dotS));
+}
+
+.mo-a-body {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 31px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #F1F3F5;
+}
+
+.mo-w {
+  display: inline-block;
+  opacity: 0;
+  background: linear-gradient(90deg, #F1F3F5, #35D6E4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.mo-status {
+  --sOp: 0;
+  --sTy: 6;
+  position: absolute;
+  left: 50%;
+  top: calc(46% + 92px);
+  transform: translate(-50%, calc(var(--sTy) * 1px));
+  opacity: var(--sOp);
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.mo-lab {
+  position: absolute;
+  white-space: nowrap;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #35D6E4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mo-lab.mo-in {
+  animation: mo-in 240ms ease forwards;
+}
+
+.mo-lab.mo-out {
+  animation: mo-out 240ms ease forwards;
+}
+
+.mo-lab-done {
+  color: #6FE7C8;
+}
+
+.mo-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.mo-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #35D6E4;
+  animation: mo-dot 1.2s infinite;
+}
+
+.mo-dots i:nth-child(2) { animation-delay: 0.2s; }
+.mo-dots i:nth-child(3) { animation-delay: 0.4s; }
+
+.mo-reset {
+  position: absolute;
+  left: 50%;
+  top: calc(46% + 86px);
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(26, 29, 34, 0.9);
+  border: 1px solid rgba(53, 214, 228, 0.35);
+  color: #35D6E4;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, background 0.2s ease;
+}
+
+.mo-root[data-phase="answered"] .mo-reset {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mo-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
 }

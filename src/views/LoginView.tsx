@@ -1,7 +1,7 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from '../lib/auth';
-import { Mail, Lock, LogIn, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 import { BrandBackground } from '../components/BrandBackground';
 
@@ -11,14 +11,48 @@ export function LoginView() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const btnWrapRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
+
+    try {
+      sessionStorage.setItem('senda_show_welcome_orb', '1');
+      if (btnWrapRef.current) {
+        const rect = btnWrapRef.current.getBoundingClientRect();
+        const centerY = rect.top + rect.height / 2;
+        sessionStorage.setItem('senda_orb_start_y', String(centerY));
+        sessionStorage.setItem('senda_orb_start_w', String(rect.width));
+      }
+    } catch {
+      // ignorar
+    }
+
+    const welcomeAudio = new Audio('/welcome.mp3');
+    welcomeAudio.volume = 1.0;
+    welcomeAudio.preload = 'auto';
+
     const result = await signIn(email, password);
     setLoading(false);
-    if (result.error) setError(result.error);
+
+    if (result.error) {
+      try {
+        sessionStorage.removeItem('senda_show_welcome_orb');
+      } catch {
+        // ignorar
+      }
+      setError(result.error);
+    } else {
+      try {
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        welcomeAudio.currentTime = 0;
+        void welcomeAudio.play();
+      } catch {
+        // ignorar
+      }
+    }
   };
 
   return (
@@ -80,7 +114,7 @@ export function LoginView() {
             </div>
           )}
 
-          <div className="pt-1 flex justify-center">
+          <div ref={btnWrapRef} className="pt-1 flex justify-center">
             <LiquidMetalButton
               type="submit"
               fullWidth

@@ -17,8 +17,8 @@ const DEFAULT_FINANCE_SETTINGS: FinanceSettings = {
 
 const DEFAULT_CAPACITY_CONFIG: CapacityProtocolConfig = {
   safetyMarginPct: 15,
-  defaultClipperDailyVideos: 20,
-  defaultEditorDailyVideos: 20,
+  defaultClipperDailyVideos: 10,
+  defaultEditorDailyVideos: 10,
   workdayStartHour: 8,
   workdayEndHour: 20,
   maxNoResponseMinutes: 45,
@@ -70,6 +70,26 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
+const DATA_SEED_VERSION = 'senda_v4_multi_video_client_portal';
+
+function ensureCleanThreeProjectsSeed() {
+  try {
+    const currentVer = localStorage.getItem(STORAGE_PREFIX + 'seed_version');
+    if (currentVer !== DATA_SEED_VERSION) {
+      localStorage.setItem(STORAGE_PREFIX + 'brands', JSON.stringify(INITIAL_BRANDS));
+      localStorage.setItem(STORAGE_PREFIX + 'orders', JSON.stringify(INITIAL_ORDERS));
+      localStorage.setItem(STORAGE_PREFIX + 'workers', JSON.stringify(INITIAL_WORKERS));
+      localStorage.setItem(STORAGE_PREFIX + 'paidHistory', JSON.stringify(INITIAL_PAID_HISTORY));
+      localStorage.setItem(STORAGE_PREFIX + 'notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+      localStorage.setItem(STORAGE_PREFIX + 'seed_version', DATA_SEED_VERSION);
+    }
+  } catch {
+    // ignorar errores de localStorage
+  }
+}
+
+ensureCleanThreeProjectsSeed();
+
 type SharedKey =
   | 'brands'
   | 'notifications'
@@ -99,7 +119,7 @@ function saveState<T>(key: string, value: T) {
   try {
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
   } catch {
-    // almacenamiento lleno o no disponible: se ignora silenciosamente
+    // almacenamiento lleno o no disponible
   }
 }
 
@@ -173,6 +193,8 @@ interface Store {
   acceptAllClips: (videoId: string) => void;
   addCorrection: (videoId: string, time: number, text: string) => void;
   updateCorrectionTime: (videoId: string, correctionId: string, time: number) => void;
+  submitClientFeedbackBatch: (videoId: string, items: { time: number; text: string }[]) => void;
+  enableExtraClientFeedbackRound: (videoId: string) => void;
   uploadBrief: (videoId: string, fileName: string, fileUrl: string) => void;
   addFinalVideo: (videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
   uploadMainImage: (videoId: string, fileName: string, fileUrl: string) => void;
@@ -340,12 +362,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return;
     let active = true;
     (async () => {
-      const remoteBrands = await loadShared<Brand[]>('brands');
-      if (active && remoteBrands) setBrands(remoteBrands);
+      const remoteSeedVer = await loadShared<string>('seed_version');
+      if (remoteSeedVer !== DATA_SEED_VERSION) {
+        await saveShared('brands', INITIAL_BRANDS);
+        await saveShared('orders', INITIAL_ORDERS);
+        await saveShared('seed_version', DATA_SEED_VERSION);
+        if (active) {
+          setBrands(INITIAL_BRANDS);
+          setOrders(INITIAL_ORDERS);
+        }
+      } else {
+        const remoteBrands = await loadShared<Brand[]>('brands');
+        if (active && remoteBrands) setBrands(remoteBrands);
+        const remoteOrders = await loadShared<Order[]>('orders');
+        if (active && remoteOrders) setOrders(remoteOrders);
+      }
+
       const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
       if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
-      const remoteOrders = await loadShared<Order[]>('orders');
-      if (active && remoteOrders) setOrders(remoteOrders);
       const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
       if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
       const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
@@ -423,7 +457,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase.from('profiles').select('*');
     if (!data) return;
     const clipperEditor = data.filter((p: Record<string, unknown>) => p.role === 'clipper' || p.role === 'editor');
-    setWorkers(clipperEditor.map(workerFromProfileRow));
+    if (clipperEditor.length > 0) {
+      setWorkers(clipperEditor.map(workerFromProfileRow));
+    }
     setAdminProfiles(
       data
         .filter((p: Record<string, unknown>) => p.role === 'admin')
@@ -438,7 +474,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [loadWorkersFromProfiles, user?.id]);
 
-  // --- Estado "En línea" en tiempo real ---
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !user?.id) {
       setPresenceOnlineIds(new Set());
@@ -752,38 +787,123 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateVideo = useCallback((videoId: string, fn: (v: Video) => Video) => {
-    setBrands(prev => prev.map(b => ({
-      ...b,
-      videos: b.videos.map(v => v.id === videoId ? fn(v) : v),
-    })));
+    setBrands(prev => {
+      const next = prev.map(b => ({
+        ...b,
+        videos: b.videos.map(v => v.id === videoId ? fn(v) : v),
+      }));
+      brandsRef.current = next;
+      return next;
+    });
   }, []);
 
   const setQc = useCallback((videoId: string, status: QcStatus) => {
     const prevVideo = findVideo(videoId);
+    const parentBrand = brandsRef.current.find(b => b.videos.some(v => v.id === videoId));
     const wasPaid50 = prevVideo ? prevVideo.paid50 : false;
     const wasPaid100 = prevVideo ? prevVideo.paid100 : false;
+    const todayStr = new Date().toISOString().slice(0, 10);
 
     updateVideo(videoId, v => ({
       ...v,
       qc: status,
+      editorQc: status === 'aprobado_cliente' ? 'aprobado_cliente' : status === 'aprobado_senda' ? 'aprobado_senda' : v.editorQc,
+      date: status === 'aprobado_cliente' ? todayStr : v.date,
+      finalUploaded: status === 'aprobado_cliente' || status === 'aprobado_senda' ? true : v.finalUploaded,
+      publishedToClient: status === 'aprobado_senda' || status === 'aprobado_cliente' ? true : v.publishedToClient,
       paid50: status === 'aprobado_senda' || status === 'aprobado_cliente' ? true : v.paid50,
       paid100: status === 'aprobado_cliente' ? true : v.paid100,
     }));
 
+    setOrders(prev => {
+      const next = prev.map(o => {
+        const matches =
+          o.id === prevVideo?.orderId ||
+          o.boardVideoId === videoId ||
+          (parentBrand && o.brand.trim().toLowerCase() === parentBrand.name.trim().toLowerCase());
+        if (!matches) return o;
+        const brandVideos = brandsRef.current.find(b => b.id === parentBrand?.id)?.videos || [];
+        const allClientApproved = brandVideos.length > 0 && brandVideos.every(v => v.id === videoId ? status === 'aprobado_cliente' : v.qc === 'aprobado_cliente');
+        const anySendaApproved = brandVideos.some(v => v.id === videoId ? (status === 'aprobado_senda' || status === 'aprobado_cliente') : (v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente'));
+
+        let nextOrderStatus: OrderStatus = o.status;
+        if (allClientApproved) nextOrderStatus = 'finalizado';
+        else if (anySendaApproved) nextOrderStatus = 'aprobado_senda';
+        else if (o.clipperId && o.editorId) nextOrderStatus = 'asignado';
+        return { ...o, status: nextOrderStatus };
+      });
+      ordersRef.current = next;
+      return next;
+    });
+
     if (prevVideo) {
+      const brandPrefix = parentBrand ? `${parentBrand.name} · ` : '';
       const label = status.replace(/_/g, ' ');
-      pushNotification('clipper', 'qc_clip', `Estado de QC de tu clip "${prevVideo.name}": ${label}`, prevVideo.clipperId);
-      pushNotification('editor', 'qc_video', `Estado de QC del video "${prevVideo.name}": ${label}`, prevVideo.editorId);
-      pushNotification('admin', 'qc_video', `${prevVideo.name}: estado de QC cambiado a ${label}`);
+      pushNotification('clipper', 'qc_clip', `Estado de QC de "${brandPrefix}${prevVideo.name}": ${label}`, prevVideo.clipperId);
+      pushNotification('editor', 'qc_video', `Estado de QC de "${brandPrefix}${prevVideo.name}": ${label}`, prevVideo.editorId);
+      pushNotification(
+        'admin',
+        'qc_video',
+        status === 'aprobado_senda'
+          ? `${brandPrefix}${prevVideo.name}: Aprobado Senda · Subido automáticamente a Clientes`
+          : `${brandPrefix}${prevVideo.name}: estado de QC cambiado a ${label}`
+      );
 
       if (status === 'aprobado_senda' && !wasPaid50) {
-        pushNotification('clipper', 'pago_50', `Se liberó automáticamente el 50% de pago de "${prevVideo.name}" (Aprobado Senda)`, prevVideo.clipperId);
-        pushNotification('editor', 'pago_50', `Se liberó automáticamente el 50% de pago de "${prevVideo.name}" (Aprobado Senda)`, prevVideo.editorId);
+        pushNotification('clipper', 'pago_50', `Se liberó el 50% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Senda)`, prevVideo.clipperId);
+        pushNotification('editor', 'pago_50', `Se liberó el 50% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Senda)`, prevVideo.editorId);
       }
       if (status === 'aprobado_cliente' && !wasPaid100) {
-        pushNotification('clipper', 'pago_100', `Se liberó automáticamente el 100% de pago de "${prevVideo.name}" (Aprobado Cliente)`, prevVideo.clipperId);
-        pushNotification('editor', 'pago_100', `Se liberó automáticamente el 100% de pago de "${prevVideo.name}" (Aprobado Cliente)`, prevVideo.editorId);
+        pushNotification('clipper', 'pago_100', `Se liberó el 100% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Cliente)`, prevVideo.clipperId);
+        pushNotification('editor', 'pago_100', `Se liberó el 100% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Cliente)`, prevVideo.editorId);
       }
+    }
+  }, [updateVideo, findVideo, pushNotification]);
+
+  const submitClientFeedbackBatch = useCallback((videoId: string, items: { time: number; text: string }[]) => {
+    if (items.length === 0) return;
+    const prevVideo = findVideo(videoId);
+    const parentBrand = brandsRef.current.find(b => b.videos.some(v => v.id === videoId));
+
+    updateVideo(videoId, v => {
+      const used = v.clientFeedbackRoundsUsed ?? 0;
+      const max = v.clientFeedbackMaxRounds ?? 1;
+      if (used >= max) return v;
+      const nextRound = used + 1;
+      const newCorrections = items.map((it, idx) => ({
+        id: `corr-cli-${Date.now()}-${idx}`,
+        time: it.time,
+        text: `[Feedback Cliente · Ronda ${nextRound}] ${it.text}`,
+        author: 'cliente' as const,
+        round: nextRound,
+      }));
+      return {
+        ...v,
+        qc: 'correcciones',
+        editorQc: 'correcciones',
+        corrections: [...v.corrections, ...newCorrections],
+        clientFeedbackRoundsUsed: nextRound,
+        clientFeedbackMaxRounds: max,
+      };
+    });
+
+    if (prevVideo) {
+      const brandPrefix = parentBrand ? `${parentBrand.name} · ` : '';
+      pushNotification('editor', 'qc_video', `El cliente envió ${items.length} corrección(es) en "${brandPrefix}${prevVideo.name}"`, prevVideo.editorId);
+      pushNotification('admin', 'qc_video', `Cliente envió su ronda de feedback (${items.length} punto(s)) en "${brandPrefix}${prevVideo.name}"`);
+    }
+  }, [updateVideo, findVideo, pushNotification]);
+
+  const enableExtraClientFeedbackRound = useCallback((videoId: string) => {
+    const prevVideo = findVideo(videoId);
+    const parentBrand = brandsRef.current.find(b => b.videos.some(v => v.id === videoId));
+    updateVideo(videoId, v => ({
+      ...v,
+      clientFeedbackMaxRounds: (v.clientFeedbackMaxRounds ?? 1) + 1,
+    }));
+    if (prevVideo) {
+      const brandPrefix = parentBrand ? `${parentBrand.name} · ` : '';
+      pushNotification('admin', 'sistema', `Se habilitó 1 nueva tanda de feedback para el cliente en "${brandPrefix}${prevVideo.name}"`);
     }
   }, [updateVideo, findVideo, pushNotification]);
 
@@ -869,7 +989,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addCorrection = useCallback((videoId: string, time: number, text: string) => {
     updateVideo(videoId, v => ({
       ...v,
-      corrections: [...v.corrections, { id: `corr-${Date.now()}`, time, text }],
+      corrections: [...v.corrections, { id: `corr-${Date.now()}`, time, text, author: 'admin' }],
       qc: v.qc === 'sin_iniciar' || v.qc === 'pendiente' ? 'correcciones' : v.qc,
     }));
   }, [updateVideo]);
@@ -894,6 +1014,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addFinalVideo = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
     updateVideo(videoId, v => ({
       ...v,
+      qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' ? 'revision' : v.qc,
       finalVideos: [...v.finalVideos, { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null }],
     }));
   }, [updateVideo]);
@@ -1138,29 +1259,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [user, role, loadChat]);
 
   const approveFinal = useCallback((videoId: string) => {
-    const v = findVideo(videoId);
-    const wasAlreadyPaid100 = v ? v.paid100 : true;
-    updateVideo(videoId, vid => {
-      const updated = { ...vid, finalUploaded: true, paid50: true, paid100: true, qc: 'aprobado_cliente' as QcStatus, editorQc: 'aprobado_cliente' as const };
-      if (updated.tierSnapshot && !vid.paid100) {
-        setPaidHistory(prev => [...prev, {
-          videoName: updated.name,
-          clipperId: updated.clipperId,
-          editorId: updated.editorId,
-          durationKey: updated.duration || '',
-          date: new Date().toISOString().slice(0, 10),
-          paid100: true,
-          tierSnapshot: updated.tierSnapshot!,
-        }]);
-      }
-      return updated;
-    });
-    if (v && !wasAlreadyPaid100) {
-      pushNotification('clipper', 'pago_100', `Se liberó el 100% de pago de "${v.name}"`, v.clipperId);
-      pushNotification('editor', 'pago_100', `Se liberó el 100% de pago de "${v.name}"`, v.editorId);
-      pushNotification('admin', 'pago_100', `100% de pago liberado para "${v.name}" (${v.clipperName} / ${v.editorName})`);
-    }
-  }, [updateVideo, findVideo, pushNotification]);
+    setQc(videoId, 'aprobado_cliente');
+  }, [setQc]);
 
   const addClassroomModule = useCallback((title: string, desc: string, color: string) => {
     setClassroomModules(prev => [...prev, { id: `mod-${Date.now()}`, title, desc, color, lessons: [] }]);
@@ -1202,17 +1302,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         qc: 'pendiente'
       } : v),
     })));
-
-    const v = brands.flatMap(b => b.videos).find(vid => vid.id === videoId);
-    const w = workersWithOnline.find(wrk => wrk.id === workerId);
-    if (v && w) {
-      pushNotification('clipper', 'trabajo_asignado', `Nuevo trabajo asignado: "${v.name}"`, workerId);
-      pushNotification('admin', 'trabajo_asignado', `El proyecto "${v.name}" ha sido asignado a ${w.name}`);
-    }
-  }, [brands, workersWithOnline, pushNotification]);
+  }, [workersWithOnline]);
 
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
-    setOrders(prev => [{ ...o, id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
+    setOrders(prev => [{ ...o, paymentStatus: 'completado', id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
   }, []);
 
   const updateOrder = useCallback((id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => {
@@ -1237,18 +1330,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       status: 'sin_asignar' as OrderStatus, assignedWorkerIds: workerIds,
       briefFileName: briefFileName || null, briefFileUrl: briefFileUrl || null,
     });
-    for (const workerId of workerIds) {
-      const w = workersRef.current.find(x => x.id === workerId);
-      const roleFor: Role = w?.role === 'editor' ? 'editor' : 'clipper';
-      pushNotification(roleFor, 'trabajo_asignado', `Nuevo trabajo asignado: "${brand}" · entrega ${deliveryDate} ${deliveryTime}`, workerId);
-    }
-    pushNotification('admin', 'trabajo_asignado', `Pedido de "${brand}" asignado a ${workerIds.length} persona(s)`);
-  }, [addOrder, pushNotification]);
+  }, [addOrder]);
 
   const getWorkerCapacity = useCallback((workerId: string): number => {
     const w = workersRef.current.find(x => x.id === workerId);
     const defaultByRole = w?.role === 'editor' ? capacityConfig.defaultEditorDailyVideos : capacityConfig.defaultClipperDailyVideos;
-    return workerCapacities[workerId] ?? defaultByRole;
+    return workerCapacities[workerId] ?? w?.dailyCapacity ?? defaultByRole;
   }, [workerCapacities, capacityConfig.defaultClipperDailyVideos, capacityConfig.defaultEditorDailyVideos]);
 
   const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
@@ -1256,66 +1343,94 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getWorkerWorkload = useCallback((workerId: string): number => {
-    return ordersRef.current.filter(o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId)).length;
+    const activeVideos = brandsRef.current
+      .flatMap(b => b.videos)
+      .filter(v => (v.clipperId === workerId || v.editorId === workerId) && v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
+    return activeVideos.length;
   }, []);
 
-  const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null, existingVideoId?: string | null): string => {
+  const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
     const clipper = clipperId ? workersRef.current.find(w => w.id === clipperId) : null;
     const editor = editorId ? workersRef.current.find(w => w.id === editorId) : null;
-    const videoId = existingVideoId || order.boardVideoId || `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const count = Math.max(1, order.videoCount || 1);
+    let firstVideoId = order.boardVideoId || `${order.id}-v1`;
 
     setBrands(prev => {
-      const alreadyExists = prev.some(b => b.videos.some(v => v.id === videoId));
-      let nextBrands: Brand[];
-      if (alreadyExists) {
-        nextBrands = prev.map(b => ({
-          ...b,
-          videos: b.videos.map(v => v.id === videoId ? {
-            ...v,
-            clipperId: clipperId || v.clipperId,
-            clipperName: clipper ? clipper.name : v.clipperName,
-            editorId: editorId || v.editorId,
-            editorName: editor ? editor.name : v.editorName,
-            briefFileName: order.briefFileName || v.briefFileName || null,
-            briefFileUrl: order.briefFileUrl || v.briefFileUrl || null,
-          } : v),
-        }));
-      } else {
-        const newVideo: Video = {
-          id: videoId,
-          name: order.brand,
-          clipperName: clipper?.name || 'Sin asignar',
-          editorName: editor?.name || 'Sin asignar',
-          clipperId: clipperId || '',
-          editorId: editorId || '',
-          qc: 'pendiente',
-          editorQc: 'pendiente',
-          duration: null,
-          durationSeconds: 0,
-          tierSnapshot: null,
-          date: order.deliveryDate || new Date().toISOString().slice(0, 10),
-          clips: [],
-          finalVideos: [],
-          corrections: [],
-          finalUploaded: false,
-          paid50: false,
-          paid100: false,
-          briefFileName: order.briefFileName || null,
-          briefFileUrl: order.briefFileUrl || null,
-          sentByClipper: false,
-          mainImageFileName: null,
-          mainImageFileUrl: null,
-          mainImageStatus: null,
-          mainImageComment: null,
-        };
-        const existingBrand = prev.find(b => b.name.trim().toLowerCase() === order.brand.trim().toLowerCase());
-        if (existingBrand) {
-          nextBrands = prev.map(b => (b.id === existingBrand.id ? { ...b, videos: [newVideo, ...b.videos] } : b));
+      const existingBrand = prev.find(b => b.name.trim().toLowerCase() === order.brand.trim().toLowerCase());
+      const currentVideos = existingBrand ? existingBrand.videos : [];
+      const orderVideos = currentVideos.filter(v => v.orderId === order.id || currentVideos.length <= count);
+
+      const nextVideosForOrder: Video[] = [];
+      for (let i = 1; i <= count; i++) {
+        const existingVid =
+          orderVideos.find(v => v.videoNumber === i) ||
+          orderVideos[i - 1] ||
+          null;
+
+        const vidId = existingVid?.id || `${order.id}-v${i}`;
+        if (i === 1) firstVideoId = vidId;
+
+        if (existingVid) {
+          nextVideosForOrder.push({
+            ...existingVid,
+            name: `Video ${i}`,
+            videoNumber: i,
+            orderId: order.id,
+            clipperId: clipperId || existingVid.clipperId,
+            clipperName: clipper ? clipper.name : existingVid.clipperName,
+            editorId: editorId || existingVid.editorId,
+            editorName: editor ? editor.name : existingVid.editorName,
+            briefFileName: order.briefFileName || existingVid.briefFileName || null,
+            briefFileUrl: order.briefFileUrl || existingVid.briefFileUrl || null,
+          });
         } else {
-          const newBrand: Brand = { id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: order.brand, videos: [newVideo] };
-          nextBrands = [newBrand, ...prev];
+          nextVideosForOrder.push({
+            id: vidId,
+            name: `Video ${i}`,
+            videoNumber: i,
+            orderId: order.id,
+            clipperName: clipper?.name || 'Sin asignar',
+            editorName: editor?.name || 'Sin asignar',
+            clipperId: clipperId || '',
+            editorId: editorId || '',
+            qc: 'pendiente',
+            editorQc: 'pendiente',
+            duration: null,
+            durationSeconds: 45,
+            tierSnapshot: CONFIG.tiers[1],
+            date: order.deliveryDate || new Date().toISOString().slice(0, 10),
+            clips: [],
+            finalVideos: [],
+            corrections: [],
+            finalUploaded: false,
+            paid50: false,
+            paid100: false,
+            briefFileName: order.briefFileName || null,
+            briefFileUrl: order.briefFileUrl || null,
+            sentByClipper: false,
+            mainImageFileName: null,
+            mainImageFileUrl: null,
+            mainImageStatus: null,
+            mainImageComment: null,
+            publishedToClient: false,
+            clientFeedbackRoundsUsed: 0,
+            clientFeedbackMaxRounds: 1,
+          });
         }
       }
+
+      let nextBrands: Brand[];
+      if (existingBrand) {
+        nextBrands = prev.map(b => (b.id === existingBrand.id ? { ...b, videos: nextVideosForOrder } : b));
+      } else {
+        const newBrand: Brand = {
+          id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: order.brand,
+          videos: nextVideosForOrder,
+        };
+        nextBrands = [newBrand, ...prev];
+      }
+
       brandsRef.current = nextBrands;
       saveState('brands', nextBrands);
       if (isSupabaseConfigured) {
@@ -1325,7 +1440,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return nextBrands;
     });
 
-    return videoId;
+    return firstVideoId;
   }, [markLocalWrite]);
 
   const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
@@ -1334,7 +1449,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const clipper = workersRef.current.find(w => w.id === clipperId);
     const editor = workersRef.current.find(w => w.id === editorId);
 
-    const videoId = upsertBoardVideoForOrder(order, clipperId, editorId, order.boardVideoId);
+    const videoId = upsertBoardVideoForOrder(order, clipperId, editorId);
     const nextOrders = ordersRef.current.map(o => o.id === orderId ? {
       ...o,
       clipperId,
@@ -1352,52 +1467,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await saveShared('orders', nextOrders);
     }
 
-    const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
-      : 'sin fecha de entrega definida todavía';
-    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
-
+    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos individuales). Revisa Video 1 a Video ${order.videoCount} en Tareas.`;
     if (clipper) pushNotification('clipper', 'trabajo_asignado', msg, clipperId);
     if (editor) pushNotification('editor', 'trabajo_asignado', msg, editorId);
-    pushNotification('admin', 'trabajo_asignado', `Proyecto "${order.brand}" asignado a ${clipper?.name || 'un clíper'} (clíper) y ${editor?.name || 'una editora'} (editor(a)).`);
-
-    if (isSupabaseConfigured) {
-      try {
-        for (const workerId of [clipperId, editorId]) {
-          const groupId = await startAdminDm(workerId);
-          if (groupId) await sendChatGroupMessage(groupId, msg);
-        }
-      } catch {
-        // Si el mensaje de chat falla, la notificación ya quedó registrada.
-      }
-    }
-  }, [pushNotification, startAdminDm, sendChatGroupMessage, upsertBoardVideoForOrder, markLocalWrite]);
+  }, [pushNotification, upsertBoardVideoForOrder, markLocalWrite]);
 
   const notifyPersonAssigned = useCallback(async (order: Order, targetRole: 'clipper' | 'editor', workerId: string) => {
     const worker = workersRef.current.find(w => w.id === workerId);
     if (!worker) return;
-    const when = order.deliveryDate
-      ? `el ${order.deliveryDate}${order.deliveryTime ? ` a las ${order.deliveryTime}` : ''}`
-      : 'sin fecha de entrega definida todavía';
-    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Tienes que entregarlo ${when}. Revisa el brief y las referencias en Tareas.`;
+    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Revisa cada video individualmente en Tareas.`;
     pushNotification(targetRole, 'trabajo_asignado', msg, workerId);
-    pushNotification('admin', 'trabajo_asignado', `Proyecto "${order.brand}" asignado a ${worker.name} (${targetRole === 'clipper' ? 'clíper' : 'editor(a)'}).`);
-    if (isSupabaseConfigured) {
-      try {
-        const groupId = await startAdminDm(workerId);
-        if (groupId) await sendChatGroupMessage(groupId, msg);
-      } catch {
-        // Si el mensaje de chat falla, la notificación ya quedó registrada.
-      }
-    }
-  }, [pushNotification, startAdminDm, sendChatGroupMessage]);
+  }, [pushNotification]);
 
   const assignOrderClipper = useCallback(async (orderId: string, clipperId: string) => {
     const order = ordersRef.current.find(o => o.id === orderId);
     if (!order) return;
     const currentEditorId = order.editorId || null;
     const nowFull = Boolean(clipperId && currentEditorId);
-    const videoId = upsertBoardVideoForOrder(order, clipperId, currentEditorId, order.boardVideoId);
+    const videoId = upsertBoardVideoForOrder(order, clipperId, currentEditorId);
 
     const updatedOrder: Order = {
       ...order,
@@ -1416,7 +1503,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       markLocalWrite();
       await saveShared('orders', nextOrders);
     }
-
     await notifyPersonAssigned(updatedOrder, 'clipper', clipperId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
@@ -1425,7 +1511,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!order) return;
     const currentClipperId = order.clipperId || null;
     const nowFull = Boolean(currentClipperId && editorId);
-    const videoId = upsertBoardVideoForOrder(order, currentClipperId, editorId, order.boardVideoId);
+    const videoId = upsertBoardVideoForOrder(order, currentClipperId, editorId);
 
     const updatedOrder: Order = {
       ...order,
@@ -1444,7 +1530,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       markLocalWrite();
       await saveShared('orders', nextOrders);
     }
-
     await notifyPersonAssigned(updatedOrder, 'editor', editorId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
@@ -1479,9 +1564,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-    const sign = String.fromCharCode(36);
-    pushNotification('admin', 'sistema', `Cierre financiero registrado (${closing.periodLabel}) · Neto: ${sign}${closing.realizedNetRevenue.toLocaleString('es-CO')}`);
-  }, [markLocalWrite, pushNotification]);
+  }, [markLocalWrite]);
 
   const addAppExpense = useCallback((expense: Omit<AppExpense, 'id'>) => {
     const newItem: AppExpense = {
@@ -1538,19 +1621,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-    const sign = String.fromCharCode(36);
-    pushNotification(
-      data.role,
-      'pago_100',
-      `Nómina pagada (${data.weekendLabel}): ${sign}${data.amount.toLocaleString('es-CO')}${data.receiptFileName ? ` · Comprobante: ${data.receiptFileName}` : ''}`,
-      data.workerId
-    );
-    pushNotification(
-      'admin',
-      'pago_100',
-      `Pago de nómina registrado a ${data.workerName} (${sign}${data.amount.toLocaleString('es-CO')}) · ${data.weekendLabel}`
-    );
-  }, [markLocalWrite, pushNotification]);
+  }, [markLocalWrite]);
 
   const revertPayrollPayment = useCallback((paymentId: string) => {
     setPayrollPayments(prev => {
@@ -1585,7 +1656,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     selectedVideo, setSelectedVideo,
     selectedClassroomModuleId, setSelectedClassroomModuleId,
     setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
-    addCorrection, updateCorrectionTime, uploadBrief, addFinalVideo,
+    addCorrection, updateCorrectionTime, submitClientFeedbackBatch, enableExtraClientFeedbackRound,
+    uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,
     sendChat, closeDay, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals,
     togglePaid50, approveFinal, toggleOnline,

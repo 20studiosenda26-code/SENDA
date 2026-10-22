@@ -40,11 +40,15 @@ export interface Correction {
   id: string;
   time: number;
   text: string;
+  author?: 'admin' | 'cliente';
+  round?: number;
 }
 
 export interface Video {
   id: string;
   name: string;
+  videoNumber?: number;
+  orderId?: string | null;
   clipperName: string;
   editorName: string;
   clipperId: string;
@@ -68,6 +72,9 @@ export interface Video {
   mainImageFileUrl?: string | null;
   mainImageStatus?: MainImageStatus | null;
   mainImageComment?: string | null;
+  publishedToClient?: boolean;
+  clientFeedbackRoundsUsed?: number;
+  clientFeedbackMaxRounds?: number;
 }
 
 export interface Brand {

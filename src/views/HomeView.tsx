@@ -1,20 +1,56 @@
+import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Flame, Target, TrendingUp, Play, ArrowRight, CheckCircle2, Clock, AlertCircle, CalendarDays, GraduationCap, BookOpen, Users } from 'lucide-react';
 import { CardNodeDeco } from '../components/BrandBackground';
 import { CLASSROOM_MODULES } from '../data';
-import { AdminHomePanels } from './AdminHomePanels';
+import { AdminHomePanels, workerLoadColor, type WorkerLoad } from './AdminHomePanels';
 import { pendingRoleSuffix } from '../lib/qcLabel';
 
 export function HomeView() {
-  const { role, workers, currentWorkerId, brands, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
+  const { role, workers, currentWorkerId, brands, orders, getWorkerCapacity, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
+  const [selectedTeamWorkerId, setSelectedTeamWorkerId] = useState<string | null>(null);
+
   const worker = workers.find(w => w.id === currentWorkerId);
   const goals = getWorkerGoals(currentWorkerId, role === 'admin' ? 'clipper' : (role as 'clipper' | 'editor'));
 
-  const myVideos = brands.flatMap(b => b.videos).filter(v =>
+  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
+
+  const myVideos = allVideos.filter(v =>
     role === 'clipper' ? v.clipperId === currentWorkerId : role === 'editor' ? v.editorId === currentWorkerId : true
   );
   const inProgress = myVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
   const done = myVideos.filter(v => v.qc === 'aprobado_cliente');
+
+  const workerLoadStatusMap = useMemo(() => {
+    const map: Record<string, { load: WorkerLoad; activeVideos: number; cap: number; label: string }> = {};
+    for (const w of workers) {
+      const cap = getWorkerCapacity(w.id);
+      const myActiveVids = allVideos.filter(
+        v => (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
+        v.qc !== 'aprobado_cliente' &&
+        v.qc !== 'sin_iniciar'
+      );
+
+      let activeVideos = 0;
+      for (const v of myActiveVids) {
+        const linked = orders.find(o => o.boardVideoId === v.id || o.brand.trim().toLowerCase() === v.name.trim().toLowerCase());
+        activeVideos += linked ? Math.max(1, linked.videoCount || 1) : 1;
+      }
+
+      let load: WorkerLoad = 'sin_trabajo';
+      let label = 'Sin trabajo';
+      if (activeVideos >= cap) {
+        load = 'lleno';
+        label = `Lleno (${activeVideos}/${cap} vid)`;
+      } else if (activeVideos > 0) {
+        load = 'meta';
+        label = `Meta diaria (${activeVideos}/${cap} vid)`;
+      }
+
+      map[w.id] = { load, activeVideos, cap, label };
+    }
+    return map;
+  }, [workers, allVideos, orders, getWorkerCapacity]);
 
   const greeting = role === 'admin' ? 'Panel de administración' : `Hola, ${worker?.name?.split(' ')[0] || ''}`;
 
@@ -27,23 +63,45 @@ export function HomeView() {
         </div>
 
         <div className="bg-surface-2 border border-line rounded-xl p-5">
-          <h3 className="font-display text-lg font-semibold mb-3 flex items-center gap-2">
-            <Users size={18} className="text-accent" /> Estado del equipo
-          </h3>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <Users size={18} className="text-accent" /> Estado del equipo
+            </h3>
+            <span className="text-xs text-muted-2">Haz clic en cualquier punto o nombre para ver su carga real</span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {workers.map(w => (
-              <div key={w.id} className="flex items-center gap-2 bg-surface-3 border border-line rounded-lg px-3 py-2">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${w.online ? 'bg-mint' : 'bg-muted-2'}`} />
-                <div className="min-w-0">
-                  <p className="text-xs font-medium truncate">{w.name}</p>
-                  <p className="text-[10px] text-muted-2">{w.online ? 'En línea' : 'No en línea'}</p>
-                </div>
-              </div>
-            ))}
+            {workers.map(w => {
+              const st = workerLoadStatusMap[w.id] || { load: 'sin_trabajo' as WorkerLoad, activeVideos: 0, cap: 10, label: 'Sin trabajo' };
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => setSelectedTeamWorkerId(w.id)}
+                  className="flex items-center gap-2.5 bg-surface-3 hover:bg-line/40 border border-line hover:border-accent/40 rounded-lg px-3 py-2.5 text-left transition-colors"
+                >
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${workerLoadColor(st.load)}`}
+                    title={st.label}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-xs font-medium truncate">{w.name}</p>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${w.online ? 'bg-mint' : 'bg-muted-2'}`} title={w.online ? 'En línea' : 'No en línea'} />
+                    </div>
+                    <p className="text-[10px] text-muted-2 truncate">
+                      {st.label} · {w.online ? 'En línea' : 'Offline'}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <AdminHomePanels />
+        <AdminHomePanels
+          externalSelectedWorkerId={selectedTeamWorkerId}
+          onClearExternalWorker={() => setSelectedTeamWorkerId(null)}
+        />
       </div>
     );
   }
@@ -210,7 +268,7 @@ function StatCard({ icon: Icon, label, value, target, sub, accent, onClick }: { 
         <div className="flex items-end justify-between gap-1.5 mt-4">
           {streakDays.map((day, index) => (
             <div key={`${day.label}-${index}`} className="flex flex-col items-center gap-1.5">
-              <div className={`w-7 h-7 rounded-md flex items-center justify-center border ${day.active ? `\${colors.soft} ${colors.text}${colors.border}` : 'bg-surface-3 text-muted-2 border-line'}`}>
+              <div className={`w-7 h-7 rounded-md flex items-center justify-center border ${day.active ? `${colors.soft} ${colors.text} ${colors.border}` : 'bg-surface-3 text-muted-2 border-line'}`}>
                 {day.active ? <Flame size={14} /> : <CalendarDays size={13} />}
               </div>
               <span className="text-[10px] text-muted-2">{day.label}</span>

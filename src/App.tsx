@@ -18,12 +18,14 @@ import { CapacityView } from './views/CapacityView';
 import { AdminView } from './views/AdminView';
 import { LoginView } from './views/LoginView';
 import { UserManagement } from './views/UserManagement';
-import { useEffect } from 'react';
+import MorphOrb from './components/ui/ai-thiking-orb-and-input';
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 function Shell() {
   const { view, setView, theme } = useStore();
   const { user, loading, signOut } = useAuth();
+  const [showWelcomeOrb, setShowWelcomeOrb] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -35,6 +37,19 @@ function Shell() {
     }
   }, [user?.role, view, setView]);
 
+  useEffect(() => {
+    if (user) {
+      try {
+        if (sessionStorage.getItem('senda_show_welcome_orb') === '1') {
+          sessionStorage.removeItem('senda_show_welcome_orb');
+          setShowWelcomeOrb(true);
+        }
+      } catch {
+        // ignorar
+      }
+    }
+  }, [user]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-ink flex items-center justify-center">
@@ -45,6 +60,19 @@ function Shell() {
 
   if (!user) {
     return <LoginView />;
+  }
+
+  if (showWelcomeOrb) {
+    return (
+      <MorphOrb
+        autoStart
+        initialText={`Autenticando a ${user.name}...`}
+        minThinkMs={1800}
+        speed={1.25}
+        onSubmit={() => "Bienvenido a SENDA"}
+        onComplete={() => setShowWelcomeOrb(false)}
+      />
+    );
   }
 
   const renderView = () => {

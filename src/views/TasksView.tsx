@@ -6,7 +6,7 @@ import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
   ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
-  Clock, ChevronRight, User, Link2, StickyNote
+  Clock, ChevronRight, ChevronDown, User, Link2, StickyNote
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
@@ -32,6 +32,36 @@ function clipStatusClasses(status?: ClipStatus | null) {
 function isImageFile(name?: string | null) {
   if (!name) return false;
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+}
+
+const BOARD_QC_LABEL: Record<QcStatus, string> = {
+  sin_iniciar: 'Sin iniciar',
+  pendiente: 'Pendiente',
+  revision: 'En revisión',
+  correcciones: 'Correcciones',
+  aprobado: 'Aprobado',
+  aprobado_senda: 'Aprobado Senda · En Clientes',
+  aprobado_cliente: 'Aprobado cliente',
+};
+
+const BOARD_QC_CLASSES: Record<QcStatus, string> = {
+  sin_iniciar: 'bg-surface-3 text-muted-2',
+  pendiente: 'bg-amber-dim text-amber',
+  revision: 'bg-accent-dim text-accent',
+  correcciones: 'bg-red-500/10 text-red-400',
+  aprobado: 'bg-mint-dim text-mint',
+  aprobado_senda: 'bg-mint-dim text-mint border border-mint/30',
+  aprobado_cliente: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+};
+
+function getProcessBadgeLabel(v: Video): string {
+  if (v.qc === 'pendiente') {
+    return `Proceso: Pendiente ${pendingRoleSuffix(v)}`;
+  }
+  if (v.qc === 'aprobado_senda') {
+    return 'Proceso: Aprobado Senda (En Clientes)';
+  }
+  return `Proceso: ${BOARD_QC_LABEL[v.qc]}`;
 }
 
 function VideoTimeline({
@@ -110,22 +140,30 @@ export function TasksView() {
     setSelectedVideo, selectedVideo,
   } = useStore();
 
-  const allVideos = useMemo(
-    () => brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))),
-    [brands]
-  );
+  const [openBrandId, setOpenBrandId] = useState<string | null>(null);
 
-  // Proyectos asignados específicamente al Clipper o Editor autenticado
-  const myAssignedVideos = useMemo(() => {
-    return allVideos
-      .filter(v => (role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [allVideos, role, currentWorkerId]);
+  const myProjectsWithVideos = useMemo(() => {
+    return brands
+      .map(b => {
+        const myVids = b.videos
+          .filter(v => (role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId))
+          .sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
+        const linkedOrder = orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
+        return {
+          brand: b,
+          videos: myVids,
+          linkedOrder,
+        };
+      })
+      .filter(group => group.videos.length > 0);
+  }, [brands, orders, role, currentWorkerId]);
 
   if (selectedVideo) {
+    const parentBrand = brands.find(b => b.videos.some(v => v.id === selectedVideo.id));
     return (
       <VideoDetail
         video={selectedVideo}
+        brandName={parentBrand?.name || ''}
         onClose={() => setSelectedVideo(null)}
         onSetQc={setQc}
         onAddClip={addClip}
@@ -152,13 +190,13 @@ export function TasksView() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
-        <h2 className="font-display text-2xl font-bold mb-1">Proyectos disponibles</h2>
+        <h2 className="font-display text-2xl font-bold mb-1">Proyectos asignados</h2>
         <p className="text-muted text-sm">
-          Proyectos asignados a ti ({role === 'clipper' ? 'Clipper' : 'Editor(a)'}). Haz clic en un proyecto para revisar el brief, subir tu material y gestionar avances.
+          Selecciona un proyecto para ver cada video por separado (<strong className="text-text">Video 1, Video 2, Video 3...</strong>) con su proceso actual.
         </p>
       </div>
 
-      {myAssignedVideos.length === 0 ? (
+      {myProjectsWithVideos.length === 0 ? (
         <div className="text-center py-16 bg-surface-2 border border-dashed border-line rounded-2xl">
           <div className="w-14 h-14 rounded-full bg-surface-3 flex items-center justify-center mx-auto mb-3 text-muted">
             <CheckCircle2 size={28} />
@@ -167,68 +205,92 @@ export function TasksView() {
           <p className="text-xs text-muted mt-1">Cuando el administrador te asigne un proyecto aparecerá inmediatamente aquí.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {myAssignedVideos.map((project, index) => {
-            const linkedOrder = orders.find(o =>
-              o.boardVideoId === project.id ||
-              (o.brand.trim().toLowerCase() === project.name.trim().toLowerCase() &&
-                (role === 'clipper' ? o.clipperId === currentWorkerId : o.editorId === currentWorkerId))
-            );
+        <div className="space-y-4">
+          {myProjectsWithVideos.map(({ brand, videos, linkedOrder }, index) => {
+            const isOpen = openBrandId === brand.id || openBrandId === null;
             return (
               <div
-                key={project.id}
-                className="bg-surface-2 border border-line rounded-xl p-4 hover:border-accent/40 transition-colors space-y-3"
+                key={brand.id}
+                className="bg-surface-2 border border-line rounded-2xl overflow-hidden transition-colors"
               >
-                <div className="flex items-center justify-between gap-4 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setOpenBrandId(prev => (prev === brand.id ? '__none__' : brand.id))}
+                  className="w-full p-4 flex items-center justify-between gap-4 hover:bg-surface-3/60 transition-colors text-left"
+                >
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="w-7 h-7 rounded-full bg-accent-dim text-accent border border-accent/30 flex items-center justify-center text-xs font-semibold shrink-0 font-tech">
+                    <span className="w-8 h-8 rounded-xl bg-accent-dim text-accent border border-accent/30 flex items-center justify-center text-xs font-bold shrink-0 font-tech">
                       {index + 1}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-base font-semibold truncate">
-                        {project.name}
-                        {linkedOrder ? ` · ${linkedOrder.videoCount} videos` : ''}
+                      <p className="text-base font-display font-bold truncate">
+                        {brand.name} · <span className="text-accent font-tech">{videos.length} videos</span>
                       </p>
                       <p className="text-xs text-muted-2 flex items-center gap-2 flex-wrap mt-0.5">
                         <span className="inline-flex items-center gap-1">
-                          <Clock size={12} /> Entrega: {linkedOrder?.deliveryDate ? `${linkedOrder.deliveryDate} · ${linkedOrder.deliveryTime || ''}` : project.date}
+                          <Clock size={12} /> Entrega: {linkedOrder?.deliveryDate ? `${linkedOrder.deliveryDate} · ${linkedOrder.deliveryTime || ''}` : videos[0]?.date}
                         </span>
-                        <span>· Clipper: {project.clipperName}</span>
-                        <span>· Editor(a): {project.editorName}</span>
+                        <span>· Clipper: {videos[0]?.clipperName}</span>
+                        <span>· Editor(a): {videos[0]?.editorName}</span>
                       </p>
                     </div>
                   </div>
+                  <ChevronDown size={18} className={`text-muted transition-transform ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+                </button>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[project.qc]}`}>
-                      {project.qc === 'pendiente' ? `Pendiente ${pendingRoleSuffix(project)}` : BOARD_QC_LABEL[project.qc]}
-                    </span>
-                    <button
-                      onClick={() => setSelectedVideo(project)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 bg-accent text-on-accent rounded-lg text-xs font-semibold hover:bg-accent-strong transition-colors"
-                    >
-                      Abrir proyecto <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </div>
+                {isOpen && (
+                  <div className="p-4 pt-2 border-t border-line/60 space-y-3 bg-surface-3/30">
+                    {linkedOrder && (linkedOrder.avatarName || linkedOrder.briefFileName || (linkedOrder.references && linkedOrder.references.length > 0) || linkedOrder.clientNotes) && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        <div className="bg-surface-2 border border-line rounded-lg p-2.5">
+                          <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
+                          <p className="truncate">{linkedOrder.avatarName || 'Sin avatar especificado'}</p>
+                        </div>
+                        <div className="bg-surface-2 border border-line rounded-lg p-2.5">
+                          <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><FileText size={11} /> Brief</p>
+                          <p className="truncate">{videos[0]?.briefFileName || linkedOrder.briefFileName || 'Sin brief'}</p>
+                        </div>
+                        <div className="bg-surface-2 border border-line rounded-lg p-2.5">
+                          <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><Link2 size={11} /> Referencias</p>
+                          <p className="truncate">{linkedOrder.references && linkedOrder.references.length > 0 ? `${linkedOrder.references.length} referencia(s)` : 'Sin referencias'}</p>
+                        </div>
+                        <div className="bg-surface-2 border border-line rounded-lg p-2.5">
+                          <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><StickyNote size={11} /> Notas cliente</p>
+                          <p className="truncate">{linkedOrder.clientNotes || 'Sin notas'}</p>
+                        </div>
+                      </div>
+                    )}
 
-                {linkedOrder && (linkedOrder.avatarName || linkedOrder.briefFileName || (linkedOrder.references && linkedOrder.references.length > 0) || linkedOrder.clientNotes) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-line/60 text-xs">
-                    <div className="bg-surface-3 rounded-lg p-2.5">
-                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
-                      <p className="truncate">{linkedOrder.avatarName || 'Sin avatar especificado'}</p>
-                    </div>
-                    <div className="bg-surface-3 rounded-lg p-2.5">
-                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><FileText size={11} /> Brief</p>
-                      <p className="truncate">{project.briefFileName || linkedOrder.briefFileName || 'Sin brief'}</p>
-                    </div>
-                    <div className="bg-surface-3 rounded-lg p-2.5">
-                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><Link2 size={11} /> Referencias</p>
-                      <p className="truncate">{linkedOrder.references && linkedOrder.references.length > 0 ? `${linkedOrder.references.length} referencia(s)` : 'Sin referencias'}</p>
-                    </div>
-                    <div className="bg-surface-3 rounded-lg p-2.5">
-                      <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><StickyNote size={11} /> Notas cliente</p>
-                      <p className="truncate">{linkedOrder.clientNotes || 'Sin notas'}</p>
+                    <div className="space-y-2">
+                      {videos.map((v, vIdx) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => setSelectedVideo(v)}
+                          className="w-full flex items-center justify-between gap-3 p-3 bg-surface-2 hover:bg-surface-3 border border-line hover:border-accent/50 rounded-xl text-left transition-all"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="w-7 h-7 rounded-lg bg-surface-3 border border-line font-tech text-xs font-bold flex items-center justify-center text-accent shrink-0">
+                              #{v.videoNumber || vIdx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold truncate">
+                                Video {v.videoNumber || vIdx + 1}
+                              </p>
+                              <p className="text-[11px] text-muted-2 truncate">
+                                Clips: {v.clips.length} · Corte final: {v.finalVideos.length} · Correcciones: {v.corrections.length}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2.5 shrink-0">
+                            <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>
+                              {getProcessBadgeLabel(v)}
+                            </span>
+                            <ChevronRight size={15} className="text-muted-2" />
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -242,11 +304,11 @@ export function TasksView() {
 }
 
 function VideoDetail({
-  video, onClose, onSetQc, onAddClip, onReplaceClip, onSetClipStatus, onSetClipMarkerTime, onAcceptAllClips,
+  video, brandName, onClose, onSetQc, onAddClip, onReplaceClip, onSetClipStatus, onSetClipMarkerTime, onAcceptAllClips,
   onAddCorrection, onUpdateCorrectionTime,
   onUploadBrief, onAddFinalVideo, onUploadMainImage, onSetMainImageStatus, onSendVideo, role,
 }: {
-  video: Video; onClose: () => void; onSetQc: (id: string, s: QcStatus) => void; onAddClip: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
+  video: Video; brandName: string; onClose: () => void; onSetQc: (id: string, s: QcStatus) => void; onAddClip: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
   onReplaceClip: (id: string, clipId: string, fileName: string, fileUrl: string) => void; onSetClipStatus: (id: string, clipId: string, status: ClipStatus, reason?: string) => void;
   onSetClipMarkerTime: (id: string, clipId: string, time: number) => void; onAcceptAllClips: (id: string) => void; onAddCorrection: (id: string, time: number, text: string) => void;
   onUpdateCorrectionTime: (id: string, correctionId: string, time: number) => void; onUploadBrief: (id: string, fileName: string, fileUrl: string) => void;
@@ -353,7 +415,14 @@ function VideoDetail({
             <X size={18} />
           </button>
           <div>
-            <h2 className="font-display text-2xl font-bold">{video.name}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="font-display text-2xl font-bold">
+                {brandName ? `${brandName} · ${video.name}` : video.name}
+              </h2>
+              <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${BOARD_QC_CLASSES[video.qc]}`}>
+                {getProcessBadgeLabel(video)}
+              </span>
+            </div>
             <p className="text-sm text-muted">{video.clipperName} → {video.editorName} · {video.date}</p>
           </div>
         </div>
@@ -400,9 +469,6 @@ function VideoDetail({
                     {video.mainImageStatus === 'aprobada' ? 'Aprobada' : video.mainImageStatus === 'rechazada' ? 'Rechazada' : 'Pendiente de aprobación'}
                   </span>
                 )}
-                {video.mainImageComment && (
-                  <p className="text-[10px] text-muted mt-1 max-w-[150px]">"{video.mainImageComment}"</p>
-                )}
               </div>
               {isClipper && (
                 <>
@@ -444,17 +510,6 @@ function VideoDetail({
         </div>
       </div>
 
-      {(isClipper || isAdmin) && video.mainImageFileUrl && (
-        <div className="bg-surface-2 border border-line rounded-xl p-4">
-          <p className="text-sm font-medium mb-2 flex items-center gap-2">
-            <ImageIcon size={14} className="text-violet" /> Vista previa · Imagen principal
-          </p>
-          <div className="bg-surface-3 rounded-lg overflow-hidden max-h-72 flex items-center justify-center">
-            <img src={video.mainImageFileUrl} alt={video.mainImageFileName || 'Imagen principal'} className="w-full max-h-72 object-contain" />
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
           <div className="aspect-video bg-surface-3 rounded-lg flex items-center justify-center overflow-hidden">
@@ -471,11 +526,17 @@ function VideoDetail({
                   className="w-full h-full object-contain"
                 />
               )
+            ) : video.finalVideos[0]?.fileUrl ? (
+              <video
+                src={video.finalVideos[0].fileUrl}
+                controls
+                className="w-full h-full object-contain"
+              />
             ) : (
               <div className="text-center">
                 <Film size={40} className="text-muted-2 mx-auto mb-2" />
                 <p className="text-sm text-muted">
-                  {video.clips.length > 0 ? 'Selecciona un clip para reproducirlo aquí' : 'Vista previa del video'}
+                  {video.clips.length > 0 ? 'Selecciona un clip para reproducirlo aquí' : `Vista previa de ${video.name}`}
                 </p>
                 {video.duration && <p className="text-xs text-muted-2 mt-1">{video.duration}</p>}
               </div>
@@ -535,11 +596,6 @@ function VideoDetail({
                     >
                       <X size={18} />
                     </button>
-                    {activeClip.status && (
-                      <span className={`text-xs px-2 py-1 rounded ${clipStatusClasses(activeClip.status)}`}>
-                        {clipStatusLabel(activeClip.status)}
-                      </span>
-                    )}
                   </div>
                   {showRejectBox && (
                     <div className="mt-2 space-y-2">
@@ -559,14 +615,11 @@ function VideoDetail({
                           }
                         }}
                         disabled={!rejectReason.trim()}
-                        className="text-xs bg-red-500 text-white rounded-md px-3 py-1.5 font-medium hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-xs bg-red-500 text-white rounded-md px-3 py-1.5 font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
                       >
                         Confirmar rechazo
                       </button>
                     </div>
-                  )}
-                  {activeClip.status === 'rejected' && activeClip.rejectionReason && (
-                    <p className="text-xs text-red-400 mt-2">Motivo: {activeClip.rejectionReason}</p>
                   )}
                 </div>
               )}
@@ -591,7 +644,7 @@ function VideoDetail({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium">Estado de QC</p>
+              <p className="text-sm font-medium">Estado de QC ({video.name})</p>
               {!isAdmin && (
                 <span className="text-[10px] text-muted-2 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
               )}
@@ -621,14 +674,28 @@ function VideoDetail({
               ))}
             </div>
           </div>
+
           {isAdmin && (
-            <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Senda
-              </button>
-              <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Cliente
-              </button>
+            <div className="space-y-2 pt-2 border-t border-line">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onSetQc(video.id, 'aprobado_senda')}
+                  className="flex-1 bg-mint-dim text-mint border border-mint/40 rounded-lg py-2.5 text-sm font-semibold hover:bg-mint/20 transition-colors flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 size={16} /> Aprobar Senda (Subir a Clientes)
+                </button>
+                <button
+                  onClick={() => onSetQc(video.id, 'aprobado_cliente')}
+                  className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-semibold hover:bg-accent-strong transition-colors flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 size={16} /> Aprobar Cliente
+                </button>
+              </div>
+              {(video.publishedToClient || video.qc === 'aprobado_senda' || video.qc === 'aprobado_cliente') && (
+                <p className="text-[11px] text-mint flex items-center gap-1.5">
+                  <CheckCircle2 size={13} /> Este video ({video.name}) ya fue subido directamente a la sección Clientes de <strong>{brandName}</strong>.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -637,7 +704,7 @@ function VideoDetail({
           <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display text-base font-semibold flex items-center gap-2">
-                <Film size={16} className="text-accent" /> {isEditor ? 'Clips enviados' : 'Clips generados'}
+                <Film size={16} className="text-accent" /> {isEditor ? `Clips enviados (${video.name})` : `Clips generados (${video.name})`}
               </h3>
               {isClipper && (
                 <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
@@ -653,14 +720,14 @@ function VideoDetail({
 
             {confirmAcceptAll && (
               <div className="mb-3 p-3 bg-surface-3 border border-line rounded-lg">
-                <p className="text-sm mb-2">¿Aceptar todos los clips de esta tarea?</p>
+                <p className="text-sm mb-2">¿Aceptar todos los clips de {video.name}?</p>
                 <div className="flex gap-2">
-                  <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-surface-2 border border-line text-muted rounded-md py-1.5 text-xs font-medium hover:text-text transition-colors">
+                  <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-surface-2 border border-line text-muted rounded-md py-1.5 text-xs font-medium">
                     Cancelar
                   </button>
                   <button
                     onClick={() => { onAcceptAllClips(video.id); setConfirmAcceptAll(false); }}
-                    className="flex-1 bg-mint text-on-accent rounded-md py-1.5 text-xs font-medium hover:opacity-90 transition-colors"
+                    className="flex-1 bg-mint text-on-accent rounded-md py-1.5 text-xs font-medium"
                   >
                     Aceptar todos
                   </button>
@@ -668,19 +735,13 @@ function VideoDetail({
               </div>
             )}
 
-            {isClipper && (
-              <p className="text-xs text-amber bg-amber-dim/40 border border-amber/20 rounded-lg px-3 py-2 mb-3">
-                Debes subir la imagen principal arriba y esperar a que el administrador la apruebe antes de generar y subir clips.
-              </p>
-            )}
-
             {showClipForm && (
               <div className="mb-3 space-y-2 p-3 bg-surface-3 rounded-lg">
-                <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
+                <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent">
                   {uploadingNewClip ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                  {clipFileName || (uploadingNewClip ? 'Subiendo...' : 'Subir archivo de video (cualquier formato)')}
+                  {clipFileName || (uploadingNewClip ? 'Subiendo...' : 'Subir archivo de video')}
                   <input type="file" className="hidden" onChange={handleClipFile} disabled={uploadingNewClip} />
                 </label>
                 <button
@@ -691,12 +752,13 @@ function VideoDetail({
                     }
                   }}
                   disabled={uploadingNewClip || !clipName}
-                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium disabled:opacity-50"
                 >
                   Guardar clip
                 </button>
               </div>
             )}
+
             {video.clips.length === 0 ? (
               <p className="text-sm text-muted text-center py-4">Sin clips {isEditor ? 'enviados' : 'generados'}</p>
             ) : (
@@ -705,9 +767,7 @@ function VideoDetail({
                   <div
                     key={c.id}
                     onClick={() => c.fileUrl && setActiveClipId(c.id)}
-                    className={`p-2 rounded-lg border transition-colors ${
-                      c.fileUrl ? 'cursor-pointer' : ''
-                    } ${
+                    className={`p-2 rounded-lg border transition-colors ${c.fileUrl ? 'cursor-pointer' : ''} ${
                       activeClip?.id === c.id ? 'bg-accent-dim border-accent/40' : 'bg-surface-3 border-transparent hover:border-line'
                     }`}
                   >
@@ -719,14 +779,8 @@ function VideoDetail({
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${clipStatusClasses(c.status)}`}>
                             {clipStatusLabel(c.status)}
                           </span>
-                          {(c.version || 1) > 1 && (
-                            <span className="text-[10px] text-muted-2">v{c.version}</span>
-                          )}
                         </div>
                         {c.note && <p className="text-xs text-muted">{c.note}</p>}
-                        {c.status === 'rejected' && c.rejectionReason && (
-                          <p className="text-xs text-red-400 mt-0.5">Motivo: {c.rejectionReason}</p>
-                        )}
                         {c.fileName && (
                           <a
                             href={c.fileUrl || undefined}
@@ -749,7 +803,7 @@ function VideoDetail({
                           <button
                             onClick={() => replaceInputRefs.current[c.id]?.click()}
                             disabled={uploadingClipId === c.id}
-                            className="text-[11px] text-muted hover:text-accent flex items-center gap-1 px-2 py-1 rounded-md bg-surface-2 border border-line disabled:opacity-50"
+                            className="text-[11px] text-muted hover:text-accent flex items-center gap-1 px-2 py-1 rounded-md bg-surface-2 border border-line"
                           >
                             {uploadingClipId === c.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
                             {c.fileUrl ? 'Reemplazar' : 'Subir'}
@@ -761,6 +815,7 @@ function VideoDetail({
                 ))}
               </div>
             )}
+
             {isClipper && video.clips.length > 0 && (
               <button
                 onClick={() => onSendVideo(video.id)}
@@ -769,7 +824,7 @@ function VideoDetail({
                   video.sentByClipper ? 'bg-mint-dim text-mint cursor-default' : 'bg-accent text-on-accent hover:bg-accent-strong'
                 }`}
               >
-                {video.sentByClipper ? <><CheckCircle2 size={16} /> Video enviado</> : <><Send size={16} /> Enviar video</>}
+                {video.sentByClipper ? <><CheckCircle2 size={16} /> Clips enviados</> : <><Send size={16} /> Enviar clips de {video.name}</>}
               </button>
             )}
           </div>
@@ -778,7 +833,7 @@ function VideoDetail({
             <div className="bg-surface-2 border border-line rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-display text-base font-semibold flex items-center gap-2">
-                  <VideoIcon size={16} className="text-mint" /> Video final
+                  <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
                 {isEditor && (
                   <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
@@ -788,11 +843,11 @@ function VideoDetail({
               </div>
               {showFinalForm && isEditor && (
                 <div className="mb-3 space-y-2 p-3 bg-surface-3 rounded-lg">
-                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                  <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                  <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
+                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                  <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                  <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent">
                     <Upload size={14} />
-                    {finalFileName || 'Subir archivo de video (cualquier formato)'}
+                    {finalFileName || 'Subir archivo de video'}
                     <input type="file" className="hidden" onChange={handleFinalFile} />
                   </label>
                   <button
@@ -802,7 +857,7 @@ function VideoDetail({
                         setFinalName(''); setFinalNote(''); setFinalFileName(''); setFinalFileUrl(''); setShowFinalForm(false);
                       }
                     }}
-                    className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
+                    className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium"
                   >
                     Guardar video final
                   </button>
@@ -836,11 +891,7 @@ function VideoDetail({
                       </div>
                       {previewOpenId === fv.id && fv.fileUrl && (
                         <div className="mt-2 rounded-md overflow-hidden bg-black">
-                          {isImageFile(fv.fileName) ? (
-                            <img src={fv.fileUrl} alt={fv.name} className="w-full max-h-64 object-contain" />
-                          ) : (
-                            <video src={fv.fileUrl} controls className="w-full max-h-64" />
-                          )}
+                          <video src={fv.fileUrl} controls className="w-full max-h-64" />
                         </div>
                       )}
                     </div>
@@ -849,11 +900,12 @@ function VideoDetail({
               )}
             </div>
           )}
+
           {!isClipper && (
             <div className="bg-surface-2 border border-line rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-display text-base font-semibold flex items-center gap-2">
-                  <MessageSquare size={16} className="text-amber" /> Correcciones
+                  <MessageSquare size={16} className="text-amber" /> Correcciones ({video.corrections.length})
                 </h3>
                 {isAdmin && (
                   <button onClick={() => setShowCorrForm(s => !s)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
@@ -863,9 +915,9 @@ function VideoDetail({
               </div>
               {isAdmin && showCorrForm && (
                 <div className="mb-3 space-y-2 p-3 bg-surface-3 rounded-lg">
-                  <input value={corrTime} onChange={e => setCorrTime(e.target.value)} placeholder="Tiempo (seg)" type="number" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                  <input value={corrText} onChange={e => setCorrText(e.target.value)} placeholder="Descripción" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent" />
-                  <button onClick={() => { if (corrText) { onAddCorrection(video.id, parseInt(corrTime) || 0, corrText); setCorrTime(''); setCorrText(''); setShowCorrForm(false); } }} className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors">
+                  <input value={corrTime} onChange={e => setCorrTime(e.target.value)} placeholder="Tiempo (seg)" type="number" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                  <input value={corrText} onChange={e => setCorrText(e.target.value)} placeholder="Descripción" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent" />
+                  <button onClick={() => { if (corrText) { onAddCorrection(video.id, parseInt(corrTime) || 0, corrText); setCorrTime(''); setCorrText(''); setShowCorrForm(false); } }} className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium">
                     Guardar corrección
                   </button>
                 </div>
@@ -885,19 +937,6 @@ function VideoDetail({
                   ))}
                 </div>
               )}
-              {!isAdmin && (
-                <p className="text-[10px] text-muted-2 flex items-center gap-1 mt-3"><Lock size={10} /> Solo el admin puede dejar o editar correcciones. Quedan guardadas hasta que el video se apruebe por completo.</p>
-              )}
-            </div>
-          )}
-          {isAdmin && (
-            <div className="flex gap-2">
-              <button onClick={() => onSetQc(video.id, 'aprobado_senda')} className="flex-1 bg-mint-dim text-mint border border-mint/30 rounded-lg py-2.5 text-sm font-medium hover:bg-mint/10 transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Senda
-              </button>
-              <button onClick={() => onSetQc(video.id, 'aprobado_cliente')} className="flex-1 bg-accent text-on-accent rounded-lg py-2.5 text-sm font-medium hover:bg-accent-strong transition-colors flex items-center justify-center gap-2">
-                <CheckCircle2 size={16} /> Aprobar Cliente
-              </button>
             </div>
           )}
         </div>
@@ -906,40 +945,29 @@ function VideoDetail({
   );
 }
 
-const BOARD_QC_LABEL: Record<QcStatus, string> = {
-  sin_iniciar: 'Sin iniciar',
-  pendiente: 'Pendiente',
-  revision: 'En revisión',
-  correcciones: 'Correcciones',
-  aprobado: 'Aprobado',
-  aprobado_senda: 'Aprobado Senda',
-  aprobado_cliente: 'Aprobado cliente',
-};
-
-const BOARD_QC_CLASSES: Record<QcStatus, string> = {
-  sin_iniciar: 'bg-surface-3 text-muted-2',
-  pendiente: 'bg-amber-dim text-amber',
-  revision: 'bg-accent-dim text-accent',
-  correcciones: 'bg-red-500/10 text-red-400',
-  aprobado: 'bg-mint-dim text-mint',
-  aprobado_senda: 'bg-mint-dim text-mint',
-  aprobado_cliente: 'bg-mint-dim text-mint',
-};
-
+// Tablero de Proyectos Iniciados del Administrador: agrupa por Proyecto/Marca y despliega Video 1, Video 2, Video 3... con su proceso al lado
 export function TasksBoard() {
-  const { brands, setSelectedVideo } = useStore();
+  const { brands, orders, setSelectedVideo } = useStore();
   const [filter, setFilter] = useState<'todos' | QcStatus>('todos');
-
-  const allVideos = useMemo(
-    () => brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))),
-    [brands],
-  );
-  const filtered = useMemo(
-    () => (filter === 'todos' ? allVideos : allVideos.filter(v => v.qc === filter)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-    [allVideos, filter],
-  );
+  const [expandedBrandId, setExpandedBrandId] = useState<string | null>(null);
 
   const filterOptions: ('todos' | QcStatus)[] = ['todos', 'sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
+
+  const brandGroups = useMemo(() => {
+    return brands
+      .map(b => {
+        const sortedVids = [...b.videos].sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
+        const filteredVids = filter === 'todos' ? sortedVids : sortedVids.filter(v => v.qc === filter);
+        const linkedOrder = orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
+        return {
+          brand: b,
+          videos: filteredVids,
+          totalVideos: sortedVids.length,
+          linkedOrder,
+        };
+      })
+      .filter(g => g.videos.length > 0);
+  }, [brands, orders, filter]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-4">
@@ -957,26 +985,72 @@ export function TasksBoard() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {brandGroups.length === 0 ? (
         <p className="text-sm text-muted text-center py-10">No hay videos en este estado</p>
       ) : (
-        <div className="space-y-2">
-          {filtered.map(v => (
-            <button
-              key={v.id}
-              onClick={() => setSelectedVideo(v)}
-              className="w-full flex items-center gap-3 p-3.5 bg-surface-2 border border-line rounded-xl hover:border-accent/40 hover:bg-surface-3 transition-colors text-left"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{v.name}</p>
-                <p className="text-xs text-muted-2 truncate">{v.brandName} · {v.clipperName} + {v.editorName} · {v.date}</p>
+        <div className="space-y-3">
+          {brandGroups.map(({ brand, videos, totalVideos, linkedOrder }, idx) => {
+            const isOpen = expandedBrandId === brand.id || expandedBrandId === null;
+            return (
+              <div key={brand.id} className="bg-surface-2 border border-line rounded-2xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExpandedBrandId(prev => (prev === brand.id ? '__closed__' : brand.id))}
+                  className="w-full flex items-center justify-between gap-3 p-4 hover:bg-surface-3/60 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-7 h-7 rounded-lg bg-accent-dim text-accent border border-accent/30 flex items-center justify-center text-xs font-bold font-tech shrink-0">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-base font-display font-bold truncate">
+                        {brand.name} · <span className="text-accent font-tech">{totalVideos} videos</span>
+                      </p>
+                      <p className="text-xs text-muted-2 truncate">
+                        Equipo: {videos[0]?.clipperName} + {videos[0]?.editorName}
+                        {linkedOrder?.deliveryDate ? ` · Entrega: ${linkedOrder.deliveryDate} ${linkedOrder.deliveryTime || ''}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDown size={18} className={`text-muted transition-transform ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+                </button>
+
+                {isOpen && (
+                  <div className="p-3.5 pt-2 border-t border-line/60 bg-surface-3/30 space-y-2">
+                    {videos.map((v, vIndex) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setSelectedVideo(v)}
+                        className="w-full flex items-center justify-between gap-3 p-3 bg-surface-2 border border-line rounded-xl hover:border-accent/50 hover:bg-surface-3 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-7 h-7 rounded-lg bg-surface-3 border border-line font-tech text-xs font-bold text-accent flex items-center justify-center shrink-0">
+                            #{v.videoNumber || vIndex + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">
+                              Video {v.videoNumber || vIndex + 1} <span className="text-muted-2 font-normal">· {brand.name}</span>
+                            </p>
+                            <p className="text-xs text-muted-2 truncate">
+                              Clips: {v.clips.length} · Corte final: {v.finalVideos.length} · Correcciones: {v.corrections.length}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>
+                            {getProcessBadgeLabel(v)}
+                          </span>
+                          <ChevronRight size={15} className="text-muted-2" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${BOARD_QC_CLASSES[v.qc]}`}>
-                {v.qc === 'pendiente' ? `Pendiente ${pendingRoleSuffix(v)}` : BOARD_QC_LABEL[v.qc]}
-              </span>
-              <ChevronRight size={15} className="text-muted-2 shrink-0" />
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
