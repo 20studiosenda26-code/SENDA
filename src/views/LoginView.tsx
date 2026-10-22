@@ -1,7 +1,7 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { Mail, Lock, LogIn, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
 import { BrandBackground } from '../components/BrandBackground';
 
@@ -16,9 +16,21 @@ export function LoginView() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    try {
+      sessionStorage.setItem('senda_show_welcome_orb', '1');
+    } catch {
+      // ignorar si sessionStorage no está disponible
+    }
     const result = await signIn(email, password);
     setLoading(false);
-    if (result.error) setError(result.error);
+    if (result.error) {
+      try {
+        sessionStorage.removeItem('senda_show_welcome_orb');
+      } catch {
+        // ignorar
+      }
+      setError(result.error);
+    }
   };
 
   return (
