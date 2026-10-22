@@ -46,22 +46,6 @@ const homeDy = () => {
   return 145;
 };
 
-/* Reproduce ÚNICAMENTE el archivo MP3 subido (sin voz sintética) */
-function playUploadedMp3Now() {
-  try {
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    const w = window as unknown as { __sendaWelcomeAudio?: HTMLAudioElement };
-    const audio = w.__sendaWelcomeAudio || new Audio("/welcome.mp3");
-    audio.currentTime = 0;
-    audio.volume = 1.0;
-    void audio.play();
-  } catch {
-    // ignorar
-  }
-}
-
 type Ease = (t: number) => number;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -630,11 +614,6 @@ function createRuntime(env: Env): Runtime {
     try {
       env.ui.setPhase("launch");
       hist.length = 0;
-
-      // Dispara tu audio MP3 justo cuando la píldora se convierte en bolita y empieza a subir (320ms)
-      window.setTimeout(() => {
-        if (!sig.aborted) 
-      }, Math.round(320 / env.getSpeed()));
 
       if (!reduced) {
         await go(launchTracks(geo));

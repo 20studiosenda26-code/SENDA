@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { useAuth } from '../lib/auth';
 import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
 import sendaLogo from '../assets/senda-logo.png';
+import welcomeMp3Url from '../assets/welcome-jessica.mp3';
 import { BrandBackground } from '../components/BrandBackground';
 
 export function LoginView() {
@@ -30,7 +31,7 @@ export function LoginView() {
       // ignorar
     }
 
-    const welcomeAudio = new Audio('/welcome.mp3');
+    const welcomeAudio = new Audio(welcomeMp3Url);
     welcomeAudio.volume = 1.0;
     welcomeAudio.preload = 'auto';
 
