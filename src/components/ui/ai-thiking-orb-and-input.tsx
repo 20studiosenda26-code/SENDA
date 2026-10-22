@@ -1,12 +1,14 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "../../index.css";
 
+/* ───────────────────────────── copy ───────────────────────────── */
 const COPY = {
-  placeholder: "Iniciando sesión…",
+  placeholder: "Autenticando sesión en SENDA…",
   labels: ["Verificando", "Sincronizando", "Cargando", "Preparando"],
   done: "Listo",
   answerTitle: "Acceso concedido",
   answerBody: "Bienvenido a SENDA",
+  reset: "Continuar",
   send: "Entrar",
 };
 
@@ -21,31 +23,15 @@ export interface MorphOrbProps {
   onComplete?: () => void;
 }
 
-const PILL_H = 54, BALL_SMALL = 54, ORB_D = 132, ORB_R = 66, CANVAS = 220;
-const CARD_H = 134;
+/* ─────────────────────────── geometry ─────────────────────────── */
+const PILL_H = 60, BALL_SMALL = 60, ORB_D = 132, ORB_R = 66, CANVAS = 220;
+const CARD_H = 114;
 const FLY_D = 138;
+const pillW = () => Math.min(Number(sessionStorage.getItem("senda_orb_start_w")) || 400, window.innerWidth - 32);
+const cardW = () => Math.min(340, window.innerWidth - 32);
+const homeDy = () => (Number(sessionStorage.getItem("senda_orb_start_y")) || (window.innerHeight * 0.46 + 145)) - window.innerHeight * 0.46;
 
-const pillW = () => {
-  try {
-    const savedW = Number(sessionStorage.getItem("senda_orb_start_w"));
-    if (savedW && savedW > 180) return Math.min(savedW, window.innerWidth - 32);
-  } catch { /* ignore */ }
-  return Math.min(400, window.innerWidth - 48);
-};
-
-const cardW = () => Math.min(390, window.innerWidth - 32);
-
-const homeDy = () => {
-  const stageCenterY = window.innerHeight * 0.46;
-  try {
-    const savedY = Number(sessionStorage.getItem("senda_orb_start_y"));
-    if (savedY && savedY > 100 && savedY < window.innerHeight - 40) {
-      return savedY - stageCenterY;
-    }
-  } catch { /* ignore */ }
-  return 145;
-};
-
+/* ───────────────────────── math + easing ───────────────────────── */
 type Ease = (t: number) => number;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -104,6 +90,7 @@ const E = {
 
 const bez = (t: number, p0: number, c: number, p2: number) => (1 - t) * (1 - t) * p0 + 2 * (1 - t) * t * c + t * t * p2;
 
+/* ───────────────────────── timeline data ───────────────────────── */
 interface Track { ch: string; from: number; to: number; t0: number; t1: number; ease?: Ease }
 const T = (ch: string, from: number, to: number, t0: number, t1: number, ease: Ease = E.io): Track => ({ ch, from, to, t0, t1, ease });
 
@@ -170,7 +157,7 @@ const unfoldTracks = (g: Geo, tw: number): Track[] => [
   T("h", ORB_D, 124, 0, 90, E.in),
   T("w", 124, g.cw, 90, 700, E.card),
   T("h", 124, CARD_H, 90, 700, E.out),
-  T("r", ORB_D / 2, 22, 90, 700, E.io),
+  T("r", ORB_D / 2, 20, 90, 700, E.io),
   T("oGreen", 1, 0, 200, 560, E.out),
   T("oCard", 0, 1, 200, 560, E.out),
   T("oHalo", 0.35, 0, 300, 700, E.out),
@@ -181,6 +168,7 @@ const unfoldTracks = (g: Geo, tw: number): Track[] => [
   T("bloom", 1, 0.625, 700, 1200, E.io),
 ];
 
+/* reduced-motion: pure cross-fades */
 const R_OUT: Track[] = [
   T("oInput", 1, 0, 0, 140, E.out),
   T("oPill", 1, 0, 0, 200, E.out),
@@ -207,12 +195,15 @@ const rCardIn = (tw: number): Track[] => [
   T("bloom", 1, 0.625, 0, 250, E.out),
 ];
 
+const FADE = ["oGlow", "oAur", "oPill", "oBall", "oGreen", "oCard", "oRing", "oInput", "oHalo", "sOp", "orb.alpha", "trail"];
+
 const INIT: Record<string, number> = {
   h: PILL_H, r: 999, oGlow: 1, oHalo: 0, oPill: 1, oBall: 0, oGreen: 0, oCard: 0, oRing: 1, oInput: 1, inScale: 1, oAur: 1,
   gs: 0.55, cs: 1, hOp: 0, dotS: 0, bloom: 1, u: 0, yOff: 0, trail: 0, pulse: -1, sOp: 0, sTy: 6, cHalo: 0, wp: 0,
   "orb.k": 0, "orb.alpha": 0, "orb.spin": 0, "orb.pop": 1, "orb.sweep": 0, "orb.vortex": 0, "orb.gain": 1, "orb.floor": 0, "orb.rad": 0,
 };
 
+/* ─────────────────────────── async utils ─────────────────────────── */
 const ABORT = Symbol("abort");
 
 function sleep(ms: number, sig: AbortSignal) {
@@ -237,10 +228,12 @@ function abortable<V>(p: Promise<V>, sig: AbortSignal) {
   });
 }
 
+/* ───────────────────────────── dotted orb (SENDA Cyan/Blue palette) ───────────────────────────── */
 const RINGS = 16;
 const DOT_LIST = (() => {
   const rand = mulberry32(7);
   const out: { x: number; y: number; z: number; u: number; seed: number }[] = [];
+  for (let k = 0; k < RINGS; k++) {
     const y = 1 - ((k + 0.5) / RINGS) * 2;
     const r = Math.sqrt(1 - y * y);
     const m = Math.max(4, Math.round(30 * r));
@@ -259,6 +252,7 @@ const DU = Float32Array.from(DOT_LIST, (d) => d.u);
 const DS = Float32Array.from(DOT_LIST, (d) => d.seed);
 
 const G_STEPS = 24, A_STEPS = 48;
+// Gradiente de partículas calibrado al Cian/Azul de SENDA (#F1F3F5 -> #35D6E4)
 const COLORS: string[] = (() => {
   const out: string[] = [];
   for (let gi = 0; gi <= G_STEPS; gi++) {
@@ -415,6 +409,7 @@ function createOrb(canvas: HTMLCanvasElement, getSpeed: () => number, isReduced:
   return { P, ensure, reset, destroy };
 }
 
+/* ───────────────────────────── runtime ───────────────────────────── */
 interface UI {
   setPhase(p: Phase): void;
   swapLabel(name: string): void;
@@ -613,7 +608,6 @@ function createRuntime(env: Env): Runtime {
     try {
       env.ui.setPhase("launch");
       hist.length = 0;
-
       if (!reduced) {
         await go(launchTracks(geo));
         setNow("r", ORB_D / 2);
@@ -674,19 +668,62 @@ function createRuntime(env: Env): Runtime {
         wStagger = 0;
         env.ui.setAnswer(body);
         await go(R_GREEN_OUT);
-        setNow("w", geo.cw); setNow("h", CARD_H); setNow("r", 22); setNow("dotS", 1);
+        setNow("w", geo.cw); setNow("h", CARD_H); setNow("r", 20); setNow("dotS", 1);
         await go(rCardIn(wDur));
       }
 
       env.ui.setPhase("answered");
       env.ui.live(body);
       env.ui.focusAnswer();
-      await sleep(1400 / env.getSpeed(), sig);
+      await sleep(1100 / env.getSpeed(), sig);
       if (!sig.aborted) env.ui.notifyComplete();
     } catch (e) {
       if (e === ABORT) return;
       hard();
     }
+  };
+
+  const toIdle = async (kind: "reset" | "esc") => {
+    if (idling) return;
+    idling = true;
+    const my = ++epoch;
+    const ac = child();
+    idleCtl = ac;
+    const sig = ac.signal;
+    const outMs = kind === "reset" ? 240 : 200;
+    const inMs = kind === "reset" ? 420 : 200;
+    env.ui.setPhase("reset");
+
+    const out: Track[] = [T("cHalo", vals.cHalo ?? 0, 0, 0, outMs, E.out)];
+    for (const ch of FADE) {
+      const v = vals[ch] ?? 0;
+      if (v > 0.001) out.push(T(ch, v, 0, 0, outMs, E.out));
+    }
+    if (kind === "reset") out.push(T("cs", 1, 0.98, 0, outMs, E.out));
+    await play(out, sig);
+    if (sig.aborted || my !== epoch) return;
+
+    setNow("pulse", -1);
+    env.ui.setAnswer("");
+    env.ui.resetLabel();
+    env.ui.clearInput();
+    orb.reset();
+    hist.length = 0;
+    geo.pw = pillW(); geo.cw = cardW(); geo.H = homeDy();
+    resetChannels();
+    const pillCh = ["oPill", "oInput", "oGlow", "oAur", "oRing"];
+    pillCh.forEach((ch) => setNow(ch, 0));
+    setNow("yOff", kind === "reset" ? 8 : 0);
+    const inn: Track[] = pillCh.map((ch) => T(ch, 0, 1, 0, inMs, E.out));
+    if (kind === "reset") inn.push(T("yOff", 8, 0, 0, inMs, E.out));
+    await play(inn, sig);
+    if (sig.aborted || my !== epoch) return;
+
+    resetChannels();
+    current = null; idleCtl = null; busy = false; idling = false;
+    env.ui.lock(false);
+    env.ui.setPhase("idle");
+    env.ui.idleReady();
   };
 
   function hard() {
@@ -722,8 +759,15 @@ function createRuntime(env: Env): Runtime {
       void run(text, ac.signal, cfg);
       return true;
     },
-    escape() {},
-    reset() {},
+    escape() {
+      if (!busy || idling) return;
+      current?.abort();
+      void toIdle("esc");
+    },
+    reset() {
+      if (!busy || idling) return;
+      void toIdle("reset");
+    },
     hard,
     home() {
       if (busy) return;
@@ -739,13 +783,16 @@ function createRuntime(env: Env): Runtime {
   };
 }
 
+/* ───────────────────────────── component ───────────────────────────── */
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export default function MorphOrb(props: MorphOrbProps) {
   const [phase, setPhaseState] = useState<Phase>("idle");
-  const [value, setValue] = useState(props.initialText || "Iniciar sesión");
+  const [value, setValue] = useState(props.initialText || "Bienvenido a SENDA");
   const [lbl, setLbl] = useState<{ cur: string; prev: string | null; n: number }>({ cur: COPY.labels[0], prev: null, n: 0 });
   const [answer, setAnswer] = useState("");
+  const [dbgSpeed, setDbgSpeed] = useState(1);
+  const [debug] = useState(() => typeof window !== "undefined" && /[?&]debug(?:[=&]|$)/.test(window.location.search));
 
   const rootRef = useRef<HTMLDivElement>(null);
   const moverRef = useRef<HTMLDivElement>(null);
@@ -763,18 +810,20 @@ export default function MorphOrb(props: MorphOrbProps) {
   const propsRef = useRef(props);
   propsRef.current = props;
   const speedRef = useRef(1);
-  speedRef.current = Math.max(0.05, props.speed ?? 1.25);
+  speedRef.current = Math.max(0.05, (props.speed ?? 1.25) * dbgSpeed);
   const phaseRef = useRef<Phase>("idle");
   const reducedRef = useRef(false);
   const rtRef = useRef<Runtime | null>(null);
+  const lastTextRef = useRef("");
+  const timers = useRef<{ typing?: number; shake?: number; flash?: number }>({});
 
   const defaultSubmit = () =>
     new Promise<string>((res) => {
-      window.setTimeout(() => res(COPY.answerBody), 1700 / speedRef.current);
+      window.setTimeout(() => res(COPY.answerBody), 1800 / speedRef.current);
     });
   const makeCfg = (): RunCfg => ({
     onSubmit: propsRef.current.onSubmit ?? defaultSubmit,
-    minThink: propsRef.current.minThinkMs ?? 1800,
+    minThink: propsRef.current.minThinkMs ?? 1900,
   });
 
   useIsoLayoutEffect(() => {
@@ -801,27 +850,94 @@ export default function MorphOrb(props: MorphOrbProps) {
         clearInput: () => setValue(""),
         live: (s) => { if (liveRef.current) liveRef.current.textContent = s; },
         lock: (on) => { form.toggleAttribute("inert", on); },
-        idleReady: () => {},
+        idleReady: () => { inputRef.current?.focus({ preventScroll: true }); },
         focusAnswer: () => { answerRef.current?.focus({ preventScroll: true }); },
         notifyComplete: () => { propsRef.current.onComplete?.(); },
       },
     });
     rtRef.current = rt;
 
+    const onResize = () => {
+      if (phaseRef.current === "idle" && !rt.busy()) rt.home();
+    };
+    window.addEventListener("resize", onResize);
+
     if (propsRef.current.autoStart) {
-      const startText = propsRef.current.initialText || "Iniciar sesión";
+      const startText = propsRef.current.initialText || "Bienvenido a SENDA";
+      lastTextRef.current = startText;
       window.setTimeout(() => {
         rt.start(startText, makeCfg());
-      }, 40);
+      }, 120);
+    } else {
+      inputRef.current?.focus({ preventScroll: true });
     }
 
     return () => {
+      window.removeEventListener("resize", onResize);
       mq.removeEventListener("change", onMq);
+      window.clearTimeout(timers.current.typing);
+      window.clearTimeout(timers.current.shake);
+      window.clearTimeout(timers.current.flash);
       rt.destroy();
       rtRef.current = null;
     };
   }, []);
 
+  const shake = () => {
+    const a = actorRef.current;
+    if (!a) return;
+    a.removeAttribute("data-shake");
+    void a.offsetWidth;
+    a.setAttribute("data-shake", "");
+    a.setAttribute("data-flash", "");
+    window.clearTimeout(timers.current.shake);
+    window.clearTimeout(timers.current.flash);
+    timers.current.shake = window.setTimeout(() => a.removeAttribute("data-shake"), 260);
+    timers.current.flash = window.setTimeout(() => a.removeAttribute("data-flash"), 200);
+  };
+
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    const a = actorRef.current;
+    if (!a) return;
+    a.setAttribute("data-typing", "");
+    window.clearTimeout(timers.current.typing);
+    timers.current.typing = window.setTimeout(() => a.removeAttribute("data-typing"), 300);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && (e.shiftKey || e.nativeEvent.isComposing)) e.preventDefault();
+  };
+
+  const onFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const rt = rtRef.current;
+    if (!rt || rt.busy() || phaseRef.current !== "idle") return;
+    const text = value.trim();
+    if (!text) { shake(); return; }
+    lastTextRef.current = text;
+    rt.start(text, makeCfg());
+  };
+
+  const onReset = () => {
+    if (propsRef.current.onComplete) {
+      propsRef.current.onComplete();
+      return;
+    }
+    if (phaseRef.current === "answered") rtRef.current?.reset();
+  };
+
+  const replay = () => {
+    const rt = rtRef.current;
+    if (!rt) return;
+    const text = lastTextRef.current || "Bienvenido a SENDA";
+    lastTextRef.current = text;
+    rt.hard();
+    setValue(text);
+    window.requestAnimationFrame(() => { rt.start(text, makeCfg()); });
+  };
+
+  const ready = value.trim().length > 0;
   const words = answer.split(/\s+/).filter(Boolean);
 
   const labelInner = (name: string) =>
@@ -855,7 +971,7 @@ export default function MorphOrb(props: MorphOrbProps) {
           <div className="mo-card" aria-hidden="true" />
           <div className="mo-ring" aria-hidden="true" />
 
-          <form className="mo-input" ref={formRef} onSubmit={(e) => e.preventDefault()} autoComplete="off">
+          <form className="mo-input" ref={formRef} onSubmit={onFormSubmit} autoComplete="off">
             <svg className="mo-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M10 3.5l1.7 4.8 4.8 1.7-4.8 1.7L10 16.5l-1.7-4.8L3.5 10l4.8-1.7L10 3.5z" />
               <path d="M18 14.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
@@ -865,9 +981,19 @@ export default function MorphOrb(props: MorphOrbProps) {
               className="mo-field"
               type="text"
               value={value}
-              readOnly
+              maxLength={200}
+              placeholder={COPY.placeholder}
               aria-label="SENDA"
+              spellCheck={false}
+              onChange={onChange}
+              onKeyDown={onKeyDown}
             />
+            <button type="submit" className="mo-send" aria-label={COPY.send} data-ready={ready ? "" : undefined}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5" />
+                <path d="M5.5 11.5L12 5l6.5 6.5" />
+              </svg>
+            </button>
           </form>
 
           <canvas className="mo-orb" ref={canvasRef} aria-hidden="true" />
@@ -896,7 +1022,28 @@ export default function MorphOrb(props: MorphOrbProps) {
         <span key={"c" + lbl.n} className="mo-lab mo-in">{labelInner(lbl.cur)}</span>
       </div>
 
+      <button type="button" className="hidden" onClick={onReset}>{COPY.reset}</button>
+
       <div className="mo-live" ref={liveRef} role="status" aria-live="polite" />
+
+      {debug && (
+        <div className="mo-debug">
+          <span className="mo-chip">{phase}</span>
+          <label>
+            <span>{dbgSpeed.toFixed(2)}×</span>
+            <input
+              type="range"
+              min={0.25}
+              max={2}
+              step={0.05}
+              value={dbgSpeed}
+              aria-label="Speed"
+              onChange={(e) => setDbgSpeed(parseFloat(e.target.value))}
+            />
+          </label>
+          <button type="button" onClick={replay}>Replay</button>
+        </div>
+      )}
     </div>
   );
 }
