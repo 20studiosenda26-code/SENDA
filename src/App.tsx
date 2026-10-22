@@ -1,3 +1,4 @@
+import { WelcomeAudio } from "./components/WelcomeAudio";
 import { StoreProvider, useStore } from './store';
 import { AuthProvider, useAuth } from './lib/auth';
 import { Rail } from './components/Rail';
