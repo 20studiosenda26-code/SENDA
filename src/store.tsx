@@ -17,8 +17,8 @@ const DEFAULT_FINANCE_SETTINGS: FinanceSettings = {
 
 const DEFAULT_CAPACITY_CONFIG: CapacityProtocolConfig = {
   safetyMarginPct: 15,
-  defaultClipperDailyVideos: 20,
-  defaultEditorDailyVideos: 20,
+  defaultClipperDailyVideos: 10,
+  defaultEditorDailyVideos: 10,
   workdayStartHour: 8,
   workdayEndHour: 20,
   maxNoResponseMinutes: 45,
@@ -70,6 +70,26 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
+const DATA_SEED_VERSION = 'senda_v3_three_projects_sync';
+
+function ensureCleanThreeProjectsSeed() {
+  try {
+    const currentVer = localStorage.getItem(STORAGE_PREFIX + 'seed_version');
+    if (currentVer !== DATA_SEED_VERSION) {
+      localStorage.setItem(STORAGE_PREFIX + 'brands', JSON.stringify(INITIAL_BRANDS));
+      localStorage.setItem(STORAGE_PREFIX + 'orders', JSON.stringify(INITIAL_ORDERS));
+      localStorage.setItem(STORAGE_PREFIX + 'workers', JSON.stringify(INITIAL_WORKERS));
+      localStorage.setItem(STORAGE_PREFIX + 'paidHistory', JSON.stringify(INITIAL_PAID_HISTORY));
+      localStorage.setItem(STORAGE_PREFIX + 'notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+      localStorage.setItem(STORAGE_PREFIX + 'seed_version', DATA_SEED_VERSION);
+    }
+  } catch {
+    // ignorar errores de localStorage
+  }
+}
+
+ensureCleanThreeProjectsSeed();
+
 type SharedKey =
   | 'brands'
   | 'notifications'
@@ -340,12 +360,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return;
     let active = true;
     (async () => {
-      const remoteBrands = await loadShared<Brand[]>('brands');
-      if (active && remoteBrands) setBrands(remoteBrands);
+      const remoteSeedVer = await loadShared<string>('seed_version');
+      if (remoteSeedVer !== DATA_SEED_VERSION) {
+        await saveShared('brands', INITIAL_BRANDS);
+        await saveShared('orders', INITIAL_ORDERS);
+        await saveShared('seed_version', DATA_SEED_VERSION);
+        if (active) {
+          setBrands(INITIAL_BRANDS);
+          setOrders(INITIAL_ORDERS);
+        }
+      } else {
+        const remoteBrands = await loadShared<Brand[]>('brands');
+        if (active && remoteBrands) setBrands(remoteBrands);
+        const remoteOrders = await loadShared<Order[]>('orders');
+        if (active && remoteOrders) setOrders(remoteOrders);
+      }
+
       const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
       if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
-      const remoteOrders = await loadShared<Order[]>('orders');
-      if (active && remoteOrders) setOrders(remoteOrders);
       const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
       if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
       const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
@@ -423,7 +455,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase.from('profiles').select('*');
     if (!data) return;
     const clipperEditor = data.filter((p: Record<string, unknown>) => p.role === 'clipper' || p.role === 'editor');
-    setWorkers(clipperEditor.map(workerFromProfileRow));
+    if (clipperEditor.length > 0) {
+      setWorkers(clipperEditor.map(workerFromProfileRow));
+    }
     setAdminProfiles(
       data
         .filter((p: Record<string, unknown>) => p.role === 'admin')
@@ -438,7 +472,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [loadWorkersFromProfiles, user?.id]);
 
-  // --- Estado "En línea" en tiempo real ---
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !user?.id) {
       setPresenceOnlineIds(new Set());
@@ -762,13 +795,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const prevVideo = findVideo(videoId);
     const wasPaid50 = prevVideo ? prevVideo.paid50 : false;
     const wasPaid100 = prevVideo ? prevVideo.paid100 : false;
+    const todayStr = new Date().toISOString().slice(0, 10);
 
     updateVideo(videoId, v => ({
       ...v,
       qc: status,
+      editorQc: status === 'aprobado_cliente' ? 'aprobado_cliente' : status === 'aprobado_senda' ? 'aprobado_senda' : v.editorQc,
+      date: status === 'aprobado_cliente' ? todayStr : v.date,
+      finalUploaded: status === 'aprobado_cliente' ? true : v.finalUploaded,
       paid50: status === 'aprobado_senda' || status === 'aprobado_cliente' ? true : v.paid50,
       paid100: status === 'aprobado_cliente' ? true : v.paid100,
     }));
+
+    setOrders(prev => {
+      const next = prev.map(o => {
+        const matches = o.boardVideoId === videoId || (prevVideo && o.brand.trim().toLowerCase() === prevVideo.name.trim().toLowerCase());
+        if (!matches) return o;
+        let nextOrderStatus: OrderStatus = o.status;
+        if (status === 'aprobado_cliente') nextOrderStatus = 'finalizado';
+        else if (status === 'aprobado_senda') nextOrderStatus = 'aprobado_senda';
+        else if (o.clipperId && o.editorId) nextOrderStatus = 'asignado';
+        return { ...o, status: nextOrderStatus };
+      });
+      ordersRef.current = next;
+      return next;
+    });
 
     if (prevVideo) {
       const label = status.replace(/_/g, ' ');
@@ -894,6 +945,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addFinalVideo = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
     updateVideo(videoId, v => ({
       ...v,
+      qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' ? 'revision' : v.qc,
       finalVideos: [...v.finalVideos, { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null }],
     }));
   }, [updateVideo]);
@@ -1140,21 +1192,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const approveFinal = useCallback((videoId: string) => {
     const v = findVideo(videoId);
     const wasAlreadyPaid100 = v ? v.paid100 : true;
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     updateVideo(videoId, vid => {
-      const updated = { ...vid, finalUploaded: true, paid50: true, paid100: true, qc: 'aprobado_cliente' as QcStatus, editorQc: 'aprobado_cliente' as const };
+      const updated = {
+        ...vid,
+        date: todayStr,
+        finalUploaded: true,
+        paid50: true,
+        paid100: true,
+        qc: 'aprobado_cliente' as QcStatus,
+        editorQc: 'aprobado_cliente' as const,
+      };
       if (updated.tierSnapshot && !vid.paid100) {
         setPaidHistory(prev => [...prev, {
           videoName: updated.name,
           clipperId: updated.clipperId,
           editorId: updated.editorId,
           durationKey: updated.duration || '',
-          date: new Date().toISOString().slice(0, 10),
+          date: todayStr,
           paid100: true,
           tierSnapshot: updated.tierSnapshot!,
         }]);
       }
       return updated;
     });
+
+    setOrders(prev => {
+      const next = prev.map(o => {
+        const matches = o.boardVideoId === videoId || (v && o.brand.trim().toLowerCase() === v.name.trim().toLowerCase());
+        return matches ? { ...o, status: 'finalizado' as OrderStatus } : o;
+      });
+      ordersRef.current = next;
+      return next;
+    });
+
     if (v && !wasAlreadyPaid100) {
       pushNotification('clipper', 'pago_100', `Se liberó el 100% de pago de "${v.name}"`, v.clipperId);
       pushNotification('editor', 'pago_100', `Se liberó el 100% de pago de "${v.name}"`, v.editorId);
@@ -1248,7 +1320,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const getWorkerCapacity = useCallback((workerId: string): number => {
     const w = workersRef.current.find(x => x.id === workerId);
     const defaultByRole = w?.role === 'editor' ? capacityConfig.defaultEditorDailyVideos : capacityConfig.defaultClipperDailyVideos;
-    return workerCapacities[workerId] ?? defaultByRole;
+    return workerCapacities[workerId] ?? w?.dailyCapacity ?? defaultByRole;
   }, [workerCapacities, capacityConfig.defaultClipperDailyVideos, capacityConfig.defaultEditorDailyVideos]);
 
   const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
@@ -1256,7 +1328,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getWorkerWorkload = useCallback((workerId: string): number => {
-    return ordersRef.current.filter(o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId)).length;
+    const activeOrdersForWorker = ordersRef.current.filter(
+      o => o.status !== 'finalizado' && (o.clipperId === workerId || o.editorId === workerId || o.assignedWorkerIds.includes(workerId))
+    );
+    const activeOrderVideosCount = activeOrdersForWorker.reduce((sum, o) => sum + Math.max(1, o.videoCount || 1), 0);
+
+    const activeBoardVideosNotInOrders = brandsRef.current
+      .flatMap(b => b.videos)
+      .filter(v =>
+        (v.clipperId === workerId || v.editorId === workerId) &&
+        v.qc !== 'aprobado_cliente' &&
+        v.qc !== 'sin_iniciar' &&
+        !activeOrdersForWorker.some(o => o.boardVideoId === v.id || o.brand.trim().toLowerCase() === v.name.trim().toLowerCase())
+      ).length;
+
+    return activeOrderVideosCount + activeBoardVideosNotInOrders;
   }, []);
 
   const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null, existingVideoId?: string | null): string => {
