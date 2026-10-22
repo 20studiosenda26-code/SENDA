@@ -241,7 +241,6 @@ const RINGS = 16;
 const DOT_LIST = (() => {
   const rand = mulberry32(7);
   const out: { x: number; y: number; z: number; u: number; seed: number }[] = [];
-  for (let k = 0; k < RINGS; k++) {
     const y = 1 - ((k + 0.5) / RINGS) * 2;
     const r = Math.sqrt(1 - y * y);
     const m = Math.max(4, Math.round(30 * r));
