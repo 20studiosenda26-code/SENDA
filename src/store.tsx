@@ -70,7 +70,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-const DATA_SEED_VERSION = 'senda_v5_production_empty';
+const DATA_SEED_VERSION = 'senda_v4_multi_video_client_portal';
 
 function ensureCleanThreeProjectsSeed() {
   try {
@@ -321,8 +321,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     localWriteLockUntil.current = Date.now() + 2500;
   }, []);
 
+  const skipNextPersist = useRef<Record<string, boolean>>({});
+  const initialMountSync = useRef<Record<string, boolean>>({});
+  
   const persistShared = useCallback(<T,>(key: SharedKey, value: T) => {
+    // Evitar sobreescribir la BD con el estado inicial vacío al abrir la app
+    if (!initialMountSync.current[key]) {
+      initialMountSync.current[key] = true;
+      return; // Saltamos el primer useEffect on-mount
+    }
+
     saveState(key, value);
+    
+    // Si este estado acaba de llegar de la BD (tiempo real o carga inicial), no lo rebotamos
+    if (skipNextPersist.current[key]) {
+      skipNextPersist.current[key] = false;
+      return;
+    }
+
     if (isSupabaseConfigured) {
       markLocalWrite();
       void saveShared(key, value);
@@ -373,21 +389,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       } else {
         const remoteBrands = await loadShared<Brand[]>('brands');
-        if (active && remoteBrands) setBrands(remoteBrands);
+        if (active && remoteBrands)  { skipNextPersist.current['brands'] = true; setBrands(remoteBrands); }
         const remoteOrders = await loadShared<Order[]>('orders');
-        if (active && remoteOrders) setOrders(remoteOrders);
+        if (active && remoteOrders)  { skipNextPersist.current['orders'] = true; setOrders(remoteOrders); }
       }
 
       const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
-      if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+      if (active && remoteNotifications)  { skipNextPersist.current['notifications'] = true; setNotifications(applyNotificationReset(remoteNotifications)); }
       const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
-      if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
+      if (active && remoteCalendar)  { skipNextPersist.current['calendarEvents'] = true; setCalendarEvents(sanitizeCalendarEvents(remoteCalendar)); }
       const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
-      if (active && remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
+      if (active && remoteWorkerGoals && typeof remoteWorkerGoals === 'object')  { skipNextPersist.current['workerGoals'] = true; setWorkerGoalsMap(remoteWorkerGoals); }
       const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
-      if (active && remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
+      if (active && remotePointsOverride && typeof remotePointsOverride === 'object')  { skipNextPersist.current['workerPointsOverride'] = true; setWorkerPointsOverride(remotePointsOverride); }
       const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
-      if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+      if (active && remoteFinSettings && typeof remoteFinSettings === 'object')  { skipNextPersist.current['financeSettings'] = true; setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings }); }
       const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
       if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
       const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
@@ -395,11 +411,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const remotePayrollPayments = await loadShared<PayrollPayment[]>('payrollPayments');
       if (active && Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
       const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
-      if (active && remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
+      if (active && remotePayrollAdj && typeof remotePayrollAdj === 'object')  { skipNextPersist.current['payrollAdjustments'] = true; setPayrollAdjustments(remotePayrollAdj); }
       const remoteCapConfig = await loadShared<CapacityProtocolConfig>('capacityProtocolConfig');
-      if (active && remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
+      if (active && remoteCapConfig && typeof remoteCapConfig === 'object')  { skipNextPersist.current['capacityProtocolConfig'] = true; setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig }); }
       const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
-      if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
+      if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object')  { skipNextPersist.current['workerCapacities'] = true; setWorkerCapacities(remoteWorkerCaps); }
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -415,19 +431,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await refreshOnlineHeartbeats();
         if (Date.now() < localWriteLockUntil.current) return;
         const remoteBrands = await loadShared<Brand[]>('brands');
-        if (remoteBrands) setBrands(remoteBrands);
+        if (remoteBrands)  { skipNextPersist.current['brands'] = true; setBrands(remoteBrands); }
         const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
-        if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+        if (remoteNotifications)  { skipNextPersist.current['notifications'] = true; setNotifications(applyNotificationReset(remoteNotifications)); }
         const remoteOrders = await loadShared<Order[]>('orders');
-        if (remoteOrders) setOrders(remoteOrders);
+        if (remoteOrders)  { skipNextPersist.current['orders'] = true; setOrders(remoteOrders); }
         const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
-        if (remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
+        if (remoteCalendar)  { skipNextPersist.current['calendarEvents'] = true; setCalendarEvents(sanitizeCalendarEvents(remoteCalendar)); }
         const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
-        if (remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
+        if (remoteWorkerGoals && typeof remoteWorkerGoals === 'object')  { skipNextPersist.current['workerGoals'] = true; setWorkerGoalsMap(remoteWorkerGoals); }
         const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
-        if (remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
+        if (remotePointsOverride && typeof remotePointsOverride === 'object')  { skipNextPersist.current['workerPointsOverride'] = true; setWorkerPointsOverride(remotePointsOverride); }
         const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
-        if (remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+        if (remoteFinSettings && typeof remoteFinSettings === 'object')  { skipNextPersist.current['financeSettings'] = true; setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings }); }
         const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
         if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
         const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
@@ -435,11 +451,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const remotePayrollPayments = await loadShared<PayrollPayment[]>('payrollPayments');
         if (Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
         const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
-        if (remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
+        if (remotePayrollAdj && typeof remotePayrollAdj === 'object')  { skipNextPersist.current['payrollAdjustments'] = true; setPayrollAdjustments(remotePayrollAdj); }
         const remoteCapConfig = await loadShared<CapacityProtocolConfig>('capacityProtocolConfig');
-        if (remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
+        if (remoteCapConfig && typeof remoteCapConfig === 'object')  { skipNextPersist.current['capacityProtocolConfig'] = true; setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig }); }
         const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
-        if (remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
+        if (remoteWorkerCaps && typeof remoteWorkerCaps === 'object')  { skipNextPersist.current['workerCapacities'] = true; setWorkerCapacities(remoteWorkerCaps); }
       })();
     });
     return unsub;
