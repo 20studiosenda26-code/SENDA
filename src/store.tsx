@@ -70,7 +70,7 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-const DATA_SEED_VERSION = 'senda_v4_multi_video_client_portal';
+const DATA_SEED_VERSION = 'senda_v5_production_empty';
 
 function ensureCleanThreeProjectsSeed() {
   try {
