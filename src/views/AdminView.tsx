@@ -5,9 +5,10 @@ import {
   Users, Video, Flame, CheckCircle2, Clock, Wifi,
   Scissors, Film, SlidersHorizontal, Check, X, RotateCcw,
 } from 'lucide-react';
+import { workerLoadColor, workerLoadBorder, WorkerLoad } from './AdminHomePanels';
 
 export function AdminView() {
-  const { workers, registeredUsersCount, brands, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals } = useStore();
+  const { workers, registeredUsersCount, brands, orders, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals, getWorkerCapacity } = useStore();
   const [teamTab, setTeamTab] = useState<'clipper' | 'editor'>('clipper');
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [ptsTodayInput, setPtsTodayInput] = useState<string>('');
@@ -17,14 +18,49 @@ export function AdminView() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedToastId, setSavedToastId] = useState<string | null>(null);
 
-  const allVideos = brands.flatMap(b => b.videos);
-  const completed = allVideos.filter(v => v.qc === 'aprobado_cliente');
-  const inProgress = allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
-  const onlineWorkers = workers.filter(w => w.online);
+  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
+  const completed = useMemo(() => allVideos.filter(v => v.qc === 'aprobado_cliente'), [allVideos]);
+  const inProgress = useMemo(() => allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar'), [allVideos]);
+  const onlineWorkers = useMemo(() => workers.filter(w => w.online), [workers]);
 
   const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
   const editors = useMemo(() => workers.filter(w => w.role === 'editor'), [workers]);
   const visibleWorkers = teamTab === 'clipper' ? clippers : editors;
+
+  // CORRECCIÓN MATEMÁTICA INTEGRADA: Reutilizar lógica de conteo de asignaciones exactas
+  const workerWorkloads = useMemo(() => {
+    const map = new Map<string, { activeLoad: number; capacity: number; status: WorkerLoad }>();
+    
+    for (const w of workers) {
+      const cap = getWorkerCapacity(w.id);
+      
+      const myActiveVideos = allVideos.filter(v =>
+        (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
+        v.qc !== 'aprobado_cliente' &&
+        v.qc !== 'sin_iniciar'
+      );
+      
+      let activeLoad = myActiveVideos.length;
+
+      const extraOrders = orders.filter(o =>
+        o.status !== 'finalizado' &&
+        (w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id) &&
+        !myActiveVideos.some(v => v.id === o.boardVideoId || v.name.trim().toLowerCase() === o.brand.trim().toLowerCase())
+      );
+
+      for (const o of extraOrders) {
+        activeLoad += Math.max(1, o.videoCount || 1);
+      }
+
+      let status: WorkerLoad = 'sin_trabajo';
+      if (activeLoad === 0) status = 'sin_trabajo';
+      else if (activeLoad >= cap) status = 'lleno';
+      else status = 'meta';
+
+      map.set(w.id, { activeLoad, capacity: cap, status });
+    }
+    return map;
+  }, [workers, allVideos, orders, getWorkerCapacity]);
 
   const startEditingWorker = (w: Worker) => {
     const goals = getWorkerGoals(w.id, w.role);
@@ -51,7 +87,6 @@ export function AdminView() {
 
   return (
     <div className="space-y-5">
-      {/* KPIs superiores — Equipo refleja en vivo todos los usuarios registrados (incluyendo Admin) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard icon={Users} label="Equipo (usuarios registrados)" value={registeredUsersCount} color="accent" />
         <KpiCard icon={Video} label="Videos totales" value={allVideos.length} color="mint" />
@@ -59,7 +94,6 @@ export function AdminView() {
         <KpiCard icon={Clock} label="En progreso" value={inProgress.length} color="amber" />
       </div>
 
-      {/* En línea ahora — tarjetas mini compactas para soportar muchos usuarios */}
       <div className="bg-surface-2 border border-line rounded-xl p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2 mb-3">
           <h3 className="font-display text-base sm:text-lg font-semibold flex items-center gap-2">
@@ -75,34 +109,40 @@ export function AdminView() {
           <p className="text-xs text-muted text-center py-3">Nadie está en línea en este momento</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-44 overflow-y-auto pr-1">
-            {onlineWorkers.map(w => (
-              <div
-                key={w.id}
-                className="flex items-center gap-2 bg-surface-3 border border-mint/25 rounded-lg px-2.5 py-1.5 min-w-0"
-              >
-                <div className="relative w-7 h-7 rounded-md bg-mint-dim text-mint flex items-center justify-center text-xs font-bold shrink-0">
-                  {w.name.charAt(0).toUpperCase()}
-                  <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-mint ring-2 ring-surface-3" />
+            {onlineWorkers.map(w => {
+              const workload = workerWorkloads.get(w.id);
+              const isFilled = workload?.status === 'lleno';
+              
+              return (
+                <div
+                  key={w.id}
+                  className={`flex items-center gap-2 bg-surface-3 border rounded-lg px-2.5 py-1.5 min-w-0 transition-colors ${
+                    isFilled ? 'border-amber/40 ring-1 ring-amber/20' : 'border-mint/25'
+                  }`}
+                >
+                  <div className={`relative w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0 ${isFilled ? 'bg-amber-dim text-amber' : 'bg-mint-dim text-mint'}`}>
+                    {w.name.charAt(0).toUpperCase()}
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-surface-3 ${isFilled ? 'bg-amber' : 'bg-mint'}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate leading-tight">{w.name}</p>
+                    <p className={`text-[10px] leading-tight truncate mt-0.5 ${isFilled ? 'text-amber' : 'text-mint'}`}>
+                      En línea · <span className="text-muted-2">{w.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</span>
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate leading-tight">{w.name}</p>
-                  <p className="text-[10px] text-mint leading-tight truncate mt-0.5">
-                    En línea · <span className="text-muted-2">{w.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</span>
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Equipo — Seccionado primero Clippers, después Editores + Edición de puntos y metas individuales */}
       <div className="bg-surface-2 border border-line rounded-xl p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h3 className="font-display text-lg font-semibold">Equipo y Metas de Puntos</h3>
             <p className="text-xs text-muted mt-0.5">
-              Selecciona Clippers o Editores para gestionar sus puntos recolectados hoy/mes, la meta individual que debe recolectar cada persona y su cierre de día.
+              Selecciona Clippers o Editores para gestionar sus puntos recolectados hoy/mes, la meta individual y su cierre de día.
             </p>
           </div>
 
@@ -111,9 +151,7 @@ export function AdminView() {
               type="button"
               onClick={() => { setTeamTab('clipper'); setEditingWorkerId(null); }}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                teamTab === 'clipper'
-                  ? 'bg-accent text-on-accent shadow-sm'
-                  : 'text-muted hover:text-text'
+                teamTab === 'clipper' ? 'bg-accent text-on-accent shadow-sm' : 'text-muted hover:text-text'
               }`}
             >
               <Scissors size={13} /> Clippers ({clippers.length})
@@ -122,9 +160,7 @@ export function AdminView() {
               type="button"
               onClick={() => { setTeamTab('editor'); setEditingWorkerId(null); }}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                teamTab === 'editor'
-                  ? 'bg-mint text-on-accent shadow-sm'
-                  : 'text-muted hover:text-text'
+                teamTab === 'editor' ? 'bg-mint text-on-accent shadow-sm' : 'text-muted hover:text-text'
               }`}
             >
               <Film size={13} /> Editores ({editors.length})
@@ -143,10 +179,10 @@ export function AdminView() {
                 <tr className="text-left text-muted text-xs border-b border-line">
                   <th className="py-2.5 pr-4 font-medium">Nombre</th>
                   <th className="py-2.5 pr-4 font-medium">Estado</th>
+                  <th className="py-2.5 pr-4 font-medium">Carga (Proyectos)</th>
                   <th className="py-2.5 pr-4 font-medium">Puntos hoy / Meta</th>
                   <th className="py-2.5 pr-4 font-medium">Puntos mes / Meta</th>
                   <th className="py-2.5 pr-4 font-medium">Racha</th>
-                  <th className="py-2.5 pr-4 font-medium">Día cerrado</th>
                   <th className="py-2.5 font-medium text-right">Acciones</th>
                 </tr>
               </thead>
@@ -156,6 +192,11 @@ export function AdminView() {
                   const isEditing = editingWorkerId === w.id;
                   const pctDay = Math.min(100, Math.round((w.pointsToday / Math.max(goals.daily, 1)) * 100));
                   const pctMonth = Math.min(100, Math.round((w.pointsMonth / Math.max(goals.monthly, 1)) * 100));
+                  
+                  const workload = workerWorkloads.get(w.id);
+                  const activeLoad = workload?.activeLoad || 0;
+                  const capacity = workload?.capacity || 10;
+                  const wStatus = workload?.status || 'sin_trabajo';
 
                   return (
                     <tr key={w.id} className="border-b border-line/50 hover:bg-surface-3/60 transition-colors align-top">
@@ -171,28 +212,23 @@ export function AdminView() {
                       </td>
 
                       <td className="py-3 pr-4">
+                        <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full border bg-surface-3 ${workerLoadBorder(wStatus)}`}>
+                          <span className={`w-2 h-2 rounded-full ${workerLoadColor(wStatus)}`} />
+                          <span className="font-tech text-xs font-semibold">{activeLoad}/{capacity}</span>
+                        </div>
+                      </td>
+
+                      <td className="py-3 pr-4">
                         {isEditing ? (
                           <div className="flex items-center gap-1.5">
                             <div>
                               <span className="text-[10px] text-muted-2 block">Hoy</span>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ptsTodayInput}
-                                onChange={e => setPtsTodayInput(e.target.value)}
-                                className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none"
-                              />
+                              <input type="number" min={0} value={ptsTodayInput} onChange={e => setPtsTodayInput(e.target.value)} className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none" />
                             </div>
                             <span className="text-muted-2 mt-3">/</span>
                             <div>
                               <span className="text-[10px] text-accent block">Meta día</span>
-                              <input
-                                type="number"
-                                min={1}
-                                value={goalDailyInput}
-                                onChange={e => setGoalDailyInput(e.target.value)}
-                                className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none"
-                              />
+                              <input type="number" min={1} value={goalDailyInput} onChange={e => setGoalDailyInput(e.target.value)} className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none" />
                             </div>
                           </div>
                         ) : (
@@ -213,24 +249,12 @@ export function AdminView() {
                           <div className="flex items-center gap-1.5">
                             <div>
                               <span className="text-[10px] text-muted-2 block">Mes</span>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ptsMonthInput}
-                                onChange={e => setPtsMonthInput(e.target.value)}
-                                className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none"
-                              />
+                              <input type="number" min={0} value={ptsMonthInput} onChange={e => setPtsMonthInput(e.target.value)} className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none" />
                             </div>
                             <span className="text-muted-2 mt-3">/</span>
                             <div>
                               <span className="text-[10px] text-mint block">Meta mes</span>
-                              <input
-                                type="number"
-                                min={1}
-                                value={goalMonthlyInput}
-                                onChange={e => setGoalMonthlyInput(e.target.value)}
-                                className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none"
-                              />
+                              <input type="number" min={1} value={goalMonthlyInput} onChange={e => setGoalMonthlyInput(e.target.value)} className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none" />
                             </div>
                           </div>
                         ) : (
@@ -250,48 +274,27 @@ export function AdminView() {
                         <span className="inline-flex items-center gap-1 text-amber font-tech text-xs">
                           <Flame size={14} /> {w.streak}
                         </span>
-                      </td>
-
-                      <td className="py-3 pr-4">
-                        <button
-                          type="button"
-                          onClick={() => toggleDayClosed(w.id)}
-                          title={w.dayClosedToday ? 'Día cerrado (clic para reabrir)' : 'Día abierto (clic para cerrar día)'}
-                          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
-                            w.dayClosedToday
-                              ? 'bg-mint-dim text-mint border-mint/30 hover:bg-mint/20'
-                              : 'bg-surface-3 text-muted border-line hover:text-text hover:border-accent/40'
-                          }`}
-                        >
-                          {w.dayClosedToday ? (
-                            <>
-                              <CheckCircle2 size={13} /> Cerrado
-                            </>
-                          ) : (
-                            <>
-                              <Clock size={13} /> Cerrar día
-                            </>
-                          )}
-                        </button>
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleDayClosed(w.id)}
+                            title={w.dayClosedToday ? 'Día cerrado (clic para reabrir)' : 'Día abierto (clic para cerrar día)'}
+                            className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                              w.dayClosedToday ? 'bg-mint-dim text-mint border-mint/30 hover:bg-mint/20' : 'bg-surface-3 text-muted border-line hover:text-text hover:border-accent/40'
+                            }`}
+                          >
+                            {w.dayClosedToday ? <><CheckCircle2 size={11} /> Cerrado</> : <><Clock size={11} /> Cerrar día</>}
+                          </button>
+                        </div>
                       </td>
 
                       <td className="py-3 text-right">
                         {isEditing ? (
                           <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={savingId === w.id}
-                              onClick={() => void handleSaveWorker(w)}
-                              className="inline-flex items-center gap-1 bg-accent text-on-accent rounded-md px-2.5 py-1 text-xs font-semibold hover:bg-accent-strong transition-colors disabled:opacity-50"
-                            >
+                            <button type="button" disabled={savingId === w.id} onClick={() => void handleSaveWorker(w)} className="inline-flex items-center gap-1 bg-accent text-on-accent rounded-md px-2.5 py-1 text-xs font-semibold hover:bg-accent-strong transition-colors disabled:opacity-50">
                               <Check size={13} /> Guardar
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingWorkerId(null)}
-                              className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface-3 border border-line text-muted hover:text-text"
-                              title="Cancelar"
-                            >
+                            <button type="button" onClick={() => setEditingWorkerId(null)} className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface-3 border border-line text-muted hover:text-text" title="Cancelar">
                               <X size={13} />
                             </button>
                           </div>
@@ -302,23 +305,9 @@ export function AdminView() {
                                 <Check size={12} /> Actualizado
                               </span>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => startEditingWorker(w)}
-                              className="inline-flex items-center gap-1.5 text-xs font-medium bg-surface-3 hover:bg-accent-dim text-muted hover:text-accent border border-line hover:border-accent/40 rounded-lg px-2.5 py-1.5 transition-colors"
-                            >
-                              <SlidersHorizontal size={12} /> Editar puntos
+                            <button type="button" onClick={() => startEditingWorker(w)} className="inline-flex items-center gap-1.5 text-xs font-medium bg-surface-3 hover:bg-accent-dim text-muted hover:text-accent border border-line hover:border-accent/40 rounded-lg px-2.5 py-1.5 transition-colors">
+                              <SlidersHorizontal size={12} /> Editar
                             </button>
-                            {w.dayClosedToday && (
-                              <button
-                                type="button"
-                                onClick={() => toggleDayClosed(w.id)}
-                                title="Reabrir día"
-                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-surface-3 border border-line text-muted hover:text-amber transition-colors"
-                              >
-                                <RotateCcw size={12} />
-                              </button>
-                            )}
                           </div>
                         )}
                       </td>
