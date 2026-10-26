@@ -1364,7 +1364,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setBrands(prev => {
       const existingBrand = prev.find(b => b.name.trim().toLowerCase() === order.brand.trim().toLowerCase());
       const currentVideos = existingBrand ? existingBrand.videos : [];
-      const orderVideos = currentVideos.filter(v => v.orderId === order.id || currentVideos.length <= count);
+      const orderVideos = currentVideos.filter(v => v.orderId === order.id);
 
       const nextVideosForOrder: Video[] = [];
       for (let i = 1; i <= count; i++) {
