@@ -70,25 +70,6 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
 }
 
 const STORAGE_PREFIX = 'senda_platform_';
-const DATA_SEED_VERSION = 'senda_v4_multi_video_client_portal';
-
-function ensureCleanThreeProjectsSeed() {
-  try {
-    const currentVer = localStorage.getItem(STORAGE_PREFIX + 'seed_version');
-    if (currentVer !== DATA_SEED_VERSION) {
-      localStorage.setItem(STORAGE_PREFIX + 'brands', JSON.stringify(INITIAL_BRANDS));
-      localStorage.setItem(STORAGE_PREFIX + 'orders', JSON.stringify(INITIAL_ORDERS));
-      localStorage.setItem(STORAGE_PREFIX + 'workers', JSON.stringify(INITIAL_WORKERS));
-      localStorage.setItem(STORAGE_PREFIX + 'paidHistory', JSON.stringify(INITIAL_PAID_HISTORY));
-      localStorage.setItem(STORAGE_PREFIX + 'notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
-      localStorage.setItem(STORAGE_PREFIX + 'seed_version', DATA_SEED_VERSION);
-    }
-  } catch {
-    // ignorar errores de localStorage
-  }
-}
-
-ensureCleanThreeProjectsSeed();
 
 type SharedKey =
   | 'brands'
@@ -128,24 +109,6 @@ const CATEGORIES_BY_ROLE: Record<Role, NotificationCategory[]> = {
   editor: ['trabajo_asignado', 'clips_enviados', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   admin: ['trabajo_asignado', 'clips_enviados', 'qc_clip', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje', 'sistema'],
 };
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function applyNotificationReset(list: NotificationItem[]): NotificationItem[] {
-  const now = Date.now();
-  const resetRoles: Role[] = ['clipper', 'editor'];
-  let result = list;
-  for (const r of resetRoles) {
-    const key = STORAGE_PREFIX + 'notif_reset_' + r;
-    const lastResetRaw = localStorage.getItem(key);
-    const lastReset = lastResetRaw ? Number(lastResetRaw) : 0;
-    if (!lastResetRaw || now - lastReset >= DAY_MS) {
-      result = result.filter(n => n.role !== r);
-      try { localStorage.setItem(key, String(now)); } catch { /* ignorar */ }
-    }
-  }
-  return result;
-}
 
 interface WorkerPointsPatch {
   pointsToday?: number;
@@ -283,7 +246,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [presenceOnlineIds, setPresenceOnlineIds] = useState<Set<string>>(() => new Set());
   const [heartbeatMap, setHeartbeatMap] = useState<Record<string, number>>({});
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => applyNotificationReset(loadState('notifications', INITIAL_NOTIFICATIONS)));
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => loadState('notifications', INITIAL_NOTIFICATIONS));
   const [emailLog, setEmailLog] = useState<EmailLogEntry[]>(() => loadState('emailLog', [] as EmailLogEntry[]));
   const [chat, setChat] = useState<ChatMessage[]>(() => loadState('chat', INITIAL_CHAT));
   const [paidHistory, setPaidHistory] = useState<PaidHistoryEntry[]>(() => loadState('paidHistory', INITIAL_PAID_HISTORY));
@@ -362,24 +325,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return;
     let active = true;
     (async () => {
-      const remoteSeedVer = await loadShared<string>('seed_version');
-      if (remoteSeedVer !== DATA_SEED_VERSION) {
-        await saveShared('brands', INITIAL_BRANDS);
-        await saveShared('orders', INITIAL_ORDERS);
-        await saveShared('seed_version', DATA_SEED_VERSION);
-        if (active) {
-          setBrands(INITIAL_BRANDS);
-          setOrders(INITIAL_ORDERS);
-        }
-      } else {
-        const remoteBrands = await loadShared<Brand[]>('brands');
-        if (active && remoteBrands) setBrands(remoteBrands);
-        const remoteOrders = await loadShared<Order[]>('orders');
-        if (active && remoteOrders) setOrders(remoteOrders);
-      }
+      const remoteBrands = await loadShared<Brand[]>('brands');
+      if (active && remoteBrands) setBrands(remoteBrands);
+      const remoteOrders = await loadShared<Order[]>('orders');
+      if (active && remoteOrders) setOrders(remoteOrders);
 
       const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
-      if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+      if (active && remoteNotifications) setNotifications(remoteNotifications);
       const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
       if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
       const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
@@ -417,7 +369,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const remoteBrands = await loadShared<Brand[]>('brands');
         if (remoteBrands) setBrands(remoteBrands);
         const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
-        if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+        if (remoteNotifications) setNotifications(remoteNotifications);
         const remoteOrders = await loadShared<Order[]>('orders');
         if (remoteOrders) setOrders(remoteOrders);
         const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
@@ -444,13 +396,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
     return unsub;
   }, [refreshOnlineHeartbeats]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setNotifications(prev => applyNotificationReset(prev));
-    }, 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const loadWorkersFromProfiles = useCallback(async () => {
     if (!supabase) return;
