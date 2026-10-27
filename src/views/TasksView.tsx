@@ -339,6 +339,10 @@ function VideoDetail({
   const [confirmAcceptAll, setConfirmAcceptAll] = useState(false);
   const [uploadingClipId, setUploadingClipId] = useState<string | null>(null);
   const [uploadingNewClip, setUploadingNewClip] = useState(false);
+  const [uploadingMainImage, setUploadingMainImage] = useState(false);
+  const [uploadingBrief, setUploadingBrief] = useState(false);
+  const [uploadingFinalVideo, setUploadingFinalVideo] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number>(0);
   const briefInputRef = useRef<HTMLInputElement>(null);
   const mainImageInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -410,53 +414,84 @@ function VideoDetail({
 
   const handleClipFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setUploadingNewClip(true);
-      try {
-        const url = await uploadSharedFile(f, `clips/${video.id}`);
-        setClipFileName(f.name);
-        setClipFileUrl(url);
-      } finally {
+    if (!f) return;
+    setClipFileName(f.name);
+    setUploadingNewClip(true);
+    setUploadPct(1);
+    try {
+      const url = await uploadSharedFile(f, `clips/${video.id}`, pct => setUploadPct(pct));
+      setClipFileUrl(url);
+    } finally {
+      setTimeout(() => {
         setUploadingNewClip(false);
-      }
+        setUploadPct(0);
+      }, 250);
     }
   };
 
   const handleReplaceClipFile = async (clipId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setUploadingClipId(clipId);
-      try {
-        const url = await uploadSharedFile(f, `clips/${video.id}`);
-        onReplaceClip(video.id, clipId, f.name, url);
-      } finally {
+    if (!f) return;
+    setUploadingClipId(clipId);
+    setUploadPct(1);
+    try {
+      const url = await uploadSharedFile(f, `clips/${video.id}`, pct => setUploadPct(pct));
+      onUploadClipFile(video.id, clipId, f.name, url);
+      setActiveClipId(clipId);
+    } finally {
+      setTimeout(() => {
         setUploadingClipId(null);
-      }
+        setUploadPct(0);
+      }, 250);
     }
   };
 
   const handleFinalFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      const url = await uploadSharedFile(f, `finals/${video.id}`);
-      setFinalFileName(f.name);
+    if (!f) return;
+    setFinalFileName(f.name);
+    setUploadingFinalVideo(true);
+    setUploadPct(1);
+    try {
+      const url = await uploadSharedFile(f, `finals/${video.id}`, pct => setUploadPct(pct));
       setFinalFileUrl(url);
+    } finally {
+      setTimeout(() => {
+        setUploadingFinalVideo(false);
+        setUploadPct(0);
+      }, 250);
     }
   };
 
   const handleBriefFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      const url = await uploadSharedFile(f, `briefs/${video.id}`);
+    if (!f) return;
+    setUploadingBrief(true);
+    setUploadPct(1);
+    try {
+      const url = await uploadSharedFile(f, `briefs/${video.id}`, pct => setUploadPct(pct));
       onUploadBrief(video.id, f.name, url);
+    } finally {
+      setTimeout(() => {
+        setUploadingBrief(false);
+        setUploadPct(0);
+      }, 250);
     }
   };
 
   const handleMainImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      const url = await uploadSharedFile(f, `main-images/${video.id}`);
+    if (!f) return;
+    setUploadingMainImage(true);
+    setUploadPct(1);
+    try {
+      const url = await uploadSharedFile(f, `main-images/${video.id}`, pct => setUploadPct(pct));
       onUploadMainImage(video.id, f.name, url);
+    } finally {
+      setTimeout(() => {
+        setUploadingMainImage(false);
+        setUploadPct(0);
+      }, 250);
     }
   };
 
@@ -493,7 +528,7 @@ function VideoDetail({
                   onClick={() => briefInputRef.current?.click()}
                   className="text-xs bg-[var(--accent)] text-[#0F2E33] rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1"
                 >
-                  <Upload size={12} /> {video.briefFileName ? 'Reemplazar' : 'Subir'}
+                  {uploadingBrief ? <><Loader2 size={12} className="animate-spin" /> {uploadPct}%</> : <><Upload size={12} /> {video.briefFileName ? "Reemplazar" : "Subir"}</>}
                 </button>
               </>
             )}
@@ -540,9 +575,19 @@ function VideoDetail({
                   <input ref={mainImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleMainImageFile} />
                   <button
                     onClick={() => mainImageInputRef.current?.click()}
-                    className="text-xs bg-violet-500 text-white rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1 shrink-0"
+                    disabled={uploadingMainImage}
+                    className="text-xs bg-violet-500 text-white rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1.5 shrink-0 disabled:opacity-70"
                   >
-                    <Upload size={12} /> {video.mainImageFileName ? "Reemplazar" : "Subir"}
+                    {uploadingMainImage ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        <span className="font-tech font-bold">Subiendo {uploadPct}%</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={12} /> {video.mainImageFileName ? "Reemplazar" : "Subir"}
+                      </>
+                    )}
                   </button>
                 </>
               )}
@@ -763,9 +808,26 @@ function VideoDetail({
                   />
                 </div>
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                <label className="flex items-center gap-2 bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
-                  {uploadingNewClip ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                  {clipFileName || (uploadingNewClip ? "Subiendo..." : "Subir archivo de video")}
+                <label className="block bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 truncate">
+                      {uploadingNewClip ? <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" /> : <Upload size={16} className="shrink-0" />}
+                      <span className="truncate">{clipFileName || "Subir archivo de video"}</span>
+                    </span>
+                    {uploadingNewClip && (
+                      <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">
+                        {uploadPct}%
+                      </span>
+                    )}
+                  </div>
+                  {uploadingNewClip && (
+                    <div className="w-full h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full"
+                        style={{ width: `${uploadPct}%` }}
+                      />
+                    </div>
+                  )}
                   <input type="file" className="hidden" onChange={handleClipFile} disabled={uploadingNewClip} />
                 </label>
                 <button
@@ -778,7 +840,7 @@ function VideoDetail({
                   disabled={uploadingNewClip || !clipName}
                   className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                 >
-                  Guardar clip
+                  {uploadingNewClip ? `Subiendo clip (${uploadPct}%)...` : "Guardar clip"}
                 </button>
               </div>
             )}
@@ -841,8 +903,17 @@ function VideoDetail({
                             disabled={uploadingClipId === c.id}
                             className="text-[11px] text-gray-400 hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--surface-1)] border border-[var(--border-line)] transition-colors"
                           >
-                            {uploadingClipId === c.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                            {c.fileUrl ? "Reemplazar" : "Subir"}
+                            {uploadingClipId === c.id ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin text-[var(--accent)]" />
+                                <span className="font-tech font-bold text-[var(--accent)]">{uploadPct}%</span>
+                              </>
+                            ) : (
+                              <>
+                                <RotateCcw size={12} />
+                                {c.fileUrl ? "Reemplazar" : "Subir"}
+                              </>
+                            )}
                           </button>
                         </div>
                       )}
@@ -883,10 +954,27 @@ function VideoDetail({
                 <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
                   <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                   <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                  <label className="flex items-center gap-2 bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
-                    <Upload size={16} />
-                    {finalFileName || "Subir archivo de video"}
-                    <input type="file" className="hidden" onChange={handleFinalFile} />
+                  <label className="block bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 truncate">
+                        {uploadingFinalVideo ? <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" /> : <Upload size={16} className="shrink-0" />}
+                        <span className="truncate">{finalFileName || "Subir archivo de video"}</span>
+                      </span>
+                      {uploadingFinalVideo && (
+                        <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">
+                          {uploadPct}%
+                        </span>
+                      )}
+                    </div>
+                    {uploadingFinalVideo && (
+                      <div className="w-full h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full"
+                          style={{ width: `${uploadPct}%` }}
+                        />
+                      </div>
+                    )}
+                    <input type="file" className="hidden" onChange={handleFinalFile} disabled={uploadingFinalVideo} />
                   </label>
                   <button
                     onClick={() => {
@@ -897,7 +985,7 @@ function VideoDetail({
                     }}
                     className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                   >
-                    Guardar video final
+                    {uploadingFinalVideo ? `Subiendo video (${uploadPct}%)...` : "Guardar video final"}
                   </button>
                 </div>
               )}
