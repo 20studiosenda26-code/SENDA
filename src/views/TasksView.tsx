@@ -6,7 +6,7 @@ import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
   ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
-  Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders
+  Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
@@ -959,9 +959,10 @@ function VideoDetail({
 
 // Tablero de Proyectos Iniciados del Administrador
 export function TasksBoard() {
-  const { brands, orders, setSelectedVideo } = useStore();
+  const { brands, orders, setSelectedVideo, deleteBrandProject } = useStore();
   const [filter, setFilter] = useState<'todos' | QcStatus>('todos');
   const [expandedBrandId, setExpandedBrandId] = useState<string | null>(null);
+  const [confirmDeleteBrandId, setConfirmDeleteBrandId] = useState<string | null>(null);
 
   const filterOptions: ('todos' | QcStatus)[] = ['todos', 'sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
@@ -1032,7 +1033,40 @@ export function TasksBoard() {
                       </p>
                     </div>
                   </div>
-                  <ChevronDown size={20} className={`text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180 text-[var(--accent)]' : ''}`} />
+                  <div className="flex items-center gap-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    {confirmDeleteBrandId === brand.id ? (
+                      <div className="flex items-center gap-1.5 bg-red-500/15 border border-red-500/40 rounded-xl px-2.5 py-1">
+                        <span className="text-xs text-red-300 font-semibold">¿Borrar proyecto?</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteBrandProject(brand.id);
+                            setConfirmDeleteBrandId(null);
+                          }}
+                          className="px-2 py-0.5 rounded-lg bg-red-500 text-white text-xs font-bold hover:bg-red-600"
+                        >
+                          Sí, borrar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteBrandId(null)}
+                          className="px-2 py-0.5 rounded-lg bg-[var(--surface-3)] text-gray-300 text-xs hover:text-white"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteBrandId(brand.id)}
+                        title="Eliminar proyecto iniciado"
+                        className="p-2 rounded-xl text-gray-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                    <ChevronDown size={20} className={`text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180 text-[var(--accent)]' : ''}`} />
+                  </div>
                 </button>
 
                 {isOpen && (

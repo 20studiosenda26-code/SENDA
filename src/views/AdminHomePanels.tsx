@@ -565,3 +565,10 @@ function FolderModal({ title, icon, onClose, children }: { title: string; icon?:
     </div>
   );
 }
+
+export function workerLoadBorder(load: number): string {
+  if (load === 0) return "border-mint/40";
+  if (load <= 2) return "border-accent/40";
+  if (load <= 4) return "border-amber/40";
+  return "border-red-500/40";
+}

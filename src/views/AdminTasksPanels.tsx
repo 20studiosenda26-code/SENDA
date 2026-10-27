@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import type { Order, OrderStatus, Worker } from '../types';
 import {
   FolderOpen, ArrowLeft, Loader2, ListChecks, ChevronRight, ChevronDown,
-  User, FileDown, Link2, StickyNote, CheckCircle2,
+  User, FileDown, Link2, StickyNote, CheckCircle2, Trash2, Sparkles,
 } from 'lucide-react';
 import { TasksBoard } from './TasksView';
 
@@ -29,7 +29,17 @@ const ORDER_STATUS_DOT: Record<OrderStatus, string> = {
 type Folder = 'disponibles' | 'iniciados';
 
 export function AdminTasksRoot() {
+  const { orders, brands } = useStore();
   const [folder, setFolder] = useState<Folder | null>(null);
+
+  const availableCount = useMemo(
+    () => orders.filter(o => !(Boolean(o.clipperId) && Boolean(o.editorId))).length,
+    [orders]
+  );
+  const startedCount = useMemo(
+    () => brands.filter(b => b.videos.length > 0).length,
+    [brands]
+  );
 
   if (folder === 'iniciados') {
     return (
@@ -49,12 +59,16 @@ export function AdminTasksRoot() {
         <FolderCard
           icon={<ListChecks size={22} />}
           title="Proyectos disponibles"
+          count={availableCount}
+          badgeLabel="por asignar"
           desc="Brief, avatar y referencias del cliente, y asignación de clíper + editor(a)"
           onClick={() => setFolder('disponibles')}
         />
         <FolderCard
           icon={<FolderOpen size={22} />}
           title="Proyectos iniciados"
+          count={startedCount}
+          badgeLabel="en tablero"
           desc="El tablero de tareas (sin iniciar, revisión, aprobado)"
           onClick={() => setFolder('iniciados')}
         />
@@ -63,10 +77,15 @@ export function AdminTasksRoot() {
   );
 }
 
-function FolderCard({ icon, title, desc, onClick }: { icon: React.ReactNode; title: string; desc: string; onClick: () => void }) {
+function FolderCard({ icon, title, count, badgeLabel, desc, onClick }: { icon: React.ReactNode; title: string; count: number; badgeLabel: string; desc: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="text-left bg-surface-2 border border-line rounded-xl p-5 hover:border-accent/50 hover:bg-surface-3 transition-colors group">
-      <div className="w-11 h-11 rounded-lg bg-accent-dim text-accent flex items-center justify-center mb-3">{icon}</div>
+    <button onClick={onClick} className="text-left bg-surface-2 border border-line rounded-xl p-5 hover:border-accent/50 hover:bg-surface-3 transition-all group">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="w-11 h-11 rounded-lg bg-accent-dim text-accent flex items-center justify-center">{icon}</div>
+        <span className={`px-2.5 py-1 rounded-full text-xs font-tech font-bold border ${count > 0 ? "bg-accent-dim text-accent border-accent/40" : "bg-surface-3 text-muted-2 border-line"}`}>
+          {count} {badgeLabel}
+        </span>
+      </div>
       <p className="font-display text-base font-semibold flex items-center gap-1">
         {title} <ChevronRight size={15} className="text-muted-2 group-hover:text-accent transition-colors" />
       </p>
@@ -158,7 +177,9 @@ function WorkerPicker({
 }
 
 function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: number; isOpen: boolean; onToggle: () => void }) {
-  const { workers, getWorkerWorkload, getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor } = useStore();
+  const { workers, getWorkerWorkload, getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor, assignOrderTeam, deleteOrder } = useStore();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [assigningBoth, setAssigningBoth] = useState(false);
   const [clipperSel, setClipperSel] = useState<string | null>(order.clipperId || null);
   const [editorSel, setEditorSel] = useState<string | null>(order.editorId || null);
   const [assigningClipper, setAssigningClipper] = useState(false);
@@ -226,6 +247,36 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
             {order.clipperId && !order.editorId && <> · Clipper: {clipperName}</>}
             {order.editorId && !order.clipperId && <> · Editor(a): {editorName}</>}
           </p>
+        </div>
+        <div onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 shrink-0">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/40 rounded-lg px-2 py-1">
+              <span className="text-[11px] text-red-300 font-semibold">¿Borrar?</span>
+              <button
+                type="button"
+                onClick={() => deleteOrder(order.id)}
+                className="px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-bold hover:bg-red-600"
+              >
+                Sí
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="px-1.5 py-0.5 rounded bg-surface-3 text-muted text-[11px] hover:text-text"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              title="Eliminar pedido disponible"
+              className="p-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
         <ChevronDown size={16} className={`text-muted-2 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -342,6 +393,35 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                   </div>
                 )}
               </div>
+
+              {clipperSel && editorSel && (!order.clipperId || !order.editorId) && (
+                <div className="pt-3 border-t border-mint/30 flex items-center justify-between gap-3 flex-wrap bg-mint-dim/20 rounded-xl p-3">
+                  <div className="text-xs">
+                    <p className="font-display font-bold text-mint flex items-center gap-1.5">
+                      <Sparkles size={14} /> Equipo completo seleccionado
+                    </p>
+                    <p className="text-muted text-[11px]">
+                      Asigna ambos a la vez y traslada este proyecto directo a Proyectos iniciados.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={assigningBoth}
+                    onClick={async () => {
+                      setAssigningBoth(true);
+                      try {
+                        await assignOrderTeam(order.id, clipperSel, editorSel);
+                      } finally {
+                        setAssigningBoth(false);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-mint text-on-accent font-display text-xs font-bold flex items-center gap-1.5 hover:opacity-95 shadow-[0_0_20px_-4px_rgba(111,231,200,0.5)] disabled:opacity-50"
+                  >
+                    {assigningBoth ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                    Asignar Equipo e Iniciar Proyecto
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

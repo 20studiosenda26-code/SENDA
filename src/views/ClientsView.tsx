@@ -57,7 +57,7 @@ function buildInvoiceCode(brand: string, dateIso?: string): string {
 export function ClientsView() {
   const {
     orders, brands, workers, financeSettings, capacityConfig,
-    getWorkerCapacity, addOrder, updateOrder, setView, setQc,
+    getWorkerCapacity, addOrder, updateOrder, deleteOrder, setView, setQc,
     submitClientFeedbackBatch, enableExtraClientFeedbackRound,
   } = useStore();
 
@@ -91,6 +91,7 @@ export function ClientsView() {
   const [uploadingOrderBriefId, setUploadingOrderBriefId] = useState<string | null>(null);
   const [uploadingOrderInvoiceId, setUploadingOrderInvoiceId] = useState<string | null>(null);
   const [createdToast, setCreatedToast] = useState<string | null>(null);
+  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<string | null>(null);
 
   const briefInputRef = useRef<HTMLInputElement | null>(null);
   const invoiceInputRef = useRef<HTMLInputElement | null>(null);
@@ -467,66 +468,37 @@ export function ClientsView() {
 
     const baseInvoice = buildInvoiceCode(cleanBrand, deliveryDate);
 
-    if (!capacityPreview.fitsInSingleDay && capacityPreview.batches.length > 1) {
-      capacityPreview.batches.forEach(b => {
-        addOrder({
-          brand: `${cleanBrand} · Tanda ${b.index}/${capacityPreview.batches.length}`,
-          videoCount: b.videos,
-          deliveryDate: b.date,
-          deliveryTime,
-          status: 'sin_asignar',
-          assignedWorkerIds: [],
-          clipperId: null,
-          editorId: null,
-          unitPriceClient,
-          unitClipperPay,
-          unitEditorPay,
-          complexity,
-          priority: capacityPreview.autoPriority,
-          paymentStatus: 'completado',
-          invoiceNumber: `${baseInvoice}-T${b.index}`,
-          invoiceDate: todayIso(),
-          invoiceFileName: invoiceFile.name,
-          invoiceFileUrl: invoiceFile.url,
-          briefFileName: briefFile?.name || null,
-          briefFileUrl: briefFile?.url || null,
-          clientNotes: clientNotes.trim() || `Tanda ${b.index}: ${b.videos} videos · ${capacityPreview.etaText}`,
-        });
-      });
-      setCreatedToast(`Pedido ingresado con pago 100% verificado: ${capacityPreview.batches.length} tandas de "${cleanBrand}" (${baseInvoice}).`);
-    } else {
-      addOrder({
-        brand: cleanBrand,
-        videoCount,
-        deliveryDate,
-        deliveryTime,
-        status: 'sin_asignar',
-        assignedWorkerIds: [],
-        clipperId: null,
-        editorId: null,
-        unitPriceClient,
-        unitClipperPay,
-        unitEditorPay,
-        complexity,
-        priority: capacityPreview.autoPriority,
-        paymentStatus: 'completado',
-        invoiceNumber: baseInvoice,
-        invoiceDate: todayIso(),
-        invoiceFileName: invoiceFile.name,
-        invoiceFileUrl: invoiceFile.url,
-        briefFileName: briefFile?.name || null,
-        briefFileUrl: briefFile?.url || null,
-        clientNotes: clientNotes.trim() || `ETA: ${capacityPreview.etaText}`,
-      });
-      setCreatedToast(`Pedido de "${cleanBrand}" (${videoCount} videos) ingresado con factura verificada ${baseInvoice}.`);
-    }
+    addOrder({
+      brand: cleanBrand,
+      videoCount,
+      deliveryDate,
+      deliveryTime,
+      status: "sin_asignar",
+      assignedWorkerIds: [],
+      clipperId: null,
+      editorId: null,
+      unitPriceClient,
+      unitClipperPay,
+      unitEditorPay,
+      complexity,
+      priority: capacityPreview.autoPriority,
+      paymentStatus: "completado",
+      invoiceNumber: baseInvoice,
+      invoiceDate: todayIso(),
+      invoiceFileName: invoiceFile.name,
+      invoiceFileUrl: invoiceFile.url,
+      briefFileName: briefFile?.name || null,
+      briefFileUrl: briefFile?.url || null,
+      clientNotes: clientNotes.trim() || `ETA: ${capacityPreview.etaText}`,
+    });
 
+    setCreatedToast(`Pedido de "${cleanBrand}" (${videoCount} videos) enviado a Tareas → Proyectos disponibles (${baseInvoice}).`);
     setSelectedClientBrand(cleanBrand);
-    setBrandName('');
-    setClientNotes('');
+    setBrandName("");
+    setClientNotes("");
     setBriefFile(null);
     setInvoiceFile(null);
-    setTimeout(() => setCreatedToast(null), 4500);
+    setTimeout(() => setCreatedToast(null), 6000);
   };
 
   const handleAddDraftCorrection = () => {
@@ -1294,6 +1266,13 @@ export function ClientsView() {
               {createdToast && (
                 <div className="bg-mint-dim border border-mint/40 text-mint rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2"><CheckCircle2 size={14} /> {createdToast}</span>
+                  <button
+                    type="button"
+                    onClick={() => setView("tareas")}
+                    className="px-2.5 py-1 rounded-lg bg-mint text-on-accent font-display text-[11px] font-bold shrink-0 hover:opacity-90 transition-opacity"
+                  >
+                    Asignar en Tareas →
+                  </button>
                 </div>
               )}
 
@@ -1514,6 +1493,37 @@ export function ClientsView() {
                             >
                               <Eye size={13} /> Ir a Tareas
                             </button>
+
+                            {confirmDeleteOrderId === ord.id ? (
+                              <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/40 rounded-xl px-2.5 py-1">
+                                <span className="text-[11px] text-red-300 font-semibold">¿Borrar pedido?</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    deleteOrder(ord.id);
+                                    setConfirmDeleteOrderId(null);
+                                  }}
+                                  className="px-2 py-0.5 rounded-lg bg-red-500 text-white text-[11px] font-bold hover:bg-red-600"
+                                >
+                                  Sí, borrar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteOrderId(null)}
+                                  className="px-2 py-0.5 rounded-lg bg-surface-2 text-muted text-[11px] hover:text-text"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteOrderId(ord.id)}
+                                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                              >
+                                <Trash2 size={13} /> Borrar
+                              </button>
+                            )}
                           </div>
                         </div>
                       );

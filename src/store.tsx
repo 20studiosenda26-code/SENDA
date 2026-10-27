@@ -219,6 +219,7 @@ interface Store {
   addOrder: (o: Omit<Order, 'id' | 'createdAt'>) => void;
   updateOrder: (id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => void;
   deleteOrder: (id: string) => void;
+  deleteBrandProject: (brandId: string) => void;
   liquidateOrders: (orderIds: string[]) => void;
   assignClipper: (videoId: string, workerId: string) => void;
   assignProject: (brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => void;
@@ -299,13 +300,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [capacityConfig, setCapacityConfig] = useState<CapacityProtocolConfig>(() => loadState('capacityProtocolConfig', DEFAULT_CAPACITY_CONFIG));
 
   const localWriteLockUntil = useRef<number>(0);
+  const hydratedRef = useRef<boolean>(!isSupabaseConfigured);
   const markLocalWrite = useCallback(() => {
     localWriteLockUntil.current = Date.now() + 2500;
   }, []);
 
   const persistShared = useCallback(<T,>(key: SharedKey, value: T) => {
     saveState(key, value);
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && hydratedRef.current) {
       markLocalWrite();
       void saveShared(key, value);
     }
@@ -386,6 +388,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
       }
+      if (active) hydratedRef.current = true;
     })();
     return () => { active = false; };
   }, []);
@@ -1286,24 +1289,108 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [workersWithOnline]);
 
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
-    setOrders(prev => [{ ...o, paymentStatus: 'completado', id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() }, ...prev]);
-  }, []);
+    const newOrd: Order = {
+      ...o,
+      paymentStatus: 'completado',
+      id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setOrders(prev => {
+      const next = [newOrd, ...prev];
+      ordersRef.current = next;
+      saveState('orders', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('orders', next);
+      }
+      return next;
+    });
+  }, [markLocalWrite]);
 
   const updateOrder = useCallback((id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => {
     setOrders(prev => {
       const next = prev.map(o => o.id === id ? { ...o, ...patch } : o);
       ordersRef.current = next;
+      saveState('orders', next);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('orders', next);
+      }
       return next;
     });
-  }, []);
+  }, [markLocalWrite]);
 
   const deleteOrder = useCallback((id: string) => {
-    setOrders(prev => {
-      const next = prev.filter(o => o.id !== id);
-      ordersRef.current = next;
-      return next;
+    const targetOrder = ordersRef.current.find(o => o.id === id);
+    const nextOrders = ordersRef.current.filter(o => o.id !== id);
+    ordersRef.current = nextOrders;
+    setOrders(nextOrders);
+    saveState('orders', nextOrders);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      void saveShared('orders', nextOrders);
+    }
+
+    setBrands(prev => {
+      const otherOrdersSameBrand = targetOrder
+        ? nextOrders.some(o => o.brand.trim().toLowerCase() === targetOrder.brand.trim().toLowerCase())
+        : false;
+      const nextBrands = prev
+        .map(b => {
+          const isSameBrand = targetOrder && b.name.trim().toLowerCase() === targetOrder.brand.trim().toLowerCase();
+          const filteredVideos = b.videos.filter(v => {
+            if (v.orderId === id) return false;
+            if (!v.orderId && isSameBrand && !otherOrdersSameBrand) return false;
+            return true;
+          });
+          return { ...b, videos: filteredVideos };
+        })
+        .filter(b => b.videos.length > 0);
+
+      brandsRef.current = nextBrands;
+      saveState('brands', nextBrands);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared('brands', nextBrands);
+      }
+      return nextBrands;
     });
-  }, []);
+  }, [markLocalWrite]);
+
+  const deleteBrandProject = useCallback((brandId: string) => {
+    const targetBrand = brandsRef.current.find(b => b.id === brandId);
+    const linkedOrderIds = new Set<string>();
+    if (targetBrand) {
+      targetBrand.videos.forEach(v => {
+        if (v.orderId) linkedOrderIds.add(v.orderId);
+      });
+      ordersRef.current.forEach(o => {
+        if (o.brand.trim().toLowerCase() === targetBrand.name.trim().toLowerCase()) {
+          linkedOrderIds.add(o.id);
+        }
+      });
+    }
+
+    if (linkedOrderIds.size > 0) {
+      const nextOrders = ordersRef.current.filter(o => !linkedOrderIds.has(o.id));
+      ordersRef.current = nextOrders;
+      setOrders(nextOrders);
+      saveState("orders", nextOrders);
+      if (isSupabaseConfigured) {
+        markLocalWrite();
+        void saveShared("orders", nextOrders);
+      }
+    }
+
+    const nextBrands = brandsRef.current.filter(b => b.id !== brandId);
+    brandsRef.current = nextBrands;
+    setBrands(nextBrands);
+    saveState("brands", nextBrands);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      void saveShared("brands", nextBrands);
+    }
+  }, [markLocalWrite]);
 
   const liquidateOrders = useCallback((orderIds: string[]) => {
     setOrders(prev => {
@@ -1427,7 +1514,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       let nextBrands: Brand[];
       if (existingBrand) {
-        nextBrands = prev.map(b => (b.id === existingBrand.id ? { ...b, videos: nextVideosForOrder } : b));
+        const otherVideos = existingBrand.videos.filter(v => v.orderId && v.orderId !== order.id);
+        nextBrands = prev.map(b => (b.id === existingBrand.id ? { ...b, videos: [...otherVideos, ...nextVideosForOrder] } : b));
       } else {
         const newBrand: Brand = {
           id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1490,7 +1578,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!order) return;
     const currentEditorId = order.editorId || null;
     const nowFull = Boolean(clipperId && currentEditorId);
-    const videoId = upsertBoardVideoForOrder(order, clipperId, currentEditorId);
+    const videoId = nowFull ? upsertBoardVideoForOrder(order, clipperId, currentEditorId) : (order.boardVideoId || null);
 
     const updatedOrder: Order = {
       ...order,
@@ -1517,7 +1605,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!order) return;
     const currentClipperId = order.clipperId || null;
     const nowFull = Boolean(currentClipperId && editorId);
-    const videoId = upsertBoardVideoForOrder(order, currentClipperId, editorId);
+    const videoId = nowFull ? upsertBoardVideoForOrder(order, currentClipperId, editorId) : (order.boardVideoId || null);
 
     const updatedOrder: Order = {
       ...order,
@@ -1674,7 +1762,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     chatGroups, chatMessages, adminProfiles, createChatGroup, sendChatGroupMessage, ensureOwnAdminDm, startAdminDm,
     deleteChatGroup,
     notificationsArchive,
-    orders, addOrder, updateOrder, deleteOrder, liquidateOrders, assignProject, assignClipper,
+    orders, addOrder, updateOrder, deleteOrder, deleteBrandProject, liquidateOrders, assignProject, assignClipper,
     workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
     assignOrderClipper, assignOrderEditor,
     financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
