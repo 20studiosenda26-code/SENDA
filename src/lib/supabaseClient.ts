@@ -102,27 +102,36 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
-// Sube cualquier archivo con ráfagas paralelas (4x más rápido) y reporta porcentaje real (0% a 100%)
+// Memoriza si el bucket de Supabase Storage existe para NUNCA hacer doble subida ni perder segundos
+let storageBucketAvailable: boolean | null = null;
+
+// Sube cualquier archivo a máxima velocidad y reporta porcentaje 100% real (nunca retrocede)
 export async function uploadSharedFile(
   file: File,
   folder: string,
   onProgress?: (percent: number) => void
 ): Promise<string> {
+  let highestPct = 0;
   const report = (p: number) => {
-    if (onProgress) onProgress(Math.max(1, Math.min(100, Math.round(p))));
+    const clamped = Math.max(1, Math.min(100, Math.round(p)));
+    if (clamped > highestPct) {
+      highestPct = clamped;
+      if (onProgress) onProgress(highestPct);
+    }
   };
 
-  report(5);
+  report(2);
 
-  // 1. Si es imagen, comprimir en canvas súper rápido para que pese pocos KB y suba casi instantáneo
+  // 1. Imágenes: compresión instantánea por hardware en Canvas (< 200ms)
   if (file.type.startsWith("image/") && typeof document !== "undefined") {
     try {
-      report(20);
-      const rawDataUrl = await fileToDataUrl(file);
-      report(55);
-      const compressed = await new Promise<string>(resolve => {
+      report(15);
+      const bmpUrl = URL.createObjectURL(file);
+      const compressed = await new Promise<string>((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
+          URL.revokeObjectURL(bmpUrl);
+          report(60);
           const maxDim = 1280;
           let w = img.width;
           let h = img.height;
@@ -134,39 +143,61 @@ export async function uploadSharedFile(
           canvas.width = w;
           canvas.height = h;
           const ctx = canvas.getContext("2d");
-          if (!ctx) { resolve(rawDataUrl); return; }
+          if (!ctx) { reject(new Error("no-ctx")); return; }
           ctx.drawImage(img, 0, 0, w, h);
           resolve(canvas.toDataURL("image/jpeg", 0.82));
         };
-        img.onerror = () => resolve(rawDataUrl);
-        img.src = rawDataUrl;
+        img.onerror = err => {
+          URL.revokeObjectURL(bmpUrl);
+          reject(err);
+        };
+        img.src = bmpUrl;
       });
       report(100);
       return compressed;
     } catch {
-      // Continúa abajo si falla compresión
+      // Continúa abajo si no se pudo comprimir
     }
   }
 
-  // 2. Intentar primero Supabase Storage directo con progreso simulado durante el stream
-  if (supabase) {
+  // 2. Si Supabase Storage está disponible, subir directo por stream binario XHR con progreso real de bytes
+  if (supabase && supabaseUrl && supabaseAnonKey && storageBucketAvailable !== false) {
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-      let fakePct = 12;
-      const ticker = setInterval(() => {
-        fakePct = Math.min(88, fakePct + 9);
-        report(fakePct);
-      }, 180);
+      const uploadEndpoint = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/${MEDIA_BUCKET}/${path}`;
 
-      const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, file, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: file.type || "application/octet-stream",
+      const uploadedOk = await new Promise<boolean>(resolve => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", uploadEndpoint, true);
+        xhr.setRequestHeader("Authorization", `Bearer ${supabaseAnonKey}`);
+        xhr.setRequestHeader("apikey", supabaseAnonKey);
+        xhr.setRequestHeader("x-upsert", "true");
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable && e.total > 0) {
+            const pct = 5 + (e.loaded / e.total) * 92;
+            report(pct);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            storageBucketAvailable = true;
+            resolve(true);
+          } else {
+            storageBucketAvailable = false;
+            resolve(false);
+          }
+        };
+        xhr.onerror = () => {
+          storageBucketAvailable = false;
+          resolve(false);
+        };
+        xhr.send(file);
       });
-      clearInterval(ticker);
 
-      if (!error) {
+      if (uploadedOk) {
         const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
         if (data?.publicUrl) {
           report(100);
@@ -174,24 +205,24 @@ export async function uploadSharedFile(
         }
       }
     } catch {
-      // Continúa al motor paralelo por bloques
+      storageBucketAvailable = false;
     }
   }
 
-  // 3. Motor de subida paralela por bloques (4 hilos simultáneos) + caché instantánea en IndexedDB
+  // 3. Subida directa de alta velocidad por bloques grandes (2.2MB x 6 canales paralelos)
   const mediaId = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  // Guardar de inmediato en memoria e IndexedDB local para reproducción instantánea
+  // Caché local inmediata: quien sube el archivo lo tiene disponible al instante
   const localObjUrl = URL.createObjectURL(file);
   memoryBlobUrlCache.set(`senda-media://${mediaId}`, localObjUrl);
   void idbSet(mediaId, file);
 
-  // Leer archivo con progreso real (del 10% al 30%)
+  // Lectura rápida en memoria (avanza del 2% al 15%)
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onprogress = e => {
-      if (e.lengthComputable) {
-        report(10 + (e.loaded / e.total) * 20);
+      if (e.lengthComputable && e.total > 0) {
+        report(2 + (e.loaded / e.total) * 13);
       }
     };
     reader.onload = () => resolve(reader.result as string);
@@ -199,37 +230,45 @@ export async function uploadSharedFile(
     reader.readAsDataURL(file);
   });
 
+  report(16);
+
   if (supabase) {
-    // Bloques de 900KB subidos en paralelo de a 4 a la vez para máxima velocidad
-    const CHUNK_SIZE = 900000;
+    // Bloques grandes de 2.2MB con 6 hilos en paralelo para reducir peticiones HTTP a menos de la mitad
+    const CHUNK_SIZE = 2200000;
     const totalChunks = Math.max(1, Math.ceil(dataUrl.length / CHUNK_SIZE));
-    const chunkKeys: string[] = [];
-    const tasks: { key: string; data: string }[] = [];
+    const chunkKeys: string[] = new Array(totalChunks);
+    const tasks: { index: number; key: string; data: string }[] = [];
 
     for (let i = 0; i < totalChunks; i++) {
       const chunkKey = `${mediaId}_part_${i}`;
-      const chunkData = dataUrl.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      chunkKeys.push(chunkKey);
-      tasks.push({ key: chunkKey, data: chunkData });
+      chunkKeys[i] = chunkKey;
+      tasks.push({
+        index: i,
+        key: chunkKey,
+        data: dataUrl.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE),
+      });
     }
 
     let completedChunks = 0;
-    const CONCURRENCY = 4;
+    const CONCURRENCY = 6;
+    let cursor = 0;
 
-    for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-      const batch = tasks.slice(i, i + CONCURRENCY);
-      await Promise.all(
-        batch.map(async item => {
-          await supabase.from("platform_kv").upsert({
-            key: item.key,
-            value: item.data,
-            updated_at: new Date().toISOString(),
-          });
-          completedChunks++;
-          report(30 + (completedChunks / totalChunks) * 65);
-        })
-      );
-    }
+    const workers = Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, async () => {
+      while (cursor < tasks.length) {
+        const currentIndex = cursor++;
+        const item = tasks[currentIndex];
+        await supabase.from("platform_kv").upsert({
+          key: item.key,
+          value: item.data,
+          updated_at: new Date().toISOString(),
+        });
+        completedChunks++;
+        // Avanza de forma estrictamente lineal del 16% al 96% según los bloques reales terminados
+        report(16 + (completedChunks / totalChunks) * 80);
+      }
+    });
+
+    await Promise.all(workers);
 
     await supabase.from("platform_kv").upsert({
       key: `${mediaId}_meta`,
