@@ -1015,6 +1015,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...c,
         status,
         rejectionReason: status === 'rejected' ? (reason || '') : null,
+        adminNote: reason ? reason : c.adminNote,
         reviewedBy: 'Admin',
         reviewedAt: new Date().toISOString(),
       } : c),

@@ -459,24 +459,19 @@ function VideoDetail({
             </a>
           </div>
           {(isClipper || isAdmin) && (
-            <div className="flex items-center gap-2.5 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3 py-2 hover:border-gray-500 transition-colors">
+            <div className="flex items-center gap-3 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3.5 py-2 hover:border-gray-500 transition-colors">
               <ImageIcon size={16} className="text-violet-400 shrink-0" />
-              <div className="text-xs min-w-[100px]">
+              <div className="text-xs min-w-[110px]">
                 <p className="font-medium text-white">Imagen principal</p>
-                <p className="text-gray-400 truncate max-w-[140px]">{video.mainImageFileName || 'Sin imagen'}</p>
+                <p className="text-gray-400 truncate max-w-[150px]">{video.mainImageFileName || "Sin imagen"}</p>
                 {video.mainImageStatus && (
-                  <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded ${
-                    video.mainImageStatus === 'aprobada' ? 'bg-mint-dim text-mint' :
-                    video.mainImageStatus === 'rechazada' ? 'bg-red-500/10 text-red-400' :
-                    'bg-amber-dim text-amber'
+                  <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded font-medium ${
+                    video.mainImageStatus === "aprobada" ? "bg-mint-dim text-mint" :
+                    video.mainImageStatus === "rechazada" ? "bg-red-500/10 text-red-400" :
+                    "bg-amber-dim text-amber"
                   }`}>
-                    {video.mainImageStatus === 'aprobada' ? 'Aprobada' : video.mainImageStatus === 'rechazada' ? 'Rechazada' : 'Pendiente de aprobación'}
+                    {video.mainImageStatus === "aprobada" ? "Aprobado" : video.mainImageStatus === "rechazada" ? "Rechazado" : "Pendiente de aprobación"}
                   </span>
-                )}
-                {video.mainImageComment && (
-                  <p className="text-[10px] text-amber mt-0.5 truncate max-w-[160px]" title={video.mainImageComment}>
-                    Nota: {video.mainImageComment}
-                  </p>
                 )}
               </div>
 
@@ -484,7 +479,7 @@ function VideoDetail({
                 <button
                   type="button"
                   onClick={() => setShowMainImagePreview(true)}
-                  title="Ver vista previa de la Imagen principal"
+                  title="Abrir vista previa para revisar imagen"
                   className="w-8 h-8 rounded-lg bg-[var(--surface-3)] hover:bg-[var(--accent)]/20 border border-[var(--border-line)] hover:border-[var(--accent)] text-[var(--accent)] flex items-center justify-center transition-all shrink-0"
                 >
                   <Eye size={15} />
@@ -498,45 +493,22 @@ function VideoDetail({
                     onClick={() => mainImageInputRef.current?.click()}
                     className="text-xs bg-violet-500 text-white rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1 shrink-0"
                   >
-                    <Upload size={12} /> {video.mainImageFileName ? 'Reemplazar' : 'Subir'}
+                    <Upload size={12} /> {video.mainImageFileName ? "Reemplazar" : "Subir"}
                   </button>
                 </>
-              )}
-              {isAdmin && video.mainImageFileName && (
-                <div className="flex flex-col gap-1 shrink-0 w-[150px]">
-                  <input
-                    value={mainImageComment}
-                    onChange={e => setMainImageComment(e.target.value)}
-                    placeholder="Comentario"
-                    className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-md px-2 py-1 text-[11px] text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors"
-                  />
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => { onSetMainImageStatus(video.id, 'aprobada', mainImageComment); setMainImageComment(''); }}
-                      className="flex-1 bg-mint-dim text-mint rounded-md py-1 text-[11px] font-medium hover:bg-mint/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-1"
-                    >
-                      <ThumbsUp size={11} /> Aprobar
-                    </button>
-                    <button
-                      onClick={() => { onSetMainImageStatus(video.id, 'rechazada', mainImageComment); setMainImageComment(''); }}
-                      className="flex-1 bg-red-500/10 text-red-400 rounded-md py-1 text-[11px] font-medium hover:bg-red-500/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-1"
-                    >
-                      <ThumbsDown size={11} /> Rechazar
-                    </button>
-                  </div>
-                </div>
               )}
             </div>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5 space-y-4">
-          <div className="aspect-video bg-[var(--surface-3)] rounded-lg flex items-center justify-center overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Columna izquierda: Reproductor Vertical Grande + Chulito, X y Comentario */}
+        <div className="lg:col-span-6 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5 space-y-4">
+          <div className="w-full min-h-[520px] max-h-[640px] bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl flex items-center justify-center overflow-hidden mx-auto">
             {activeClip?.fileUrl ? (
               isImageFile(activeClip.fileName) ? (
-                <img src={activeClip.fileUrl} alt={activeClip.name} className="w-full h-full object-contain" />
+                <img src={activeClip.fileUrl} alt={activeClip.name} className="w-full h-[560px] object-contain" />
               ) : (
                 <video
                   key={activeClip.id}
@@ -544,20 +516,20 @@ function VideoDetail({
                   src={activeClip.fileUrl}
                   controls
                   autoPlay
-                  className="w-full h-full object-contain"
+                  className="w-full h-[560px] object-contain"
                 />
               )
             ) : video.finalVideos[0]?.fileUrl ? (
               <video
                 src={video.finalVideos[0].fileUrl}
                 controls
-                className="w-full h-full object-contain"
+                className="w-full h-[560px] object-contain"
               />
             ) : (
-              <div className="text-center">
-                <Film size={40} className="text-gray-600 mx-auto mb-2" />
+              <div className="text-center p-6">
+                <Film size={42} className="text-gray-600 mx-auto mb-2" />
                 <p className="text-sm text-gray-400">
-                  {video.clips.length > 0 ? 'Selecciona un clip para reproducirlo aquí' : `Vista previa de ${video.name}`}
+                  {video.clips.length > 0 ? "Selecciona un clip para reproducirlo en formato vertical" : `Vista previa de ${video.name}`}
                 </p>
                 {video.duration && <p className="text-xs text-gray-500 mt-1">{video.duration}</p>}
               </div>
@@ -565,165 +537,79 @@ function VideoDetail({
           </div>
 
           {activeClip && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
+            <div className="space-y-3 pt-2 border-t border-[var(--border-line)]">
+              <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium text-white truncate">Clip activo: {activeClip.name}</p>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${clipStatusClasses(activeClip.status)}`}>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${clipStatusClasses(activeClip.status)}`}>
                   {clipStatusLabel(activeClip.status)}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 mt-1">
-                {isAdmin && (
-                  <button
-                    onClick={() => {
-                      const t = Math.floor(playerRef.current?.currentTime || 0);
-                      onSetClipMarkerTime(video.id, activeClip.id, t);
-                    }}
-                    className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-md px-2 py-1 flex items-center gap-1 hover:bg-amber-500/20 transition-colors shrink-0"
-                  >
-                    <Flag size={11} /> Marcar momento actual
-                  </button>
-                )}
-                <p className="text-xs text-gray-400">
-                  {activeClip.markerTime != null
-                    ? <>Momento señalado: <span className="text-amber-400 font-mono">{fmtTime(activeClip.markerTime)}</span></>
-                    : 'Sin momento señalado'}
+              {(activeClip.rejectionReason || activeClip.adminNote) && (
+                <p className="text-xs text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2">
+                  Comentario: <strong>{activeClip.rejectionReason || activeClip.adminNote}</strong>
                 </p>
-              </div>
+              )}
 
               {isAdmin && (
-                <div className="mt-3 pt-3 border-t border-[var(--border-line)]">
-                  <div className="flex items-center gap-3">
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-2.5">
                     <button
-                      onClick={() => { onSetClipStatus(video.id, activeClip.id, 'approved'); setShowRejectBox(false); }}
+                      type="button"
+                      onClick={() => {
+                        onSetClipStatus(video.id, activeClip.id, "approved", rejectReason.trim() || undefined);
+                        setRejectReason("");
+                        setShowRejectBox(false);
+                      }}
                       title="Aceptar clip"
-                      className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-1 transition-all duration-300 ${
-                        activeClip.status === 'approved'
-                          ? 'bg-[#6FE7C8] text-[#0F2E33] border-[#6FE7C8] shadow-[0_0_15px_rgba(111,231,200,0.3)]'
-                          : 'bg-[#6FE7C8]/10 text-[#6FE7C8] border-[#6FE7C8]/30 hover:bg-[#6FE7C8]/20'
+                      className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
+                        activeClip.status === "approved"
+                          ? "bg-[#6FE7C8] text-[#0F2E33] border-[#6FE7C8] shadow-[0_0_15px_rgba(111,231,200,0.3)]"
+                          : "bg-[#6FE7C8]/10 text-[#6FE7C8] border-[#6FE7C8]/30 hover:bg-[#6FE7C8]/20"
                       }`}
                     >
                       <Check size={18} />
                     </button>
                     <button
-                      onClick={() => setShowRejectBox(s => !s)}
+                      type="button"
+                      onClick={() => {
+                        if (rejectReason.trim()) {
+                          onSetClipStatus(video.id, activeClip.id, "rejected", rejectReason.trim());
+                          setRejectReason("");
+                          setShowRejectBox(false);
+                        } else {
+                          setShowRejectBox(true);
+                        }
+                      }}
                       title="Rechazar clip"
-                      className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-1 transition-all duration-300 ${
-                        activeClip.status === 'rejected'
-                          ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
-                          : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                      className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
+                        activeClip.status === "rejected"
+                          ? "bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]"
+                          : "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20"
                       }`}
                     >
                       <X size={18} />
                     </button>
+                    <input
+                      value={rejectReason}
+                      onChange={e => setRejectReason(e.target.value)}
+                      placeholder="Escribe un comentario sobre este clip..."
+                      className="flex-1 bg-[var(--surface-3)] border border-[var(--border-line)] rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors"
+                    />
                   </div>
-                  {showRejectBox && (
-                    <div className="mt-3 space-y-2">
-                      <textarea
-                        value={rejectReason}
-                        onChange={e => setRejectReason(e.target.value)}
-                        placeholder="Motivo del rechazo (obligatorio)"
-                        rows={2}
-                        className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors resize-none"
-                      />
-                      <button
-                        onClick={() => {
-                          if (rejectReason.trim()) {
-                            onSetClipStatus(video.id, activeClip.id, 'rejected', rejectReason.trim());
-                            setRejectReason('');
-                            setShowRejectBox(false);
-                          }
-                        }}
-                        disabled={!rejectReason.trim()}
-                        className="text-xs bg-red-500 text-white rounded-md px-4 py-2 font-medium hover:bg-red-600 hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-40 disabled:hover:-translate-y-0"
-                      >
-                        Confirmar rechazo
-                      </button>
-                    </div>
+                  {showRejectBox && !rejectReason.trim() && (
+                    <p className="text-[11px] text-red-400">
+                      Escribe un comentario en el campo de arriba y vuelve a presionar la X para confirmar el rechazo.
+                    </p>
                   )}
                 </div>
               )}
             </div>
           )}
-
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-sm font-medium text-white">Marcador de tiempo del error</p>
-              {!isAdmin && (
-                <span className="text-[10px] text-gray-500 flex items-center gap-1"><Lock size={10} /> Solo lectura</span>
-              )}
-            </div>
-            <VideoTimeline
-              durationSeconds={video.durationSeconds || 60}
-              corrections={video.corrections}
-              editable={isAdmin}
-              onDragTime={(correctionId, time) => onUpdateCorrectionTime(video.id, correctionId, time)}
-              onTimelineClick={time => { setCorrTime(String(time)); setShowCorrForm(true); }}
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-white">Estado de QC ({video.name})</p>
-              {!isAdmin && (
-                <span className="text-[10px] text-gray-500 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {qcOptions.map(q => (
-                isAdmin ? (
-                  <button
-                    key={q}
-                    onClick={() => onSetQc(video.id, q)}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-all duration-300 hover:-translate-y-0.5 ${
-                      video.qc === q 
-                      ? 'bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.3)]' 
-                      : 'bg-[var(--surface-3)] text-gray-400 border-[var(--border-line)] hover:text-white hover:border-gray-500'
-                    }`}
-                  >
-                    {qcStatusLabel(q, video)}
-                  </button>
-                ) : (
-                  <span
-                    key={q}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-md border cursor-default select-none ${
-                      video.qc === q ? 'bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.2)]' : 'bg-[var(--surface-3)] text-gray-500 border-[var(--border-line)] opacity-60'
-                    }`}
-                  >
-                    {qcStatusLabel(q, video)}
-                  </span>
-                )
-              ))}
-            </div>
-          </div>
-
-          {isAdmin && (
-            <div className="space-y-2 pt-2 border-t border-[var(--border-line)]">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onSetQc(video.id, 'aprobado_senda')}
-                  className="flex-1 bg-[#6FE7C8]/10 text-[#6FE7C8] border border-[#6FE7C8]/40 rounded-lg py-2.5 text-sm font-semibold hover:bg-[#6FE7C8] hover:text-[#0F2E33] hover:shadow-[0_0_15px_rgba(111,231,200,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 size={16} /> Aprobar Senda
-                </button>
-                <button
-                  onClick={() => onSetQc(video.id, 'aprobado_cliente')}
-                  className="flex-1 bg-[var(--accent)] text-[#0F2E33] rounded-lg py-2.5 text-sm font-semibold hover:bg-[var(--accent-strong)] hover:shadow-[0_0_15px_rgba(53,214,228,0.5)] hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 size={16} /> Aprobar Cliente
-                </button>
-              </div>
-              {(video.publishedToClient || video.qc === 'aprobado_senda' || video.qc === 'aprobado_cliente') && (
-                <p className="text-[11px] text-[#6FE7C8] flex items-center gap-1.5 mt-2">
-                  <CheckCircle2 size={13} /> Este video ({video.name}) ya está visible en la sección Clientes de <strong>{brandName}</strong>.
-                </p>
-              )}
-            </div>
-          )}
         </div>
 
-        <div className="space-y-4">
+        {/* Columna derecha: Clips generados y Video final (sin cuadro de Correcciones) */}
+        <div className="lg:col-span-6 space-y-4">
           <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-base font-semibold text-white flex items-center gap-2">
@@ -740,7 +626,7 @@ function VideoDetail({
                   </span>
                 )
               )}
-              {isAdmin && video.clips.some(c => c.fileUrl && c.status !== 'approved') && (
+              {isAdmin && video.clips.some(c => c.fileUrl && c.status !== "approved") && (
                 <button onClick={() => setConfirmAcceptAll(true)} className="text-xs bg-mint-dim text-mint rounded-md px-2.5 py-1.5 font-medium hover:bg-mint/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1">
                   <Check size={12} /> Aceptar todos los clips
                 </button>
@@ -770,14 +656,14 @@ function VideoDetail({
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                 <label className="flex items-center gap-2 bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
                   {uploadingNewClip ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                  {clipFileName || (uploadingNewClip ? 'Subiendo...' : 'Subir archivo de video')}
+                  {clipFileName || (uploadingNewClip ? "Subiendo..." : "Subir archivo de video")}
                   <input type="file" className="hidden" onChange={handleClipFile} disabled={uploadingNewClip} />
                 </label>
                 <button
                   onClick={() => {
                     if (clipName) {
                       onAddClip(video.id, clipName, clipNote, clipFileName || undefined, clipFileUrl || undefined);
-                      setClipName(''); setClipNote(''); setClipFileName(''); setClipFileUrl(''); setShowClipForm(false);
+                      setClipName(""); setClipNote(""); setClipFileName(""); setClipFileUrl(""); setShowClipForm(false);
                     }
                   }}
                   disabled={uploadingNewClip || !clipName}
@@ -803,7 +689,7 @@ function VideoDetail({
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-gray-500">Sin clips {isEditor ? 'enviados' : 'generados'}</p>
+                  <p className="text-sm text-gray-500">Sin clips {isEditor ? "enviados" : "generados"}</p>
                 )}
               </div>
             ) : (
@@ -812,12 +698,12 @@ function VideoDetail({
                   <div
                     key={c.id}
                     onClick={() => c.fileUrl && setActiveClipId(c.id)}
-                    className={`p-3 rounded-lg border transition-all duration-300 ${c.fileUrl ? 'cursor-pointer' : ''} ${
-                      activeClip?.id === c.id ? 'bg-[var(--accent)]/10 border-[var(--accent)]/50 shadow-sm' : 'bg-[var(--surface-3)] border-transparent hover:border-gray-600'
+                    className={`p-3 rounded-lg border transition-all duration-300 ${c.fileUrl ? "cursor-pointer" : ""} ${
+                      activeClip?.id === c.id ? "bg-[var(--accent)]/10 border-[var(--accent)]/50 shadow-sm" : "bg-[var(--surface-3)] border-transparent hover:border-gray-600"
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <Play size={16} className={`mt-0.5 shrink-0 ${activeClip?.id === c.id ? 'text-[var(--accent)]' : 'text-gray-500'}`} />
+                      <Play size={16} className={`mt-0.5 shrink-0 ${activeClip?.id === c.id ? "text-[var(--accent)]" : "text-gray-500"}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <p className="text-sm font-medium text-white">{c.name}</p>
@@ -826,6 +712,9 @@ function VideoDetail({
                           </span>
                         </div>
                         {c.note && <p className="text-xs text-gray-400 mb-1">{c.note}</p>}
+                        {(c.rejectionReason || c.adminNote) && (
+                          <p className="text-xs text-amber mb-1">Comentario: {c.rejectionReason || c.adminNote}</p>
+                        )}
                         {c.fileName && (
                           <a
                             href={c.fileUrl || undefined}
@@ -851,7 +740,7 @@ function VideoDetail({
                             className="text-[11px] text-gray-400 hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--surface-1)] border border-[var(--border-line)] transition-colors"
                           >
                             {uploadingClipId === c.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                            {c.fileUrl ? 'Reemplazar' : 'Subir'}
+                            {c.fileUrl ? "Reemplazar" : "Subir"}
                           </button>
                         </div>
                       )}
@@ -866,9 +755,9 @@ function VideoDetail({
                 onClick={() => onSendVideo(video.id)}
                 disabled={video.sentByClipper}
                 className={`w-full mt-4 rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 ${
-                  video.sentByClipper 
-                    ? 'bg-mint-dim text-mint cursor-default' 
-                    : 'bg-[var(--accent)] text-[#0F2E33] hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-1'
+                  video.sentByClipper
+                    ? "bg-mint-dim text-mint cursor-default"
+                    : "bg-[var(--accent)] text-[#0F2E33] hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-1"
                 }`}
               >
                 {video.sentByClipper ? <><CheckCircle2 size={16} /> Clips enviados</> : <><Send size={16} /> Enviar clips de {video.name}</>}
@@ -894,14 +783,14 @@ function VideoDetail({
                   <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                   <label className="flex items-center gap-2 bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
                     <Upload size={16} />
-                    {finalFileName || 'Subir archivo de video'}
+                    {finalFileName || "Subir archivo de video"}
                     <input type="file" className="hidden" onChange={handleFinalFile} />
                   </label>
                   <button
                     onClick={() => {
                       if (finalName) {
                         onAddFinalVideo(video.id, finalName, finalNote, finalFileName || undefined, finalFileUrl || undefined);
-                        setFinalName(''); setFinalNote(''); setFinalFileName(''); setFinalFileUrl(''); setShowFinalForm(false);
+                        setFinalName(""); setFinalNote(""); setFinalFileName(""); setFinalFileUrl(""); setShowFinalForm(false);
                       }
                     }}
                     className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
@@ -934,13 +823,13 @@ function VideoDetail({
                             onClick={() => setPreviewOpenId(id => (id === fv.id ? null : fv.id))}
                             className="text-[11px] text-gray-400 hover:text-[var(--accent)] flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-[var(--surface-1)] border border-[var(--border-line)] transition-colors"
                           >
-                            <Eye size={12} /> {previewOpenId === fv.id ? 'Ocultar' : 'Ver'}
+                            <Eye size={12} /> {previewOpenId === fv.id ? "Ocultar" : "Ver"}
                           </button>
                         )}
                       </div>
                       {previewOpenId === fv.id && fv.fileUrl && (
                         <div className="mt-3 rounded-lg overflow-hidden bg-black border border-[var(--border-line)]">
-                          <video src={fv.fileUrl} controls className="w-full max-h-64" />
+                          <video src={fv.fileUrl} controls className="w-full max-h-[480px] object-contain" />
                         </div>
                       )}
                     </div>
@@ -949,47 +838,44 @@ function VideoDetail({
               )}
             </div>
           )}
+        </div>
+      </div>
 
-          {!isClipper && (
-            <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display text-base font-semibold text-white flex items-center gap-2">
-                  <MessageSquare size={16} className="text-amber-400" /> Correcciones ({video.corrections.length})
-                </h3>
-                {isAdmin && (
-                  <button onClick={() => setShowCorrForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
-                    <Plus size={14} /> Agregar
-                  </button>
-                )}
-              </div>
-              {isAdmin && showCorrForm && (
-                <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
-                  <input value={corrTime} onChange={e => setCorrTime(e.target.value)} placeholder="Tiempo (seg)" type="number" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                  <input value={corrText} onChange={e => setCorrText(e.target.value)} placeholder="Descripción" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                  <button onClick={() => { if (corrText) { onAddCorrection(video.id, parseInt(corrTime) || 0, corrText); setCorrTime(''); setCorrText(''); setShowCorrForm(false); } }} className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all">
-                    Guardar corrección
-                  </button>
-                </div>
-              )}
-              {video.corrections.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 border border-dashed border-[var(--border-line)] rounded-lg">
-                  <p className="text-sm">Sin correcciones</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {video.corrections.map(c => (
-                    <div key={c.id} className="flex items-start gap-3 p-3 bg-[var(--surface-3)] border border-[var(--border-line)] rounded-lg">
-                      <AlertCircle size={16} className="text-amber-400 mt-0.5 shrink-0" />
-                      <div>
-                        <span className="text-xs text-amber-400 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded mr-2">{fmtTime(c.time)}</span>
-                        <p className="text-sm text-white mt-1">{c.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      {/* Última sección abajo: Estado de QC (sin botones de Aprobar Senda ni Aprobar Cliente) */}
+      <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium text-white">Estado de QC ({video.name})</p>
+          {!isAdmin && (
+            <span className="text-[10px] text-gray-500 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
           )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {qcOptions.map(q => (
+            isAdmin ? (
+              <button
+                key={q}
+                onClick={() => onSetQc(video.id, q)}
+                className={`text-xs font-medium px-3.5 py-2 rounded-md border transition-all duration-300 hover:-translate-y-0.5 ${
+                  video.qc === q
+                    ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.3)]"
+                    : "bg-[var(--surface-3)] text-gray-400 border-[var(--border-line)] hover:text-white hover:border-gray-500"
+                }`}
+              >
+                {qcStatusLabel(q, video)}
+              </button>
+            ) : (
+              <span
+                key={q}
+                className={`text-xs font-medium px-3.5 py-2 rounded-md border cursor-default select-none ${
+                  video.qc === q
+                    ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.2)]"
+                    : "bg-[var(--surface-3)] text-gray-500 border-[var(--border-line)] opacity-60"
+                }`}
+              >
+                {qcStatusLabel(q, video)}
+              </span>
+            )
+          ))}
         </div>
       </div>
 
@@ -1000,7 +886,7 @@ function VideoDetail({
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl max-w-3xl w-full p-5 space-y-4 shadow-2xl"
+            className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between gap-3 border-b border-[var(--border-line)] pb-3">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -1020,9 +906,9 @@ function VideoDetail({
                       : "bg-amber-dim text-amber"
                   }`}>
                     {video.mainImageStatus === "aprobada"
-                      ? "Aprobada"
+                      ? "Aprobado"
                       : video.mainImageStatus === "rechazada"
-                      ? "Rechazada"
+                      ? "Rechazado"
                       : "Pendiente de aprobación"}
                   </span>
                 )}
@@ -1036,64 +922,59 @@ function VideoDetail({
               </button>
             </div>
 
-            <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl overflow-hidden flex items-center justify-center max-h-[65vh] min-h-[260px]">
+            <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl overflow-hidden flex items-center justify-center max-h-[60vh] min-h-[260px]">
               {video.mainImageFileUrl ? (
                 <img
                   src={video.mainImageFileUrl}
                   alt={video.mainImageFileName}
-                  className="max-h-[65vh] w-auto object-contain"
+                  className="max-h-[60vh] w-auto object-contain"
                 />
               ) : (
                 <p className="text-sm text-gray-400 py-12">Vista previa no disponible para este archivo.</p>
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-              <div className="text-xs text-gray-400">
-                {video.mainImageComment ? (
-                  <span>Comentario Admin: <strong className="text-amber">{video.mainImageComment}</strong></span>
-                ) : (
-                  <span>Subida por Clipper: <strong className="text-white">{video.clipperName}</strong></span>
-                )}
+            {video.mainImageComment && (
+              <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2.5 text-xs text-gray-300">
+                <span className="text-gray-400">Comentario registrado: </span>
+                <strong className="text-amber">{video.mainImageComment}</strong>
               </div>
-              <div className="flex items-center gap-2">
-                {video.mainImageFileUrl && (
-                  <a
-                    href={video.mainImageFileUrl}
-                    download={video.mainImageFileName}
-                    className="px-3 py-1.5 rounded-lg bg-[var(--surface-3)] hover:bg-[var(--accent)]/20 text-white hover:text-[var(--accent)] text-xs font-medium flex items-center gap-1.5 transition-colors"
+            )}
+
+            {isAdmin && (
+              <div className="space-y-3 pt-1 border-t border-[var(--border-line)]">
+                <input
+                  value={mainImageComment}
+                  onChange={e => setMainImageComment(e.target.value)}
+                  placeholder="Comentarios sobre la imagen principal (opcional)..."
+                  className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors"
+                />
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetMainImageStatus(video.id, "aprobada", mainImageComment.trim());
+                      setMainImageComment("");
+                      setShowMainImagePreview(false);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-mint text-[#0F2E33] text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
                   >
-                    <Download size={13} /> Descargar imagen
-                  </a>
-                )}
-                {isAdmin && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSetMainImageStatus(video.id, "aprobada", mainImageComment);
-                        setMainImageComment("");
-                        setShowMainImagePreview(false);
-                      }}
-                      className="px-3.5 py-1.5 rounded-lg bg-mint text-[#0F2E33] text-xs font-bold flex items-center gap-1.5 hover:opacity-95 transition-opacity"
-                    >
-                      <ThumbsUp size={13} /> Aprobar imagen
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSetMainImageStatus(video.id, "rechazada", mainImageComment);
-                        setMainImageComment("");
-                        setShowMainImagePreview(false);
-                      }}
-                      className="px-3.5 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-red-500/30 transition-colors"
-                    >
-                      <ThumbsDown size={13} /> Rechazar
-                    </button>
-                  </>
-                )}
+                    <ThumbsUp size={14} /> Aprobar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetMainImageStatus(video.id, "rechazada", mainImageComment.trim());
+                      setMainImageComment("");
+                      setShowMainImagePreview(false);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:bg-red-500/30 transition-colors"
+                  >
+                    <ThumbsDown size={14} /> Rechazar
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
