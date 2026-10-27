@@ -1,6 +1,6 @@
 import { useStore } from '../store';
 import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip } from '../types';
-import { uploadSharedFile } from '../lib/supabaseClient';
+import { uploadSharedFile, resolveMediaUrl, downloadMediaFile } from '../lib/supabaseClient';
 import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
@@ -353,6 +353,55 @@ function VideoDetail({
   const activeClip: Clip | null =
     video.clips.find(c => c.id === activeClipId) ||
     (video.clips.length === 1 ? video.clips[0] : null);
+  const [resolvedClipUrl, setResolvedClipUrl] = useState<string | null>(null);
+  const [loadingClipMedia, setLoadingClipMedia] = useState(false);
+  const [resolvedMainImgUrl, setResolvedMainImgUrl] = useState<string | null>(null);
+  const [resolvedFinalUrls, setResolvedFinalUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const raw = activeClip?.fileUrl || video.finalVideos[0]?.fileUrl || null;
+    if (!raw) {
+      setResolvedClipUrl(null);
+      setLoadingClipMedia(false);
+      return;
+    }
+    setLoadingClipMedia(true);
+    resolveMediaUrl(raw).then(url => {
+      if (!cancelled) {
+        setResolvedClipUrl(url || raw);
+        setLoadingClipMedia(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeClip?.id, activeClip?.fileUrl, video.finalVideos]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!video.mainImageFileUrl) {
+      setResolvedMainImgUrl(null);
+      return;
+    }
+    resolveMediaUrl(video.mainImageFileUrl).then(url => {
+      if (!cancelled) setResolvedMainImgUrl(url || video.mainImageFileUrl);
+    });
+    return () => { cancelled = true; };
+  }, [video.mainImageFileUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const nextMap: Record<string, string> = {};
+      for (const fv of video.finalVideos) {
+        if (fv.fileUrl) {
+          const r = await resolveMediaUrl(fv.fileUrl);
+          if (r) nextMap[fv.id] = r;
+        }
+      }
+      if (!cancelled) setResolvedFinalUrls(nextMap);
+    })();
+    return () => { cancelled = true; };
+  }, [video.finalVideos]);
 
   useEffect(() => {
     setShowRejectBox(false);
@@ -506,23 +555,31 @@ function VideoDetail({
         {/* Columna izquierda: Reproductor Vertical Grande + Chulito, X y Comentario */}
         <div className="lg:col-span-6 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5 space-y-4">
           <div className="w-full min-h-[520px] max-h-[640px] bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl flex items-center justify-center overflow-hidden mx-auto">
-            {activeClip?.fileUrl ? (
+            {loadingClipMedia ? (
+              <div className="text-center p-6 space-y-2">
+                <Loader2 size={32} className="text-[var(--accent)] animate-spin mx-auto" />
+                <p className="text-xs text-gray-300">Cargando archivo de video en alta calidad...</p>
+              </div>
+            ) : activeClip?.fileUrl && resolvedClipUrl ? (
               isImageFile(activeClip.fileName) ? (
-                <img src={activeClip.fileUrl} alt={activeClip.name} className="w-full h-[560px] object-contain" />
+                <img src={resolvedClipUrl} alt={activeClip.name} className="w-full h-[560px] object-contain" />
               ) : (
                 <video
-                  key={activeClip.id}
+                  key={`${activeClip.id}-${resolvedClipUrl}`}
                   ref={playerRef}
-                  src={activeClip.fileUrl}
+                  src={resolvedClipUrl}
                   controls
                   autoPlay
+                  playsInline
                   className="w-full h-[560px] object-contain"
                 />
               )
-            ) : video.finalVideos[0]?.fileUrl ? (
+            ) : video.finalVideos[0]?.fileUrl && resolvedClipUrl ? (
               <video
-                src={video.finalVideos[0].fileUrl}
+                key={resolvedClipUrl}
+                src={resolvedClipUrl}
                 controls
+                playsInline
                 className="w-full h-[560px] object-contain"
               />
             ) : (
@@ -768,14 +825,7 @@ function VideoDetail({
                           <p className="text-xs text-amber mb-1">Comentario: {c.rejectionReason || c.adminNote}</p>
                         )}
                         {c.fileName && (
-                          <a
-                            href={c.fileUrl || undefined}
-                            download={c.fileName}
-                            onClick={e => e.stopPropagation()}
-                            className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline"
-                          >
-                            <Download size={11} /> {c.fileName}
-                          </a>
+                          <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(c.fileUrl, c.fileName); }} className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline text-left"><Download size={11} /> {c.fileName}</button>
                         )}
                       </div>
                       {isClipper && (
@@ -865,9 +915,7 @@ function VideoDetail({
                           <p className="text-sm font-medium text-white">{fv.name}</p>
                           {fv.note && <p className="text-xs text-gray-400 mb-1">{fv.note}</p>}
                           {fv.fileName && (
-                            <a href={fv.fileUrl || undefined} download={fv.fileName} className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline">
-                              <Download size={11} /> {fv.fileName}
-                            </a>
+                            <button type="button" onClick={() => void downloadMediaFile(fv.fileUrl, fv.fileName)} className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline text-left"><Download size={11} /> {fv.fileName}</button>
                           )}
                         </div>
                         {fv.fileUrl && (
@@ -881,7 +929,7 @@ function VideoDetail({
                       </div>
                       {previewOpenId === fv.id && fv.fileUrl && (
                         <div className="mt-3 rounded-lg overflow-hidden bg-black border border-[var(--border-line)]">
-                          <video src={fv.fileUrl} controls className="w-full max-h-[480px] object-contain" />
+                          <video src={resolvedFinalUrls[fv.id] || fv.fileUrl} controls playsInline className="w-full max-h-[480px] object-contain" />
                         </div>
                       )}
                     </div>
@@ -977,7 +1025,7 @@ function VideoDetail({
             <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl overflow-hidden flex items-center justify-center max-h-[60vh] min-h-[260px]">
               {video.mainImageFileUrl ? (
                 <img
-                  src={video.mainImageFileUrl}
+                  src={resolvedMainImgUrl || video.mainImageFileUrl}
                   alt={video.mainImageFileName}
                   className="max-h-[60vh] w-auto object-contain"
                 />
