@@ -216,7 +216,7 @@ export function AdminHomePanels({
         capacity: cap,
         dailyGoal: goals.daily,
         status,
-        activeBrandNames: Array.from(brandCounts.entries()).map(([bName, count]) => `${bName} (${count} vid)`),
+        activeBrandNames: Array.from(brandCounts.entries()).map(([bName, count]) => `${bName} · ${count} video(s) pendiente(s)`),
         assignedVideosList,
       };
     }
@@ -577,17 +577,15 @@ export function AdminHomePanels({
                       </div>
                     </div>
 
-                    {info.assignedVideosList.length > 0 && (
+                    {info.activeBrandNames.length > 0 && (
                       <div className="pt-2 border-t border-line/60 flex flex-wrap gap-1.5">
-                        {info.assignedVideosList.slice(0, 12).map(({ video: vid, brandName }) => (
-                          <button
-                            key={vid.id}
-                            type="button"
-                            onClick={() => { setOpenFolder(null); goToVideo(vid); }}
-                            className="text-[11px] font-tech px-2 py-1 rounded-lg bg-surface-2 hover:bg-accent-dim border border-line hover:border-accent/40 text-text hover:text-accent transition-colors"
+                        {info.activeBrandNames.map((brandSummary, idx) => (
+                          <span
+                            key={idx}
+                            className="text-xs font-tech font-medium px-2.5 py-1 rounded-lg bg-surface-2 border border-line text-accent"
                           >
-                            {brandName} · {vid.name} ({vid.qc.replace(/_/g, ' ')})
-                          </button>
+                            {brandSummary}
+                          </span>
                         ))}
                       </div>
                     )}

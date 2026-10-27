@@ -492,13 +492,12 @@ export function ClientsView() {
       clientNotes: clientNotes.trim() || `ETA: ${capacityPreview.etaText}`,
     });
 
-    setCreatedToast(`Pedido de "${cleanBrand}" (${videoCount} videos) enviado a Tareas → Proyectos disponibles (${baseInvoice}).`);
     setSelectedClientBrand(cleanBrand);
     setBrandName("");
     setClientNotes("");
     setBriefFile(null);
     setInvoiceFile(null);
-    setTimeout(() => setCreatedToast(null), 6000);
+    setView("tareas");
   };
 
   const handleAddDraftCorrection = () => {
@@ -1263,18 +1262,7 @@ export function ClientsView() {
                 </div>
               )}
 
-              {createdToast && (
-                <div className="bg-mint-dim border border-mint/40 text-mint rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-2"><CheckCircle2 size={14} /> {createdToast}</span>
-                  <button
-                    type="button"
-                    onClick={() => setView("tareas")}
-                    className="px-2.5 py-1 rounded-lg bg-mint text-on-accent font-display text-[11px] font-bold shrink-0 hover:opacity-90 transition-opacity"
-                  >
-                    Asignar en Tareas →
-                  </button>
-                </div>
-              )}
+
 
               <button
                 type="submit"
