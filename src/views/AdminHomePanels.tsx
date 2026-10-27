@@ -191,7 +191,7 @@ export function AdminHomePanels({
         if (o.status === 'finalizado' || o.status === 'aprobado_cliente') return false;
         const isMine = w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id;
         if (!isMine) return false;
-        if (coveredOrderIds.has(o.id) || coveredBrands.has(o.brand.trim().toLowerCase())) return false;
+        if (coveredOrderIds.has(o.id)) return false;
         return true;
       });
 
@@ -269,9 +269,7 @@ export function AdminHomePanels({
   // Unificar Orden de Entrega con tanto los pedidos de orders como cualquier marca en brands
   const enrichedOrders = useMemo(() => {
     const list = orders.map(o => {
-      const brandObj = brands.find(
-        b => b.videos.some(v => v.orderId === o.id) || b.name.trim().toLowerCase() === o.brand.trim().toLowerCase()
-      );
+      const brandObj = brands.find(b => b.id === `brand-${o.id}` || b.videos.some(v => v.orderId === o.id)) || brands.find(b => b.name.trim().toLowerCase() === o.brand.trim().toLowerCase());
       const brandVideos = brandObj ? brandObj.videos.filter(v => !v.orderId || v.orderId === o.id) : [];
       const linkedVideo = brandVideos[0] || allVideos.find(v => v.id === o.boardVideoId) || null;
 

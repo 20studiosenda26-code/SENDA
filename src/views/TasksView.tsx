@@ -148,7 +148,7 @@ export function TasksView() {
         const myVids = b.videos
           .filter(v => (role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId))
           .sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
-        const linkedOrder = orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
+        const linkedOrder = orders.find(o => myVids.some(v => v.orderId === o.id) || `brand-${o.id}` === b.id) || orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
         return {
           brand: b,
           videos: myVids,
@@ -971,7 +971,7 @@ export function TasksBoard() {
       .map(b => {
         const sortedVids = [...b.videos].sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
         const filteredVids = filter === 'todos' ? sortedVids : sortedVids.filter(v => v.qc === filter);
-        const linkedOrder = orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
+        const linkedOrder = orders.find(o => sortedVids.some(v => v.orderId === o.id) || `brand-${o.id}` === b.id) || orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
         return {
           brand: b,
           videos: filteredVids,

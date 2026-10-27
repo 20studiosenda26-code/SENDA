@@ -302,7 +302,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const localWriteLockUntil = useRef<number>(0);
   const hydratedRef = useRef<boolean>(!isSupabaseConfigured);
   const markLocalWrite = useCallback(() => {
-    localWriteLockUntil.current = Date.now() + 6000;
+    localWriteLockUntil.current = Date.now() + 10000;
   }, []);
 
   const persistShared = useCallback(<T,>(key: SharedKey, value: T) => {
@@ -1475,17 +1475,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return isMine && v.qc !== "aprobado_cliente";
     });
     const coveredOrderIds = new Set(activeVideos.map(v => v.orderId).filter(Boolean));
-    const coveredBrands = new Set(
-      brands
-        .filter(b => b.videos.some(v => (w ? (w.role === "clipper" ? v.clipperId === workerId : v.editorId === workerId) : (v.clipperId === workerId || v.editorId === workerId))))
-        .map(b => b.name.trim().toLowerCase())
-    );
     const unpromotedOrdersLoad = orders
       .filter(o => {
         if (o.status === "finalizado" || o.status === "aprobado_cliente") return false;
         const isMine = w ? (w.role === "clipper" ? o.clipperId === workerId : o.editorId === workerId) : (o.clipperId === workerId || o.editorId === workerId);
         if (!isMine) return false;
-        if (coveredOrderIds.has(o.id) || coveredBrands.has(o.brand.trim().toLowerCase())) return false;
+        if (coveredOrderIds.has(o.id)) return false;
         return true;
       })
       .reduce((sum, o) => sum + Math.max(1, o.videoCount || 1), 0);
@@ -1496,146 +1491,164 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
     const clipper = clipperId ? workersRef.current.find(w => w.id === clipperId) : null;
     const editor = editorId ? workersRef.current.find(w => w.id === editorId) : null;
-    const count = Math.max(1, order.videoCount || 1);
+    const count = Math.max(1, Number(order.videoCount) || 1);
+    const targetBrandId = `brand-${order.id}`;
     let firstVideoId = order.boardVideoId || `${order.id}-v1`;
 
-    setBrands(prev => {
-      const existingBrand = prev.find(b => b.name.trim().toLowerCase() === order.brand.trim().toLowerCase());
-      const currentVideos = existingBrand ? existingBrand.videos : [];
-      const orderVideos = currentVideos.filter(v => v.orderId === order.id);
+    const prevBrands = brandsRef.current;
+    // Buscamos primero por el ID único del pedido o por videos que ya tengan este orderId
+    const existingBrand =
+      prevBrands.find(b => b.id === targetBrandId) ||
+      prevBrands.find(b => b.videos.some(v => v.orderId === order.id)) ||
+      null;
 
-      const nextVideosForOrder: Video[] = [];
-      for (let i = 1; i <= count; i++) {
-        const existingVid =
-          orderVideos.find(v => v.videoNumber === i) ||
-          orderVideos[i - 1] ||
-          null;
+    const currentVideos = existingBrand ? existingBrand.videos.filter(v => !v.orderId || v.orderId === order.id) : [];
 
-        const vidId = existingVid?.id || `${order.id}-v${i}`;
-        if (i === 1) firstVideoId = vidId;
+    const nextVideosForOrder: Video[] = [];
+    for (let i = 1; i <= count; i++) {
+      const existingVid =
+        currentVideos.find(v => v.videoNumber === i) ||
+        currentVideos[i - 1] ||
+        null;
 
-        if (existingVid) {
-          nextVideosForOrder.push({
-            ...existingVid,
-            name: `Video ${i}`,
-            videoNumber: i,
-            orderId: order.id,
-            clipperId: clipperId || existingVid.clipperId,
-            clipperName: clipper ? clipper.name : existingVid.clipperName,
-            editorId: editorId || existingVid.editorId,
-            editorName: editor ? editor.name : existingVid.editorName,
-            briefFileName: order.briefFileName || existingVid.briefFileName || null,
-            briefFileUrl: order.briefFileUrl || existingVid.briefFileUrl || null,
-          });
-        } else {
-          nextVideosForOrder.push({
-            id: vidId,
-            name: `Video ${i}`,
-            videoNumber: i,
-            orderId: order.id,
-            clipperName: clipper?.name || 'Sin asignar',
-            editorName: editor?.name || 'Sin asignar',
-            clipperId: clipperId || '',
-            editorId: editorId || '',
-            qc: 'pendiente',
-            editorQc: 'pendiente',
-            duration: null,
-            durationSeconds: 45,
-            tierSnapshot: CONFIG.tiers[1],
-            date: order.deliveryDate || new Date().toISOString().slice(0, 10),
-            clips: [],
-            finalVideos: [],
-            corrections: [],
-            finalUploaded: false,
-            paid50: false,
-            paid100: false,
-            briefFileName: order.briefFileName || null,
-            briefFileUrl: order.briefFileUrl || null,
-            sentByClipper: false,
-            mainImageFileName: null,
-            mainImageFileUrl: null,
-            mainImageStatus: null,
-            mainImageComment: null,
-            publishedToClient: false,
-            clientFeedbackRoundsUsed: 0,
-            clientFeedbackMaxRounds: 1,
-          });
-        }
-      }
+      const vidId = existingVid?.id || `${order.id}-v${i}`;
+      if (i === 1) firstVideoId = vidId;
 
-      let nextBrands: Brand[];
-      if (existingBrand) {
-        const otherVideos = existingBrand.videos.filter(v => v.orderId && v.orderId !== order.id);
-        nextBrands = prev.map(b => (b.id === existingBrand.id ? { ...b, videos: [...otherVideos, ...nextVideosForOrder] } : b));
+      const resolvedClipperId = clipperId !== null ? clipperId : (existingVid?.clipperId || "");
+      const resolvedEditorId = editorId !== null ? editorId : (existingVid?.editorId || "");
+      const resolvedClipperName = clipper
+        ? clipper.name
+        : (resolvedClipperId ? (workersRef.current.find(w => w.id === resolvedClipperId)?.name || existingVid?.clipperName || "Sin asignar") : "Sin asignar");
+      const resolvedEditorName = editor
+        ? editor.name
+        : (resolvedEditorId ? (workersRef.current.find(w => w.id === resolvedEditorId)?.name || existingVid?.editorName || "Sin asignar") : "Sin asignar");
+
+      if (existingVid) {
+        nextVideosForOrder.push({
+          ...existingVid,
+          name: `Video ${i}`,
+          videoNumber: i,
+          orderId: order.id,
+          clipperId: resolvedClipperId,
+          clipperName: resolvedClipperName,
+          editorId: resolvedEditorId,
+          editorName: resolvedEditorName,
+          date: order.deliveryDate || existingVid.date || new Date().toISOString().slice(0, 10),
+          briefFileName: order.briefFileName || existingVid.briefFileName || null,
+          briefFileUrl: order.briefFileUrl || existingVid.briefFileUrl || null,
+        });
       } else {
-        const newBrand: Brand = {
-          id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: order.brand,
-          videos: nextVideosForOrder,
-        };
-        nextBrands = [newBrand, ...prev];
+        nextVideosForOrder.push({
+          id: vidId,
+          name: `Video ${i}`,
+          videoNumber: i,
+          orderId: order.id,
+          clipperName: resolvedClipperName,
+          editorName: resolvedEditorName,
+          clipperId: resolvedClipperId,
+          editorId: resolvedEditorId,
+          qc: "pendiente",
+          editorQc: "pendiente",
+          duration: null,
+          durationSeconds: 45,
+          tierSnapshot: CONFIG.tiers[1],
+          date: order.deliveryDate || new Date().toISOString().slice(0, 10),
+          clips: [],
+          finalVideos: [],
+          corrections: [],
+          finalUploaded: false,
+          paid50: false,
+          paid100: false,
+          briefFileName: order.briefFileName || null,
+          briefFileUrl: order.briefFileUrl || null,
+          sentByClipper: false,
+          mainImageFileName: null,
+          mainImageFileUrl: null,
+          mainImageStatus: null,
+          mainImageComment: null,
+          publishedToClient: false,
+          clientFeedbackRoundsUsed: 0,
+          clientFeedbackMaxRounds: 1,
+        });
       }
+    }
 
-      brandsRef.current = nextBrands;
-      saveState('brands', nextBrands);
-      if (isSupabaseConfigured) {
-        markLocalWrite();
-        void saveShared('brands', nextBrands);
-      }
-      return nextBrands;
-    });
+    let nextBrands: Brand[];
+    if (existingBrand) {
+      const otherVideosInBrand = existingBrand.videos.filter(v => v.orderId && v.orderId !== order.id);
+      nextBrands = prevBrands.map(b =>
+        b.id === existingBrand.id
+          ? { ...b, name: order.brand, videos: [...otherVideosInBrand, ...nextVideosForOrder] }
+          : b
+      );
+    } else {
+      const newBrand: Brand = {
+        id: targetBrandId,
+        name: order.brand,
+        videos: nextVideosForOrder,
+      };
+      nextBrands = [newBrand, ...prevBrands];
+    }
+
+    brandsRef.current = nextBrands;
+    setBrands(nextBrands);
+    saveState("brands", nextBrands);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      void saveShared("brands", nextBrands);
+    }
 
     return firstVideoId;
   }, [markLocalWrite]);
 
-  const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
-    const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order) return;
-    const clipper = workersRef.current.find(w => w.id === clipperId);
-    const editor = workersRef.current.find(w => w.id === editorId);
-
-    const videoId = upsertBoardVideoForOrder(order, clipperId, editorId);
-    const nextOrders = ordersRef.current.map(o => o.id === orderId ? {
-      ...o,
-      clipperId,
-      editorId,
-      assignedWorkerIds: Array.from(new Set([clipperId, editorId])),
-      status: 'asignado' as OrderStatus,
-      promotedToBoard: true,
-      boardVideoId: videoId,
-    } : o);
-    ordersRef.current = nextOrders;
-    setOrders(nextOrders);
-    saveState('orders', nextOrders);
-    if (isSupabaseConfigured) {
-      markLocalWrite();
-      await saveShared('orders', nextOrders);
-    }
-
-    const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos individuales). Revisa Video 1 a Video ${order.videoCount} en Tareas.`;
-    if (clipper) pushNotification('clipper', 'trabajo_asignado', msg, clipperId);
-    if (editor) pushNotification('editor', 'trabajo_asignado', msg, editorId);
-  }, [pushNotification, upsertBoardVideoForOrder, markLocalWrite]);
-
-  const notifyPersonAssigned = useCallback(async (order: Order, targetRole: 'clipper' | 'editor', workerId: string) => {
+  const notifyPersonAssigned = useCallback(async (order: Order, targetRole: "clipper" | "editor", workerId: string) => {
     const worker = workersRef.current.find(w => w.id === workerId);
     if (!worker) return;
     const msg = `Te hemos asignado el proyecto "${order.brand}" (${order.videoCount} videos). Revisa cada video individualmente en Tareas.`;
-    pushNotification(targetRole, 'trabajo_asignado', msg, workerId);
+    pushNotification(targetRole, "trabajo_asignado", msg, workerId);
   }, [pushNotification]);
+
+  const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return;
+    const videoId = upsertBoardVideoForOrder(order, clipperId, editorId);
+    const updatedOrder: Order = {
+      ...order,
+      clipperId,
+      editorId,
+      assignedWorkerIds: Array.from(new Set([clipperId, editorId].filter(Boolean))),
+      status: "asignado" as OrderStatus,
+      promotedToBoard: true,
+      boardVideoId: videoId,
+    };
+    const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
+    ordersRef.current = nextOrders;
+    setOrders(nextOrders);
+    saveState("orders", nextOrders);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      await Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", brandsRef.current),
+      ]);
+    }
+    if (clipperId) await notifyPersonAssigned(updatedOrder, "clipper", clipperId);
+    if (editorId) await notifyPersonAssigned(updatedOrder, "editor", editorId);
+  }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
   const assignOrderClipper = useCallback(async (orderId: string, clipperId: string) => {
     const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order) return;
+    if (!order || !clipperId) return;
     const currentEditorId = order.editorId || null;
     const nowFull = Boolean(clipperId && currentEditorId);
-    const videoId = nowFull ? upsertBoardVideoForOrder(order, clipperId, currentEditorId) : (order.boardVideoId || null);
+    // Siempre creamos/actualizamos los videos en brands para que al Clipper le aparezca su tarea al instante
+    const videoId = upsertBoardVideoForOrder(order, clipperId, currentEditorId);
 
     const updatedOrder: Order = {
       ...order,
       clipperId,
-      assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []).filter(id => id !== order.clipperId), clipperId, ...(currentEditorId ? [currentEditorId] : [])])),
-      status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+      assignedWorkerIds: Array.from(new Set([clipperId, ...(currentEditorId ? [currentEditorId] : [])])),
+      status: (nowFull ? "asignado" : "sin_asignar") as OrderStatus,
       promotedToBoard: nowFull,
       boardVideoId: videoId,
     };
@@ -1643,26 +1656,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
     ordersRef.current = nextOrders;
     setOrders(nextOrders);
-    saveState('orders', nextOrders);
+    saveState("orders", nextOrders);
     if (isSupabaseConfigured) {
       markLocalWrite();
-      await saveShared('orders', nextOrders);
+      await Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", brandsRef.current),
+      ]);
     }
-    await notifyPersonAssigned(updatedOrder, 'clipper', clipperId);
+    await notifyPersonAssigned(updatedOrder, "clipper", clipperId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
   const assignOrderEditor = useCallback(async (orderId: string, editorId: string) => {
     const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order) return;
+    if (!order || !editorId) return;
     const currentClipperId = order.clipperId || null;
     const nowFull = Boolean(currentClipperId && editorId);
-    const videoId = nowFull ? upsertBoardVideoForOrder(order, currentClipperId, editorId) : (order.boardVideoId || null);
+    // Siempre creamos/actualizamos los videos en brands para que al Editor(a) le aparezca su tarea al instante
+    const videoId = upsertBoardVideoForOrder(order, currentClipperId, editorId);
 
     const updatedOrder: Order = {
       ...order,
       editorId,
-      assignedWorkerIds: Array.from(new Set([...(order.assignedWorkerIds || []).filter(id => id !== order.editorId), editorId, ...(currentClipperId ? [currentClipperId] : [])])),
-      status: (nowFull ? 'asignado' : 'sin_asignar') as OrderStatus,
+      assignedWorkerIds: Array.from(new Set([...(currentClipperId ? [currentClipperId] : []), editorId])),
+      status: (nowFull ? "asignado" : "sin_asignar") as OrderStatus,
       promotedToBoard: nowFull,
       boardVideoId: videoId,
     };
@@ -1670,12 +1687,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
     ordersRef.current = nextOrders;
     setOrders(nextOrders);
-    saveState('orders', nextOrders);
+    saveState("orders", nextOrders);
     if (isSupabaseConfigured) {
       markLocalWrite();
-      await saveShared('orders', nextOrders);
+      await Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", brandsRef.current),
+      ]);
     }
-    await notifyPersonAssigned(updatedOrder, 'editor', editorId);
+    await notifyPersonAssigned(updatedOrder, "editor", editorId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
   const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
