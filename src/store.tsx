@@ -965,6 +965,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [updateVideo, findVideo, pushNotification]);
 
   const addClip = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
+    const currentVid = findVideo(videoId);
+    if (currentVid && currentVid.mainImageStatus !== "aprobada") {
+      return;
+    }
     updateVideo(videoId, v => ({
       ...v,
       clips: [...v.clips, {
@@ -975,7 +979,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         version: 1, previousVersions: [],
       }],
     }));
-  }, [updateVideo]);
+  }, [updateVideo, findVideo]);
 
   const replaceClip = useCallback((videoId: string, clipId: string, fileName: string, fileUrl: string) => {
     updateVideo(videoId, v => ({
@@ -1084,11 +1088,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       mainImageStatus: 'pendiente',
       mainImageComment: null,
     }));
-  }, [updateVideo]);
+    const v = findVideo(videoId);
+    const parentBrand = brandsRef.current.find(b => b.videos.some(x => x.id === videoId));
+    if (v) {
+      const prefix = parentBrand ? `${parentBrand.name} · ` : "";
+      pushNotification("admin", "qc_clip", `${v.clipperName} subió la Imagen Principal de "${prefix}${v.name}" para aprobación.`);
+    }
+  }, [updateVideo, findVideo, pushNotification]);
 
   const setMainImageStatus = useCallback((videoId: string, status: MainImageStatus, comment: string) => {
     updateVideo(videoId, v => ({ ...v, mainImageStatus: status, mainImageComment: comment || null }));
-  }, [updateVideo]);
+    const v = findVideo(videoId);
+    const parentBrand = brandsRef.current.find(b => b.videos.some(x => x.id === videoId));
+    if (v) {
+      const prefix = parentBrand ? `${parentBrand.name} · ` : "";
+      if (status === "aprobada") {
+        pushNotification("clipper", "qc_clip", `Imagen Principal aprobada en "${prefix}${v.name}". Ya puedes subir los clips.`, v.clipperId);
+      } else if (status === "rechazada") {
+        pushNotification("clipper", "qc_clip", `Imagen Principal rechazada en "${prefix}${v.name}". Motivo: ${comment || "Revisar con Admin"}.`, v.clipperId);
+      }
+    }
+  }, [updateVideo, findVideo, pushNotification]);
 
   const sendVideo = useCallback((videoId: string) => {
     updateVideo(videoId, v => ({

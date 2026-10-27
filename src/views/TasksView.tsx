@@ -331,6 +331,7 @@ function VideoDetail({
   const [corrTime, setCorrTime] = useState('');
   const [corrText, setCorrText] = useState('');
   const [mainImageComment, setMainImageComment] = useState('');
+  const [showMainImagePreview, setShowMainImagePreview] = useState(false);
   const [previewOpenId, setPreviewOpenId] = useState<string | null>(null);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -346,6 +347,7 @@ function VideoDetail({
   const isAdmin = role === 'admin';
   const isClipper = role === 'clipper';
   const isEditor = role === 'editor';
+  const isMainImageApproved = video.mainImageStatus === 'aprobada';
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
   const activeClip: Clip | null =
@@ -457,11 +459,11 @@ function VideoDetail({
             </a>
           </div>
           {(isClipper || isAdmin) && (
-            <div className="flex items-center gap-2 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3 py-2 hover:border-gray-500 transition-colors">
+            <div className="flex items-center gap-2.5 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3 py-2 hover:border-gray-500 transition-colors">
               <ImageIcon size={16} className="text-violet-400 shrink-0" />
-              <div className="text-xs min-w-[90px]">
+              <div className="text-xs min-w-[100px]">
                 <p className="font-medium text-white">Imagen principal</p>
-                <p className="text-gray-400 truncate max-w-[130px]">{video.mainImageFileName || 'Sin imagen'}</p>
+                <p className="text-gray-400 truncate max-w-[140px]">{video.mainImageFileName || 'Sin imagen'}</p>
                 {video.mainImageStatus && (
                   <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded ${
                     video.mainImageStatus === 'aprobada' ? 'bg-mint-dim text-mint' :
@@ -471,10 +473,27 @@ function VideoDetail({
                     {video.mainImageStatus === 'aprobada' ? 'Aprobada' : video.mainImageStatus === 'rechazada' ? 'Rechazada' : 'Pendiente de aprobación'}
                   </span>
                 )}
+                {video.mainImageComment && (
+                  <p className="text-[10px] text-amber mt-0.5 truncate max-w-[160px]" title={video.mainImageComment}>
+                    Nota: {video.mainImageComment}
+                  </p>
+                )}
               </div>
+
+              {video.mainImageFileName && (
+                <button
+                  type="button"
+                  onClick={() => setShowMainImagePreview(true)}
+                  title="Ver vista previa de la Imagen principal"
+                  className="w-8 h-8 rounded-lg bg-[var(--surface-3)] hover:bg-[var(--accent)]/20 border border-[var(--border-line)] hover:border-[var(--accent)] text-[var(--accent)] flex items-center justify-center transition-all shrink-0"
+                >
+                  <Eye size={15} />
+                </button>
+              )}
+
               {isClipper && (
                 <>
-                  <input ref={mainImageInputRef} type="file" accept="image/*,*/*" className="hidden" onChange={handleMainImageFile} />
+                  <input ref={mainImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleMainImageFile} />
                   <button
                     onClick={() => mainImageInputRef.current?.click()}
                     className="text-xs bg-violet-500 text-white rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1 shrink-0"
@@ -711,9 +730,15 @@ function VideoDetail({
                 <Film size={16} className="text-[var(--accent)]" /> {isEditor ? `Clips enviados (${video.name})` : `Clips generados (${video.name})`}
               </h3>
               {isClipper && (
-                <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
-                  <Plus size={14} /> Agregar
-                </button>
+                isMainImageApproved ? (
+                  <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
+                    <Plus size={14} /> Agregar
+                  </button>
+                ) : (
+                  <span className="text-xs text-amber bg-amber-dim border border-amber/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 select-none" title="El Administrador debe aprobar primero la Imagen principal">
+                    <Lock size={12} /> Requiere Imagen Principal aprobada
+                  </span>
+                )
               )}
               {isAdmin && video.clips.some(c => c.fileUrl && c.status !== 'approved') && (
                 <button onClick={() => setConfirmAcceptAll(true)} className="text-xs bg-mint-dim text-mint rounded-md px-2.5 py-1.5 font-medium hover:bg-mint/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1">
@@ -739,7 +764,7 @@ function VideoDetail({
               </div>
             )}
 
-            {showClipForm && (
+            {showClipForm && isMainImageApproved && (
               <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
                 <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
@@ -764,8 +789,22 @@ function VideoDetail({
             )}
 
             {video.clips.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 border border-dashed border-[var(--border-line)] rounded-lg">
-                <p className="text-sm">Sin clips {isEditor ? 'enviados' : 'generados'}</p>
+              <div className="text-center py-8 px-4 text-gray-400 border border-dashed border-[var(--border-line)] rounded-lg space-y-1.5">
+                {!isMainImageApproved && isClipper ? (
+                  <>
+                    <Lock size={20} className="text-amber mx-auto mb-1" />
+                    <p className="text-sm font-medium text-white">Subida de clips bloqueada por Control de Calidad</p>
+                    <p className="text-xs text-gray-400 max-w-md mx-auto">
+                      {!video.mainImageFileName
+                        ? "Primero debes subir la Imagen principal en la barra superior para que el Administrador la revise."
+                        : video.mainImageStatus === "rechazada"
+                        ? `Tu Imagen principal fue rechazada${video.mainImageComment ? `: "${video.mainImageComment}"` : ""}. Sube una nueva Imagen principal arriba.`
+                        : "Tu Imagen principal está pendiente de aprobación por el Administrador. Apenas la apruebe podrás subir los clips."}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">Sin clips {isEditor ? 'enviados' : 'generados'}</p>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -953,6 +992,111 @@ function VideoDetail({
           )}
         </div>
       </div>
+
+      {showMainImagePreview && video.mainImageFileName && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowMainImagePreview(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl max-w-3xl w-full p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--border-line)] pb-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <ImageIcon size={18} className="text-violet-400 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="font-display text-base font-bold text-white truncate">
+                    Imagen principal · {brandName ? `${brandName} · ${video.name}` : video.name}
+                  </h3>
+                  <p className="text-xs text-gray-400 truncate">{video.mainImageFileName}</p>
+                </div>
+                {video.mainImageStatus && (
+                  <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${
+                    video.mainImageStatus === "aprobada"
+                      ? "bg-mint-dim text-mint"
+                      : video.mainImageStatus === "rechazada"
+                      ? "bg-red-500/15 text-red-400"
+                      : "bg-amber-dim text-amber"
+                  }`}>
+                    {video.mainImageStatus === "aprobada"
+                      ? "Aprobada"
+                      : video.mainImageStatus === "rechazada"
+                      ? "Rechazada"
+                      : "Pendiente de aprobación"}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMainImagePreview(false)}
+                className="w-8 h-8 rounded-lg bg-[var(--surface-3)] border border-[var(--border-line)] flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl overflow-hidden flex items-center justify-center max-h-[65vh] min-h-[260px]">
+              {video.mainImageFileUrl ? (
+                <img
+                  src={video.mainImageFileUrl}
+                  alt={video.mainImageFileName}
+                  className="max-h-[65vh] w-auto object-contain"
+                />
+              ) : (
+                <p className="text-sm text-gray-400 py-12">Vista previa no disponible para este archivo.</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+              <div className="text-xs text-gray-400">
+                {video.mainImageComment ? (
+                  <span>Comentario Admin: <strong className="text-amber">{video.mainImageComment}</strong></span>
+                ) : (
+                  <span>Subida por Clipper: <strong className="text-white">{video.clipperName}</strong></span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {video.mainImageFileUrl && (
+                  <a
+                    href={video.mainImageFileUrl}
+                    download={video.mainImageFileName}
+                    className="px-3 py-1.5 rounded-lg bg-[var(--surface-3)] hover:bg-[var(--accent)]/20 text-white hover:text-[var(--accent)] text-xs font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <Download size={13} /> Descargar imagen
+                  </a>
+                )}
+                {isAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSetMainImageStatus(video.id, "aprobada", mainImageComment);
+                        setMainImageComment("");
+                        setShowMainImagePreview(false);
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg bg-mint text-[#0F2E33] text-xs font-bold flex items-center gap-1.5 hover:opacity-95 transition-opacity"
+                    >
+                      <ThumbsUp size={13} /> Aprobar imagen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSetMainImageStatus(video.id, "rechazada", mainImageComment);
+                        setMainImageComment("");
+                        setShowMainImagePreview(false);
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-red-500/30 transition-colors"
+                    >
+                      <ThumbsDown size={13} /> Rechazar
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

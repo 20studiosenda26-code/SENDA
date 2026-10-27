@@ -53,7 +53,37 @@ export async function uploadSharedFile(file: File, folder: string): Promise<stri
   }
   // Si el archivo pesa más de 180KB y el bucket no está disponible, usamos ObjectURL local
   // para nunca bloquear ni reventar el JSON de platform_kv en Supabase
-  if (file.size > 180 * 1024 && typeof URL !== "undefined" && URL.createObjectURL) {
+  // Si es una imagen (ej. Imagen Principal), generar DataURL comprimido en canvas para que Admin y Clipper la vean en cualquier dispositivo sin pesar en platform_kv
+  if (file.type.startsWith("image/") && typeof document !== "undefined") {
+    try {
+      const rawDataUrl = await fileToDataUrl(file);
+      const compressed = await new Promise<string>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1280;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(rawDataUrl); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.82));
+        };
+        img.onerror = () => resolve(rawDataUrl);
+        img.src = rawDataUrl;
+      });
+      return compressed;
+    } catch {
+      // Continúa al fallback normal
+    }
+  }
+  if (file.size > 350 * 1024 && typeof URL !== "undefined" && URL.createObjectURL) {
     return URL.createObjectURL(file);
   }
   try {
