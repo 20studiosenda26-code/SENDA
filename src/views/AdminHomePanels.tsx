@@ -17,9 +17,15 @@ function todayIso(): string {
 }
 
 export function workerLoadColor(load: WorkerLoad) {
-  if (load === 'lleno') return 'bg-amber'; 
+  if (load === 'lleno') return 'bg-amber';
   if (load === 'meta') return 'bg-mint';
   return 'bg-accent';
+}
+
+export function workerLoadBorder(load: WorkerLoad) {
+  if (load === 'lleno') return 'border-amber/40';
+  if (load === 'meta') return 'border-mint/40';
+  return 'border-accent/40';
 }
 
 const WORKER_LOAD_LABEL: Record<WorkerLoad, string> = {
