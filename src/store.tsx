@@ -302,7 +302,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const localWriteLockUntil = useRef<number>(0);
   const hydratedRef = useRef<boolean>(!isSupabaseConfigured);
   const markLocalWrite = useCallback(() => {
-    localWriteLockUntil.current = Date.now() + 2500;
+    localWriteLockUntil.current = Date.now() + 6000;
   }, []);
 
   const persistShared = useCallback(<T,>(key: SharedKey, value: T) => {
@@ -1322,99 +1322,132 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteOrder = useCallback((id: string) => {
     const targetOrder = ordersRef.current.find(o => o.id === id);
+    const targetBrandKey = targetOrder ? targetOrder.brand.trim().toLowerCase() : null;
+
+    // Si solo hay este pedido para esa marca, borramos también todos los pedidos/videos de esa marca
     const nextOrders = ordersRef.current.filter(o => o.id !== id);
+    const remainingSameBrand = targetBrandKey
+      ? nextOrders.some(o => o.brand.trim().toLowerCase() === targetBrandKey)
+      : false;
+
     ordersRef.current = nextOrders;
     setOrders(nextOrders);
-    saveState('orders', nextOrders);
-    if (isSupabaseConfigured) {
-      markLocalWrite();
-      void saveShared('orders', nextOrders);
+    saveState("orders", nextOrders);
+
+    const nextBrands = brandsRef.current
+      .map(b => {
+        const isSameBrand = targetBrandKey && b.name.trim().toLowerCase() === targetBrandKey;
+        const filteredVideos = b.videos.filter(v => {
+          if (v.orderId === id) return false;
+          if (targetOrder?.boardVideoId && v.id === targetOrder.boardVideoId) return false;
+          if (isSameBrand && (!v.orderId || !remainingSameBrand)) return false;
+          return true;
+        });
+        return { ...b, videos: filteredVideos };
+      })
+      .filter(b => b.videos.length > 0);
+
+    brandsRef.current = nextBrands;
+    setBrands(nextBrands);
+    saveState("brands", nextBrands);
+
+    if (selectedVideoId && !nextBrands.some(b => b.videos.some(v => v.id === selectedVideoId))) {
+      setSelectedVideoId(null);
     }
 
-    setBrands(prev => {
-      const otherOrdersSameBrand = targetOrder
-        ? nextOrders.some(o => o.brand.trim().toLowerCase() === targetOrder.brand.trim().toLowerCase())
-        : false;
-      const nextBrands = prev
-        .map(b => {
-          const isSameBrand = targetOrder && b.name.trim().toLowerCase() === targetOrder.brand.trim().toLowerCase();
-          const filteredVideos = b.videos.filter(v => {
-            if (v.orderId === id) return false;
-            if (!v.orderId && isSameBrand && !otherOrdersSameBrand) return false;
-            return true;
-          });
-          return { ...b, videos: filteredVideos };
-        })
-        .filter(b => b.videos.length > 0);
-
-      brandsRef.current = nextBrands;
-      saveState('brands', nextBrands);
-      if (isSupabaseConfigured) {
-        markLocalWrite();
-        void saveShared('brands', nextBrands);
-      }
-      return nextBrands;
-    });
-  }, [markLocalWrite]);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      void Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", nextBrands),
+      ]);
+    }
+  }, [markLocalWrite, selectedVideoId]);
 
   const deleteBrandProject = useCallback((brandId: string) => {
     const targetBrand = brandsRef.current.find(b => b.id === brandId);
+    const targetNameKey = targetBrand ? targetBrand.name.trim().toLowerCase() : null;
     const linkedOrderIds = new Set<string>();
+
     if (targetBrand) {
       targetBrand.videos.forEach(v => {
         if (v.orderId) linkedOrderIds.add(v.orderId);
       });
-      ordersRef.current.forEach(o => {
-        if (o.brand.trim().toLowerCase() === targetBrand.name.trim().toLowerCase()) {
-          linkedOrderIds.add(o.id);
-        }
-      });
     }
 
-    if (linkedOrderIds.size > 0) {
-      const nextOrders = ordersRef.current.filter(o => !linkedOrderIds.has(o.id));
-      ordersRef.current = nextOrders;
-      setOrders(nextOrders);
-      saveState("orders", nextOrders);
-      if (isSupabaseConfigured) {
-        markLocalWrite();
-        void saveShared("orders", nextOrders);
-      }
-    }
+    const nextOrders = ordersRef.current.filter(o => {
+      if (linkedOrderIds.has(o.id)) return false;
+      if (targetNameKey && o.brand.trim().toLowerCase() === targetNameKey) return false;
+      if (targetBrand && o.boardVideoId && targetBrand.videos.some(v => v.id === o.boardVideoId)) return false;
+      return true;
+    });
 
-    const nextBrands = brandsRef.current.filter(b => b.id !== brandId);
+    ordersRef.current = nextOrders;
+    setOrders(nextOrders);
+    saveState("orders", nextOrders);
+
+    const nextBrands = brandsRef.current.filter(b => {
+      if (b.id === brandId) return false;
+      if (targetNameKey && b.name.trim().toLowerCase() === targetNameKey) return false;
+      return true;
+    });
+
     brandsRef.current = nextBrands;
     setBrands(nextBrands);
     saveState("brands", nextBrands);
+
+    if (selectedVideoId && !nextBrands.some(b => b.videos.some(v => v.id === selectedVideoId))) {
+      setSelectedVideoId(null);
+    }
+
     if (isSupabaseConfigured) {
       markLocalWrite();
-      void saveShared("brands", nextBrands);
+      void Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", nextBrands),
+      ]);
     }
-  }, [markLocalWrite]);
+  }, [markLocalWrite, selectedVideoId]);
 
   const liquidateOrders = useCallback((orderIds: string[]) => {
-    setOrders(prev => {
-      const next = prev.filter(o => !orderIds.includes(o.id));
-      saveState('orders', next);
-      if (isSupabaseConfigured) {
-        markLocalWrite();
-        void saveShared('orders', next);
-      }
-      return next;
-    });
+    const idSet = new Set(orderIds);
+    const removedBrands = new Set(
+      ordersRef.current
+        .filter(o => idSet.has(o.id))
+        .map(o => o.brand.trim().toLowerCase())
+    );
 
-    setBrands(prev => {
-      const next = prev.map(b => ({
-        ...b,
-        videos: b.videos.filter(v => !orderIds.includes(v.orderId || ''))
-      })).filter(b => b.videos.length > 0);
-      saveState('brands', next);
-      if (isSupabaseConfigured) {
-        markLocalWrite();
-        void saveShared('brands', next);
-      }
-      return next;
-    });
+    const nextOrders = ordersRef.current.filter(o => !idSet.has(o.id));
+    ordersRef.current = nextOrders;
+    setOrders(nextOrders);
+    saveState("orders", nextOrders);
+
+    const nextBrands = brandsRef.current
+      .map(b => {
+        const bKey = b.name.trim().toLowerCase();
+        const stillHasOrders = nextOrders.some(o => o.brand.trim().toLowerCase() === bKey);
+        return {
+          ...b,
+          videos: b.videos.filter(v => {
+            if (v.orderId && idSet.has(v.orderId)) return false;
+            if (!v.orderId && removedBrands.has(bKey) && !stillHasOrders) return false;
+            return true;
+          }),
+        };
+      })
+      .filter(b => b.videos.length > 0);
+
+    brandsRef.current = nextBrands;
+    setBrands(nextBrands);
+    saveState("brands", nextBrands);
+
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      void Promise.all([
+        saveShared("orders", nextOrders),
+        saveShared("brands", nextBrands),
+      ]);
+    }
   }, [markLocalWrite]);
 
   const assignProject = useCallback((brand: string, deliveryDate: string, deliveryTime: string, workerIds: string[], briefFileName?: string, briefFileUrl?: string) => {
@@ -1436,11 +1469,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getWorkerWorkload = useCallback((workerId: string): number => {
-    const activeVideos = brandsRef.current
-      .flatMap(b => b.videos)
-      .filter(v => (v.clipperId === workerId || v.editorId === workerId) && v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
-    return activeVideos.length;
-  }, []);
+    const w = workersRef.current.find(x => x.id === workerId);
+    const activeVideos = brands.flatMap(b => b.videos).filter(v => {
+      const isMine = w ? (w.role === "clipper" ? v.clipperId === workerId : v.editorId === workerId) : (v.clipperId === workerId || v.editorId === workerId);
+      return isMine && v.qc !== "aprobado_cliente";
+    });
+    const coveredOrderIds = new Set(activeVideos.map(v => v.orderId).filter(Boolean));
+    const coveredBrands = new Set(
+      brands
+        .filter(b => b.videos.some(v => (w ? (w.role === "clipper" ? v.clipperId === workerId : v.editorId === workerId) : (v.clipperId === workerId || v.editorId === workerId))))
+        .map(b => b.name.trim().toLowerCase())
+    );
+    const unpromotedOrdersLoad = orders
+      .filter(o => {
+        if (o.status === "finalizado" || o.status === "aprobado_cliente") return false;
+        const isMine = w ? (w.role === "clipper" ? o.clipperId === workerId : o.editorId === workerId) : (o.clipperId === workerId || o.editorId === workerId);
+        if (!isMine) return false;
+        if (coveredOrderIds.has(o.id) || coveredBrands.has(o.brand.trim().toLowerCase())) return false;
+        return true;
+      })
+      .reduce((sum, o) => sum + Math.max(1, o.videoCount || 1), 0);
+
+    return activeVideos.length + unpromotedOrdersLoad;
+  }, [brands, orders]);
 
   const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
     const clipper = clipperId ? workersRef.current.find(w => w.id === clipperId) : null;

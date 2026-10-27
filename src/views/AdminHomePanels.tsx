@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../store';
 import type { Order, OrderStatus, Video, Worker } from '../types';
 import {
-  DollarSign, Users, X, ClipboardCheck, Clock3, ChevronRight, Film, Scissors, Eye
+  DollarSign, Users, X, ClipboardCheck, Clock3, ChevronRight, Film, Scissors, Eye, Trash2
 } from 'lucide-react';
 
 export type WorkerLoad = 'lleno' | 'meta' | 'sin_trabajo';
@@ -29,9 +29,9 @@ export function workerLoadBorder(load: WorkerLoad) {
 }
 
 const WORKER_LOAD_LABEL: Record<WorkerLoad, string> = {
-  lleno: 'Lleno de trabajo (capacidad al límite)',
-  meta: 'Con la meta diaria activa (en rango operativo)',
-  sin_trabajo: 'Sin trabajo asignado hoy',
+  lleno: 'Lleno de trabajo (capacidad diaria al límite)',
+  meta: 'Con tareas activas asignadas (en rango operativo)',
+  sin_trabajo: 'Sin tareas asignadas actualmente',
 };
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
@@ -85,11 +85,14 @@ export function AdminHomePanels({
     getWorkerGoals,
     setView,
     setSelectedVideo,
+    deleteOrder,
+    deleteBrandProject,
   } = useStore();
 
   const [openFolder, setOpenFolder] = useState<'finanzas' | 'equipo' | 'pedidos' | 'qc_editores' | 'qc_clippers' | null>(null);
   const [equipoFilter, setEquipoFilter] = useState<WorkerLoad>('lleno');
   const [highlightedWorkerId, setHighlightedWorkerId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
 
@@ -99,64 +102,54 @@ export function AdminHomePanels({
     return map;
   }, [brands]);
 
-  const linkedOrderByVideoId = useMemo(() => {
-    const map = new Map<string, Order>();
-    for (const o of orders) {
-      if (o.boardVideoId) map.set(o.boardVideoId, o);
-    }
-    return map;
-  }, [orders]);
-
-  const linkedOrderByBrand = useMemo(() => {
-    const map = new Map<string, Order>();
-    for (const o of orders) {
-      map.set(o.brand.trim().toLowerCase(), o);
-    }
-    return map;
-  }, [orders]);
-
   const todayStr = todayIso();
 
+  // Finanzas conectadas tanto a los pedidos activos (Pago 100%) como a los videos entregados
   const todayFinanceData = useMemo(() => {
     const unitPrice = financeSettings.clientPricePerVideo;
     const defClipper = financeSettings.defaultClipperCost;
     const defEditor = financeSettings.defaultEditorCost;
 
-    const entregadosHoy = allVideos.filter(
-      v => v.qc === 'aprobado_cliente' && (v.date === todayStr || !v.date)
-    );
-
-    const rowsHoy = entregadosHoy.map(v => {
-      const bName = brandNameForVideo[v.id] || v.name;
-      const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(bName.trim().toLowerCase());
-      const count = linked ? Math.max(1, linked.videoCount || 1) : 1;
-      const pricePerVid = linked?.unitPriceClient ?? unitPrice;
+    // 1. Proyectos activos / facturados en orders
+    const activeOrdersRows = orders.map(o => {
+      const count = Math.max(1, o.videoCount || 1);
+      const pricePerVid = o.unitPriceClient ?? unitPrice;
+      const uClipper = o.unitClipperPay ?? defClipper;
+      const uEditor = o.unitEditorPay ?? defEditor;
       const gross = count * pricePerVid;
-
-      const unitClipperPay = linked?.unitClipperPay ?? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper);
-      const unitEditorPay = linked?.unitEditorPay ?? (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
-      const creatorCost = count * (unitClipperPay + unitEditorPay);
+      const creatorCost = count * (uClipper + uEditor);
       const netMargin = gross - creatorCost;
-
-      return { video: v, brandName: bName, videoCount: count, gross, creatorCost, netMargin };
+      const clipperW = workers.find(w => w.id === o.clipperId);
+      const editorW = workers.find(w => w.id === o.editorId);
+      return {
+        id: o.id,
+        brandName: o.brand,
+        videoCount: count,
+        gross,
+        creatorCost,
+        netMargin,
+        teamLabel: `${clipperW?.name || "Por asignar"} + ${editorW?.name || "Por asignar"}`,
+        status: o.status,
+      };
     });
 
-    const grossToday = rowsHoy.reduce((sum, r) => sum + r.gross, 0);
-    const payrollToday = rowsHoy.reduce((sum, r) => sum + r.creatorCost, 0);
+    const grossToday = activeOrdersRows.reduce((sum, r) => sum + r.gross, 0);
+    const payrollToday = activeOrdersRows.reduce((sum, r) => sum + r.creatorCost, 0);
     const expensesToday = appExpenses
       .filter(e => e.date === todayStr)
       .reduce((sum, e) => sum + e.amount, 0);
 
     return {
-      rowsHoy,
+      rowsHoy: activeOrdersRows,
       grossToday,
       payrollToday,
       expensesToday,
       netUtilityToday: grossToday - payrollToday - expensesToday,
-      totalVideosHoy: rowsHoy.reduce((sum, r) => sum + r.videoCount, 0),
+      totalVideosHoy: activeOrdersRows.reduce((sum, r) => sum + r.videoCount, 0),
     };
-  }, [allVideos, brandNameForVideo, linkedOrderByVideoId, linkedOrderByBrand, financeSettings, appExpenses, todayStr]);
+  }, [orders, workers, financeSettings, appExpenses, todayStr]);
 
+  // Carga REAL exacta: lo que el Clipper/Editor tiene asignado en su pestaña de Tareas (sin duplicar jamás)
   const workerMetrics = useMemo(() => {
     const map: Record<string, {
       activeVideosLoad: number;
@@ -165,34 +158,44 @@ export function AdminHomePanels({
       dailyGoal: number;
       status: WorkerLoad;
       activeBrandNames: string[];
+      assignedVideosList: { video: Video; brandName: string }[];
     }> = {};
 
     for (const w of workers) {
       const cap = getWorkerCapacity(w.id);
       const goals = getWorkerGoals(w.id, w.role);
 
+      // Videos reales en Tareas del trabajador que aún no han sido finalizados por el cliente
       const myActiveVideos = allVideos.filter(v =>
         (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
-        v.qc !== 'aprobado_cliente' &&
-        v.qc !== 'sin_iniciar'
+        v.qc !== 'aprobado_cliente'
       );
 
       let activeVideosLoad = 0;
       const brandCounts = new Map<string, number>();
+      const coveredOrderIds = new Set<string>();
+      const coveredBrands = new Set<string>();
+      const assignedVideosList: { video: Video; brandName: string }[] = [];
 
       for (const v of myActiveVideos) {
         const bName = brandNameForVideo[v.id] || v.name;
         activeVideosLoad += 1;
         brandCounts.set(bName, (brandCounts.get(bName) || 0) + 1);
+        if (v.orderId) coveredOrderIds.add(v.orderId);
+        coveredBrands.add(bName.trim().toLowerCase());
+        assignedVideosList.push({ video: v, brandName: bName });
       }
 
-      const extraOrders = orders.filter(o =>
-        o.status !== 'finalizado' &&
-        (w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id) &&
-        !myActiveVideos.some(v => v.id === o.boardVideoId || v.name.trim().toLowerCase() === o.brand.trim().toLowerCase())
-      );
+      // Solo sumar órdenes donde ya fue preasignado este rol pero aún no se ha promovido a brands
+      const unpromotedOrders = orders.filter(o => {
+        if (o.status === 'finalizado' || o.status === 'aprobado_cliente') return false;
+        const isMine = w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id;
+        if (!isMine) return false;
+        if (coveredOrderIds.has(o.id) || coveredBrands.has(o.brand.trim().toLowerCase())) return false;
+        return true;
+      });
 
-      for (const o of extraOrders) {
+      for (const o of unpromotedOrders) {
         const count = Math.max(1, o.videoCount || 1);
         activeVideosLoad += count;
         brandCounts.set(o.brand, (brandCounts.get(o.brand) || 0) + count);
@@ -209,11 +212,12 @@ export function AdminHomePanels({
 
       map[w.id] = {
         activeVideosLoad,
-        activeProjectsCount: myActiveVideos.length + extraOrders.length,
+        activeProjectsCount: brandCounts.size,
         capacity: cap,
         dailyGoal: goals.daily,
         status,
         activeBrandNames: Array.from(brandCounts.entries()).map(([bName, count]) => `${bName} (${count} vid)`),
+        assignedVideosList,
       };
     }
 
@@ -262,42 +266,94 @@ export function AdminHomePanels({
     setView('tareas');
   };
 
+  // Unificar Orden de Entrega con tanto los pedidos de orders como cualquier marca en brands
   const enrichedOrders = useMemo(() => {
-    return orders
-      .map(o => {
-        const linkedVideo = allVideos.find(
-          v => v.id === o.boardVideoId || v.name.trim().toLowerCase() === o.brand.trim().toLowerCase()
-        );
-        let realStatus: OrderStatus = o.status;
-        if (linkedVideo) {
-          if (linkedVideo.qc === 'aprobado_cliente') realStatus = 'finalizado';
-          else if (linkedVideo.qc === 'aprobado_senda') realStatus = 'aprobado_senda';
-          else if (o.clipperId && o.editorId) realStatus = 'asignado';
-        }
+    const list = orders.map(o => {
+      const brandObj = brands.find(
+        b => b.videos.some(v => v.orderId === o.id) || b.name.trim().toLowerCase() === o.brand.trim().toLowerCase()
+      );
+      const brandVideos = brandObj ? brandObj.videos.filter(v => !v.orderId || v.orderId === o.id) : [];
+      const linkedVideo = brandVideos[0] || allVideos.find(v => v.id === o.boardVideoId) || null;
 
-        let bucket: EntregaBucket = 'asignado';
-        if (realStatus === 'finalizado' || realStatus === 'aprobado_cliente') {
-          bucket = 'finalizado';
-        } else if (!o.clipperId || !o.editorId) {
-          bucket = 'asignar';
-        } else {
-          const dt = new Date(`${o.deliveryDate}T${o.deliveryTime || '18:00'}`).getTime();
-          const hoursLeft = (dt - Date.now()) / (1000 * 60 * 60);
-          if (!Number.isNaN(dt) && hoursLeft <= 8) bucket = 'urgente';
-          else bucket = 'asignado';
-        }
+      let realStatus: OrderStatus = o.status;
+      if (brandVideos.length > 0) {
+        if (brandVideos.every(v => v.qc === 'aprobado_cliente')) realStatus = 'finalizado';
+        else if (brandVideos.some(v => v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente')) realStatus = 'aprobado_senda';
+        else if (o.clipperId && o.editorId) realStatus = 'asignado';
+      }
 
-        return { order: { ...o, status: realStatus }, linkedVideo: linkedVideo || null, bucket };
-      })
-      .sort((a, b) => {
-        const aDone = a.bucket === 'finalizado' ? 1 : 0;
-        const bDone = b.bucket === 'finalizado' ? 1 : 0;
-        if (aDone !== bDone) return aDone - bDone;
-        const tA = new Date(`${a.order.deliveryDate}T${a.order.deliveryTime || '23:59'}`).getTime();
-        const tB = new Date(`${b.order.deliveryDate}T${b.order.deliveryTime || '23:59'}`).getTime();
-        return tA - tB;
-      });
-  }, [orders, allVideos]);
+      let bucket: EntregaBucket = 'asignado';
+      if (realStatus === 'finalizado' || realStatus === 'aprobado_cliente') {
+        bucket = 'finalizado';
+      } else if (!o.clipperId || !o.editorId) {
+        bucket = 'asignar';
+      } else {
+        const dt = new Date(`${o.deliveryDate}T${o.deliveryTime || '18:00'}`).getTime();
+        const hoursLeft = (dt - Date.now()) / (1000 * 60 * 60);
+        if (!Number.isNaN(dt) && hoursLeft <= 8) bucket = 'urgente';
+        else bucket = 'asignado';
+      }
+
+      return {
+        id: o.id,
+        isBrandOnly: false,
+        brandId: brandObj?.id || null,
+        order: { ...o, status: realStatus },
+        linkedVideo,
+        bucket,
+      };
+    });
+
+    // Si existiera alguna carpeta en brands sin Order en orders (residuo antiguo), mostrarla también para poder verla o borrarla
+    for (const b of brands) {
+      const alreadyInList = list.some(
+        item => item.brandId === b.id || item.order.brand.trim().toLowerCase() === b.name.trim().toLowerCase()
+      );
+      if (!alreadyInList && b.videos.length > 0) {
+        const firstV = b.videos[0];
+        const allDone = b.videos.every(v => v.qc === 'aprobado_cliente');
+        const synthOrder: Order = {
+          id: b.id,
+          brand: b.name,
+          videoCount: b.videos.length,
+          deliveryDate: firstV.date || todayStr,
+          deliveryTime: '18:00',
+          status: allDone ? 'finalizado' : 'asignado',
+          assignedWorkerIds: [firstV.clipperId, firstV.editorId].filter(Boolean),
+          clipperId: firstV.clipperId || null,
+          editorId: firstV.editorId || null,
+          createdAt: new Date().toISOString(),
+        };
+        list.push({
+          id: b.id,
+          isBrandOnly: true,
+          brandId: b.id,
+          order: synthOrder,
+          linkedVideo: firstV,
+          bucket: allDone ? 'finalizado' : 'asignado',
+        });
+      }
+    }
+
+    return list.sort((a, b) => {
+      const aDone = a.bucket === 'finalizado' ? 1 : 0;
+      const bDone = b.bucket === 'finalizado' ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      const tA = new Date(`${a.order.deliveryDate}T${a.order.deliveryTime || '23:59'}`).getTime();
+      const tB = new Date(`${b.order.deliveryDate}T${b.order.deliveryTime || '23:59'}`).getTime();
+      return tA - tB;
+    });
+  }, [orders, brands, allVideos, todayStr]);
+
+  const handleCompleteDelete = (item: { id: string; isBrandOnly: boolean; brandId: string | null }) => {
+    if (item.isBrandOnly && item.brandId) {
+      deleteBrandProject(item.brandId);
+    } else {
+      deleteOrder(item.id);
+      if (item.brandId) deleteBrandProject(item.brandId);
+    }
+    setConfirmDeleteId(null);
+  };
 
   return (
     <>
@@ -308,7 +364,7 @@ export function AdminHomePanels({
           </div>
           <p className="font-display text-2xl font-bold">{fmtMoney(todayFinanceData.netUtilityToday)}</p>
           <p className="text-xs text-muted-2 mt-1">
-            Utilidad de hoy ({todayStr}) · {todayFinanceData.rowsHoy.length} proyecto(s) ({todayFinanceData.totalVideosHoy} videos)
+            Utilidad activa ({todayStr}) · {todayFinanceData.rowsHoy.length} proyecto(s) ({todayFinanceData.totalVideosHoy} videos)
           </p>
         </button>
 
@@ -365,11 +421,16 @@ export function AdminHomePanels({
           <p className="text-sm text-muted text-center py-4">Sin pedidos registrados</p>
         ) : (
           <div className="space-y-2">
-            {enrichedOrders.slice(0, 3).map(({ order: o, linkedVideo, bucket }, i) => {
+            {enrichedOrders.slice(0, 5).map((item, i) => {
+              const { order: o, linkedVideo, bucket } = item;
               const clipperW = workers.find(w => w.id === o.clipperId);
               const editorW = workers.find(w => w.id === o.editorId);
               return (
-                <button key={o.id} onClick={() => { if (linkedVideo) goToVideo(linkedVideo); else setOpenFolder('pedidos'); }} className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-line/30 border border-line rounded-lg text-left transition-colors">
+                <div
+                  key={item.id}
+                  onClick={() => { if (linkedVideo) goToVideo(linkedVideo); else setView('tareas'); }}
+                  className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-line/30 border border-line rounded-lg text-left transition-colors cursor-pointer"
+                >
                   <span className="w-6 h-6 rounded-full bg-surface-2 border border-line flex items-center justify-center text-xs font-semibold shrink-0">
                     {i + 1}
                   </span>
@@ -382,7 +443,37 @@ export function AdminHomePanels({
                   <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${ENTREGA_BUCKET_CLASSES[bucket]}`}>
                     {ENTREGA_BUCKET_LABEL[bucket]}
                   </span>
-                </button>
+                  <div onClick={e => e.stopPropagation()} className="shrink-0">
+                    {confirmDeleteId === item.id ? (
+                      <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/40 rounded-lg px-2 py-1">
+                        <span className="text-[10px] text-red-300 font-semibold">¿Borrar?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteDelete(item)}
+                          className="px-2 py-0.5 rounded bg-red-500 text-white text-[10px] font-bold hover:bg-red-600"
+                        >
+                          Sí
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="px-1.5 py-0.5 rounded bg-surface-2 text-muted text-[10px] hover:text-text"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(item.id)}
+                        title="Borrar proyecto por completo de la base de datos"
+                        className="p-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -390,36 +481,36 @@ export function AdminHomePanels({
       </div>
 
       {openFolder === 'finanzas' && (
-        <FolderModal title={`Utilidad del Día de Hoy (${todayStr})`} onClose={() => setOpenFolder(null)}>
+        <FolderModal title={`Utilidad y Proyectos Activos (${todayStr})`} onClose={() => setOpenFolder(null)}>
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="bg-surface-3 border border-line rounded-lg p-3.5">
-              <p className="text-xs text-muted-2">Facturación Bruta Hoy</p>
+              <p className="text-xs text-muted-2">Facturación Bruta</p>
               <p className="font-display text-xl font-bold text-text">{fmtMoney(todayFinanceData.grossToday)}</p>
             </div>
             <div className="bg-surface-3 border border-line rounded-lg p-3.5">
-              <p className="text-xs text-muted-2">Nómina + Apps Hoy</p>
+              <p className="text-xs text-muted-2">Nómina + Apps</p>
               <p className="font-display text-xl font-bold text-amber">-{fmtMoney(todayFinanceData.payrollToday + todayFinanceData.expensesToday)}</p>
             </div>
             <div className="bg-surface-3 border border-mint/40 rounded-lg p-3.5">
-              <p className="text-xs text-mint">Utilidad Neta Hoy</p>
+              <p className="text-xs text-mint">Utilidad Neta SENDA</p>
               <p className="font-display text-xl font-bold text-mint">{fmtMoney(todayFinanceData.netUtilityToday)}</p>
             </div>
           </div>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-muted-2">Proyectos aprobados por el cliente hoy</p>
+            <p className="text-xs text-muted-2">Proyectos contabilizados en el sistema</p>
             <button onClick={() => { setOpenFolder(null); setView('finanzas'); }} className="text-xs text-accent hover:text-accent-strong font-medium flex items-center gap-1">
               Ir a Finanzas completas <ChevronRight size={13} />
             </button>
           </div>
           {todayFinanceData.rowsHoy.length === 0 ? (
-            <p className="text-sm text-muted text-center py-6">Aún no hay proyectos aprobados por el cliente en el día de hoy</p>
+            <p className="text-sm text-muted text-center py-6">No hay proyectos registrados actualmente</p>
           ) : (
             <div className="space-y-2">
               {todayFinanceData.rowsHoy.map(r => (
-                <div key={r.video.id} className="flex items-center gap-3 p-3 bg-surface-3 border border-line rounded-lg">
+                <div key={r.id} className="flex items-center gap-3 p-3 bg-surface-3 border border-line rounded-lg">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{r.video.name} · {r.videoCount} videos</p>
-                    <p className="text-xs text-muted">{r.video.clipperName} + {r.video.editorName} · Bruto: {fmtMoney(r.gross)} · Nómina: -{fmtMoney(r.creatorCost)}</p>
+                    <p className="text-sm font-medium truncate">{r.brandName} · {r.videoCount} videos</p>
+                    <p className="text-xs text-muted">{r.teamLabel} · Bruto: {fmtMoney(r.gross)} · Nómina: -{fmtMoney(r.creatorCost)}</p>
                   </div>
                   <span className="text-sm font-semibold text-mint shrink-0">+{fmtMoney(r.netMargin)}</span>
                 </div>
@@ -430,7 +521,7 @@ export function AdminHomePanels({
       )}
 
       {openFolder === 'equipo' && (
-        <FolderModal title="Estado Real de Clippers y Editores" onClose={() => setOpenFolder(null)}>
+        <FolderModal title="Estado Real de Clippers y Editores (Conectado a Tareas)" onClose={() => setOpenFolder(null)}>
           <div className="flex gap-2 mb-4">
             {(['lleno', 'meta', 'sin_trabajo'] as WorkerLoad[]).map(f => (
               <button
@@ -449,36 +540,59 @@ export function AdminHomePanels({
           {workersByLoad[equipoFilter].length === 0 ? (
             <p className="text-sm text-muted text-center py-6">Nadie se encuentra en este estado en este momento</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {workersByLoad[equipoFilter].map(w => {
                 const info = workerMetrics[w.id];
                 const isHighlighted = highlightedWorkerId === w.id;
                 return (
                   <div
                     key={w.id}
-                    className={`flex items-center justify-between gap-3 p-3 bg-surface-3 border rounded-lg transition-colors ${
+                    className={`p-3.5 bg-surface-3 border rounded-xl transition-colors space-y-2.5 ${
                       isHighlighted ? 'border-accent ring-1 ring-accent/40' : 'border-line'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${workerLoadColor(equipoFilter)}`} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {w.name} <span className="text-xs text-muted-2">({w.role === 'clipper' ? 'Clipper' : 'Editor(a)'})</span>
-                        </p>
-                        <p className="text-xs text-muted-2 truncate">
-                          {info.activeBrandNames.length > 0
-                            ? `Trabajando en: ${info.activeBrandNames.join(' · ')}`
-                            : 'Sin proyectos activos asignados'}
-                        </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${workerLoadColor(equipoFilter)}`} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {w.name} <span className="text-xs text-muted-2">({w.role === 'clipper' ? 'Clipper' : 'Editor(a)'})</span>
+                          </p>
+                          <p className="text-xs text-muted-2 truncate">
+                            {info.activeBrandNames.length > 0
+                              ? `Proyectos en Tareas: ${info.activeBrandNames.join(' · ')}`
+                              : 'Sin proyectos asignados en su bandeja de Tareas'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className={`text-xs font-tech font-bold px-2.5 py-1 rounded-full border ${
+                          info.status === 'lleno'
+                            ? 'bg-amber-dim text-amber border-amber/40'
+                            : info.status === 'meta'
+                            ? 'bg-mint-dim text-mint border-mint/40'
+                            : 'bg-surface-2 text-muted border-line'
+                        }`}>
+                          {info.activeVideosLoad}/{info.capacity} videos
+                        </span>
+                        <p className="text-[10px] text-muted-2 mt-1">Puntos hoy: {w.pointsToday}/{info.dailyGoal}</p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-xs font-tech font-semibold px-2.5 py-1 rounded-full bg-surface-2 border border-line">
-                        {info.activeVideosLoad}/{info.capacity} videos
-                      </span>
-                      <p className="text-[10px] text-muted-2 mt-1">Puntos hoy: {w.pointsToday}/{info.dailyGoal}</p>
-                    </div>
+
+                    {info.assignedVideosList.length > 0 && (
+                      <div className="pt-2 border-t border-line/60 flex flex-wrap gap-1.5">
+                        {info.assignedVideosList.slice(0, 12).map(({ video: vid, brandName }) => (
+                          <button
+                            key={vid.id}
+                            type="button"
+                            onClick={() => { setOpenFolder(null); goToVideo(vid); }}
+                            className="text-[11px] font-tech px-2 py-1 rounded-lg bg-surface-2 hover:bg-accent-dim border border-line hover:border-accent/40 text-text hover:text-accent transition-colors"
+                          >
+                            {brandName} · {vid.name} ({vid.qc.replace(/_/g, ' ')})
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -494,7 +608,7 @@ export function AdminHomePanels({
             {pendingFinalVideos.map(v => (
               <button key={v.id} onClick={() => { setOpenFolder(null); goToVideo(v); }} className="w-full flex items-center justify-between gap-3 p-3 bg-surface-3 hover:bg-line/40 border border-line rounded-lg text-left transition-colors">
                 <div>
-                  <p className="text-sm font-medium">{v.name}</p>
+                  <p className="text-sm font-medium">{brandNameForVideo[v.id] ? `${brandNameForVideo[v.id]} · ${v.name}` : v.name}</p>
                   <p className="text-xs text-muted-2">Editor(a): {v.editorName} · {v.finalVideos.length} corte(s) final(es) · Estado: {v.qc.replace(/_/g, ' ')}</p>
                 </div>
                 <span className="text-xs text-accent font-medium flex items-center gap-1">Revisar <Eye size={13} /></span>
@@ -511,7 +625,7 @@ export function AdminHomePanels({
             {pendingClipVideos.map(v => (
               <button key={v.id} onClick={() => { setOpenFolder(null); goToVideo(v); }} className="w-full flex items-center justify-between gap-3 p-3 bg-surface-3 hover:bg-line/40 border border-line rounded-lg text-left transition-colors">
                 <div>
-                  <p className="text-sm font-medium">{v.name}</p>
+                  <p className="text-sm font-medium">{brandNameForVideo[v.id] ? `${brandNameForVideo[v.id]} · ${v.name}` : v.name}</p>
                   <p className="text-xs text-muted-2">Clipper: {v.clipperName} · {v.clips.filter(c => !c.status || c.status === 'pending').length} clip(s) por revisar</p>
                 </div>
                 <span className="text-xs text-accent font-medium flex items-center gap-1">Revisar <Eye size={13} /></span>
@@ -527,11 +641,12 @@ export function AdminHomePanels({
             <p className="text-sm text-muted text-center py-6">Sin pedidos registrados todavía</p>
           ) : (
             <div className="space-y-2">
-              {enrichedOrders.map(({ order: o, linkedVideo, bucket }, i) => {
+              {enrichedOrders.map((item, i) => {
+                const { order: o, linkedVideo, bucket } = item;
                 const clipperW = workers.find(w => w.id === o.clipperId);
                 const editorW = workers.find(w => w.id === o.editorId);
                 return (
-                  <div key={o.id} onClick={() => { if (linkedVideo) { setOpenFolder(null); goToVideo(linkedVideo); } }} className={`flex items-center gap-3 p-3 bg-surface-3 border border-line rounded-lg ${linkedVideo ? 'cursor-pointer hover:border-accent/40' : ''}`}>
+                  <div key={item.id} onClick={() => { if (linkedVideo) { setOpenFolder(null); goToVideo(linkedVideo); } }} className={`flex items-center gap-3 p-3 bg-surface-3 border border-line rounded-lg ${linkedVideo ? 'cursor-pointer hover:border-accent/40' : ''}`}>
                     <span className="w-6 h-6 rounded-full bg-surface-2 border border-line flex items-center justify-center text-xs font-semibold shrink-0">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{o.brand} · {o.videoCount} videos</p>
@@ -539,6 +654,35 @@ export function AdminHomePanels({
                     </div>
                     <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${ORDER_STATUS_CLASSES[o.status]}`}>{ORDER_STATUS_LABEL[o.status]}</span>
                     <span className={`text-[10px] font-medium px-2 py-1 rounded-full shrink-0 ${ENTREGA_BUCKET_CLASSES[bucket]}`}>{ENTREGA_BUCKET_LABEL[bucket]}</span>
+                    <div onClick={e => e.stopPropagation()} className="shrink-0">
+                      {confirmDeleteId === item.id ? (
+                        <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/40 rounded-lg px-2 py-1">
+                          <button
+                            type="button"
+                            onClick={() => handleCompleteDelete(item)}
+                            className="px-2 py-0.5 rounded bg-red-500 text-white text-[10px] font-bold hover:bg-red-600"
+                          >
+                            Confirmar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="px-1.5 py-0.5 rounded bg-surface-2 text-muted text-[10px] hover:text-text"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(item.id)}
+                          title="Borrar proyecto por completo"
+                          className="p-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}

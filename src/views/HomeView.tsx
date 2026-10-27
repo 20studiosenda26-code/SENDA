@@ -7,7 +7,7 @@ import { AdminHomePanels, workerLoadColor, type WorkerLoad } from './AdminHomePa
 import { pendingRoleSuffix } from '../lib/qcLabel';
 
 export function HomeView() {
-  const { role, workers, currentWorkerId, brands, orders, getWorkerCapacity, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
+  const { role, workers, currentWorkerId, brands, getWorkerCapacity, getWorkerWorkload, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
   const [selectedTeamWorkerId, setSelectedTeamWorkerId] = useState<string | null>(null);
 
   const worker = workers.find(w => w.id === currentWorkerId);
@@ -25,32 +25,22 @@ export function HomeView() {
     const map: Record<string, { load: WorkerLoad; activeVideos: number; cap: number; label: string }> = {};
     for (const w of workers) {
       const cap = getWorkerCapacity(w.id);
-      const myActiveVids = allVideos.filter(
-        v => (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
-        v.qc !== 'aprobado_cliente' &&
-        v.qc !== 'sin_iniciar'
-      );
+      const activeVideos = getWorkerWorkload(w.id);
 
-      let activeVideos = 0;
-      for (const v of myActiveVids) {
-        const linked = orders.find(o => o.boardVideoId === v.id || o.brand.trim().toLowerCase() === v.name.trim().toLowerCase());
-        activeVideos += linked ? Math.max(1, linked.videoCount || 1) : 1;
-      }
-
-      let load: WorkerLoad = 'sin_trabajo';
-      let label = 'Sin trabajo';
+      let load: WorkerLoad = "sin_trabajo";
+      let label = `Sin trabajo (0/${cap} vid)`;
       if (activeVideos >= cap) {
-        load = 'lleno';
+        load = "lleno";
         label = `Lleno (${activeVideos}/${cap} vid)`;
       } else if (activeVideos > 0) {
-        load = 'meta';
+        load = "meta";
         label = `Meta diaria (${activeVideos}/${cap} vid)`;
       }
 
       map[w.id] = { load, activeVideos, cap, label };
     }
     return map;
-  }, [workers, allVideos, orders, getWorkerCapacity]);
+  }, [workers, getWorkerCapacity, getWorkerWorkload]);
 
   const greeting = role === 'admin' ? 'Panel de administración' : `Hola, ${worker?.name?.split(' ')[0] || ''}`;
 
