@@ -617,7 +617,18 @@ function VideoDetail({
               </h3>
               {isClipper && (
                 isMainImageApproved ? (
-                  <button onClick={() => setShowClipForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
+                  <button onClick={() => {
+                    setShowClipForm(s => {
+                      const nextOpen = !s;
+                      if (nextOpen) {
+                        const usedNums = new Set(video.clips.map(c => String(c.name).replace(/\D/g, "")).filter(Boolean));
+                        let nextNum = 1;
+                        while (usedNums.has(String(nextNum))) nextNum++;
+                        setClipName(String(nextNum));
+                      }
+                      return nextOpen;
+                    });
+                  }} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
                     <Plus size={14} /> Agregar
                   </button>
                 ) : (
@@ -652,7 +663,48 @@ function VideoDetail({
 
             {showClipForm && isMainImageApproved && (
               <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
-                <input value={clipName} onChange={e => setClipName(e.target.value)} placeholder="Nombre del clip" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-300">Número de clip (solo números)</span>
+                    {clipName && (
+                      <span className="text-xs font-tech font-bold text-[var(--accent)]">
+                        Seleccionado: #{clipName}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => {
+                      const numStr = String(num);
+                      const isSelected = clipName === numStr;
+                      const alreadyUsed = video.clips.some(c => String(c.name).trim() === numStr || String(c.name).trim() === `Clip ${numStr}`);
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setClipName(numStr)}
+                          className={`py-2 rounded-md font-tech text-xs font-bold border transition-all ${
+                            isSelected
+                              ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_12px_rgba(53,214,228,0.4)]"
+                              : alreadyUsed
+                              ? "bg-[var(--surface-2)] text-gray-500 border-[var(--border-line)] opacity-60 hover:opacity-100"
+                              : "bg-[var(--surface-1)] text-white border-[var(--border-line)] hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={clipName}
+                    onChange={e => setClipName(e.target.value.replace(/\D/g, ""))}
+                    placeholder="O escribe el número (ej. 1, 2, 11...)"
+                    className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm font-tech font-bold text-[var(--accent)] outline-none focus:border-[var(--accent)] transition-colors"
+                  />
+                </div>
                 <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                 <label className="flex items-center gap-2 bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
                   {uploadingNewClip ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
