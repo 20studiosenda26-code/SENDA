@@ -539,6 +539,44 @@ function VideoDetail({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {(isAdmin || isEditor) && (
+            <div className="flex items-center gap-2.5 bg-[var(--surface-2)] border border-emerald-500/40 rounded-lg px-3.5 py-2 hover:border-emerald-400 transition-colors">
+              <Folder size={16} className="text-emerald-400 shrink-0" />
+              <div className="text-xs min-w-[115px]">
+                <p className="font-medium text-white">Google Drive (Editor)</p>
+                <p className="text-gray-400 truncate max-w-[150px]">
+                  {getGoogleDriveBridgeUrl()
+                    ? "Puente automático activo"
+                    : getGoogleDriveFolderUrl()
+                    ? "Carpeta vinculada"
+                    : "Sin configurar"}
+                </p>
+              </div>
+              {getGoogleDriveFolderUrl() && (
+                <a
+                  href={getGoogleDriveFolderUrl()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1.5 font-medium transition-all flex items-center gap-1 shrink-0"
+                >
+                  <Folder size={12} /> Abrir Drive
+                </a>
+              )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBridgeUrlDraft(getGoogleDriveBridgeUrl());
+                    setFolderUrlDraft(getGoogleDriveFolderUrl());
+                    setShowDriveConfigModal(true);
+                  }}
+                  className="text-xs bg-[var(--accent)] text-[#0F2E33] rounded-md px-2.5 py-1.5 font-bold hover:opacity-90 transition-all flex items-center gap-1 shrink-0"
+                >
+                  <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Configurar Drive" : "Conectar Drive"}
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3 py-2 hover:border-gray-500 transition-colors">
             <FileText size={16} className="text-[var(--accent)] shrink-0" />
             <div className="text-xs">
@@ -979,51 +1017,59 @@ function VideoDetail({
                 <h3 className="font-display text-base font-semibold text-white flex items-center gap-2">
                   <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
-                {isEditor && (
-                  <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
-                    <Plus size={14} /> Agregar
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBridgeUrlDraft(getGoogleDriveBridgeUrl());
+                        setFolderUrlDraft(getGoogleDriveFolderUrl());
+                        setShowDriveConfigModal(true);
+                      }}
+                      className="text-xs bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1 font-medium flex items-center gap-1 transition-colors"
+                    >
+                      <Folder size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Drive Conectado" : "Conectar Drive"}
+                    </button>
+                  )}
+                  {(isEditor || isAdmin) && (
+                    <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
+                      <Plus size={14} /> Agregar en Drive
+                    </button>
+                  )}
+                </div>
               </div>
-              {showFinalForm && isEditor && (
+              {showFinalForm && (isEditor || isAdmin) && (
                 <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
-                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
+                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final (ej. Video 1 Final)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
                   <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
+
                   <label className="block bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2 truncate">
                         {uploadingFinalVideo ? <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" /> : <Upload size={16} className="shrink-0" />}
                         <span className="truncate">
-                          {finalFileName || (getGoogleDriveBridgeUrl() ? "Subir video final (conectado directo a Google Drive)" : "Subir archivo de video final")}
+                          {finalFileName || (getGoogleDriveBridgeUrl() ? "Subir archivo (se enviará directo a Google Drive)" : "Seleccionar archivo de video final")}
                         </span>
                       </span>
                       {uploadingFinalVideo && (
-                        <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">
-                          {uploadPct}%
-                        </span>
+                        <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">{uploadPct}%</span>
                       )}
                     </div>
                     {uploadingFinalVideo && (
                       <div className="w-full h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full"
-                          style={{ width: `${uploadPct}%` }}
-                        />
+                        <div className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full" style={{ width: `${uploadPct}%` }} />
                       </div>
                     )}
                     <input type="file" accept="video/*" className="hidden" onChange={handleFinalFile} disabled={uploadingFinalVideo} />
                   </label>
 
-                  <div className="bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md p-2.5 space-y-1.5">
+                  <div className="bg-[var(--surface-1)] border border-emerald-500/30 rounded-md p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-gray-300 font-medium">Subida por Google Drive (Exclusivo Editor - Videos Finales):</span>
+                      <span className="text-xs text-emerald-300 font-medium flex items-center gap-1.5">
+                        <Folder size={13} /> Enlace de Google Drive (Video Final):
+                      </span>
                       {getGoogleDriveFolderUrl() && (
-                        <a
-                          href={getGoogleDriveFolderUrl()}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-emerald-400 hover:underline font-medium shrink-0"
-                        >
+                        <a href={getGoogleDriveFolderUrl()} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline font-medium shrink-0">
                           Abrir carpeta Drive →
                         </a>
                       )}
@@ -1039,8 +1085,8 @@ function VideoDetail({
                           setUploadErrorMsg(null);
                         }
                       }}
-                      placeholder="Pega aquí el enlace del video final en Google Drive..."
-                      className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-500 outline-none focus:border-emerald-400"
+                      placeholder="Pega aquí el link de Google Drive del video final..."
+                      className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded px-3 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-emerald-400"
                     />
                   </div>
 
@@ -1053,16 +1099,16 @@ function VideoDetail({
                   <button
                     onClick={() => {
                       const fUrl = finalDriveLinkInput.trim() || finalFileUrl;
-                      const fName = finalFileName || (finalDriveLinkInput.trim() ? `${finalName} (Drive)` : "");
-                      if (finalName && fUrl) {
-                        onAddFinalVideo(video.id, finalName, finalNote, fName || undefined, fUrl);
+                      const fName = finalFileName || (finalDriveLinkInput.trim() ? `${finalName || video.name} (Drive)` : "");
+                      if ((finalName || video.name) && fUrl) {
+                        onAddFinalVideo(video.id, finalName || video.name, finalNote, fName || undefined, fUrl);
                         setFinalName(""); setFinalNote(""); setFinalFileName(""); setFinalFileUrl(""); setFinalDriveLinkInput(""); setUploadErrorMsg(null); setShowFinalForm(false);
                       }
                     }}
-                    disabled={uploadingFinalVideo || !finalName || (!finalFileUrl && !finalDriveLinkInput.trim())}
-                    className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
+                    disabled={uploadingFinalVideo || (!finalFileUrl && !finalDriveLinkInput.trim())}
+                    className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2.5 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                   >
-                    {uploadingFinalVideo ? `Subiendo a Drive (${uploadPct}%)...` : "Guardar video final"}
+                    {uploadingFinalVideo ? `Subiendo a Google Drive (${uploadPct}%)...` : "Guardar video final"}
                   </button>
                 </div>
               )}
