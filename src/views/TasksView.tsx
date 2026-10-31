@@ -13,7 +13,7 @@ import {
 } from "../lib/supabaseClient";
 import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
-  Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload,
+  Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload, Folder,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
   ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
   Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
@@ -541,7 +541,7 @@ function VideoDetail({
         <div className="flex items-center gap-2 flex-wrap">
           {(isAdmin || isEditor) && (
             <div className="flex items-center gap-2.5 bg-[var(--surface-2)] border border-emerald-500/40 rounded-lg px-3.5 py-2 hover:border-emerald-400 transition-colors">
-              <Folder size={16} className="text-emerald-400 shrink-0" />
+              <VideoIcon size={16} className="text-emerald-400 shrink-0" />
               <div className="text-xs min-w-[115px]">
                 <p className="font-medium text-white">Google Drive (Editor)</p>
                 <p className="text-gray-400 truncate max-w-[150px]">
@@ -559,7 +559,7 @@ function VideoDetail({
                   rel="noreferrer"
                   className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1.5 font-medium transition-all flex items-center gap-1 shrink-0"
                 >
-                  <Folder size={12} /> Abrir Drive
+                  <Upload size={12} /> Abrir Drive
                 </a>
               )}
               {isAdmin && (
@@ -1028,7 +1028,7 @@ function VideoDetail({
                       }}
                       className="text-xs bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1 font-medium flex items-center gap-1 transition-colors"
                     >
-                      <Folder size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Drive Conectado" : "Conectar Drive"}
+                      <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Drive Conectado" : "Conectar Drive"}
                     </button>
                   )}
                   {(isEditor || isAdmin) && (
@@ -1066,7 +1066,7 @@ function VideoDetail({
                   <div className="bg-[var(--surface-1)] border border-emerald-500/30 rounded-md p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs text-emerald-300 font-medium flex items-center gap-1.5">
-                        <Folder size={13} /> Enlace de Google Drive (Video Final):
+                        <Upload size={13} /> Enlace de Google Drive (Video Final):
                       </span>
                       {getGoogleDriveFolderUrl() && (
                         <a href={getGoogleDriveFolderUrl()} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline font-medium shrink-0">
