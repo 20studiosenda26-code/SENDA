@@ -63,6 +63,7 @@ Deno.serve(async (req: Request) => {
       email,
       password,
       email_confirm: true,
+      user_metadata: { name, role },
     });
 
     if (createError || !created.user) {
@@ -74,13 +75,12 @@ Deno.serve(async (req: Request) => {
 
     const cargo = role === 'cliente' ? 'Cliente' : role === 'admin' ? 'Admin' : 'Clipper · Asistente de edición';
 
-    const { error: profileError } = await adminClient.from('profiles').insert({
-      id: created.user.id,
-      name,
-      role,
-      cargo,
-      contact_email: email,
-    });
+    // El trigger on_auth_user_created ya crea el perfil al crear el usuario:
+    // aquí lo completamos (upsert) en vez de insertarlo de nuevo.
+    const { error: profileError } = await adminClient.from('profiles').upsert(
+      { id: created.user.id, name, role, cargo, contact_email: email },
+      { onConflict: 'id' },
+    );
 
     if (profileError) {
       await adminClient.auth.admin.deleteUser(created.user.id);
