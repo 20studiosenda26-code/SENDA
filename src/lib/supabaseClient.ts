@@ -350,22 +350,91 @@ export async function resolveMediaUrl(rawUrl?: string | null): Promise<string | 
   return rawUrl;
 }
 
-export async function downloadMediaFile(rawUrl?: string | null, fileName?: string | null): Promise<void> {
-  if (!rawUrl) return;
-  const gdriveDownload = getGoogleDriveDownloadUrl(rawUrl);
-  if (gdriveDownload) {
-    window.open(gdriveDownload, "_blank", "noopener,noreferrer");
-    return;
-  }
-  const resolved = await resolveMediaUrl(rawUrl);
-  if (!resolved) return;
-
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const objUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = resolved;
-  a.download = fileName || "archivo-senda";
+  a.href = objUrl;
+  a.download = fileName;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objUrl), 60_000);
+}
+
+// Descarga en un iframe oculto: el servidor responde como adjunto y la app nunca se abandona
+function triggerHiddenFrameDownload(url: string) {
+  const frame = document.createElement("iframe");
+  frame.style.display = "none";
+  frame.src = url;
+  document.body.appendChild(frame);
+  setTimeout(() => frame.remove(), 120_000);
+}
+
+function withSupabaseDownloadParam(url: string, fileName: string): string | null {
+  if (!url.includes("/storage/v1/object/public/")) return null;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}download=${encodeURIComponent(fileName)}`;
+}
+
+/**
+ * Descarga directa sin abrir pestañas nuevas.
+ * - Archivos de Supabase / data URLs: se bajan como blob (con progreso real) y se guardan con su nombre.
+ * - Google Drive: descarga directa por iframe oculto (sin pantalla de confirmación).
+ */
+export async function downloadMediaFile(
+  rawUrl?: string | null,
+  fileName?: string | null,
+  onProgress?: (percent: number) => void
+): Promise<void> {
+  if (!rawUrl) return;
+  const name = (fileName || "archivo-senda").replace(/[\\/:*?"<>|]/g, "_");
+
+  const driveId = isGoogleDriveUrl(rawUrl) ? extractGoogleDriveId(rawUrl) : null;
+  if (driveId) {
+    triggerHiddenFrameDownload(`https://drive.usercontent.google.com/download?id=${driveId}&export=download&confirm=t`);
+    onProgress?.(100);
+    return;
+  }
+
+  const resolved = (await resolveMediaUrl(rawUrl)) || rawUrl;
+
+  if (resolved.startsWith("blob:") || resolved.startsWith("data:")) {
+    const blob = await (await fetch(resolved)).blob();
+    triggerBlobDownload(blob, name);
+    onProgress?.(100);
+    return;
+  }
+
+  try {
+    const res = await fetch(resolved, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const total = Number(res.headers.get("content-length")) || 0;
+    let blob: Blob;
+    if (res.body && total > 0 && onProgress) {
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          received += value.length;
+          onProgress(Math.min(99, Math.round((received / total) * 100)));
+        }
+      }
+      blob = new Blob(chunks as BlobPart[], { type: res.headers.get("content-type") || "application/octet-stream" });
+    } else {
+      blob = await res.blob();
+    }
+    triggerBlobDownload(blob, name);
+    onProgress?.(100);
+  } catch {
+    // Si el servidor no permite leer el archivo (CORS), lo pedimos como adjunto sin salir de la app
+    triggerHiddenFrameDownload(withSupabaseDownloadParam(resolved, name) || resolved);
+    onProgress?.(100);
+  }
 }
 
 export async function loadShared<T>(key: string): Promise<T | null> {

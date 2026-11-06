@@ -5,6 +5,7 @@ import { Bell, ChevronDown, X, Trash2, Briefcase, Film, ClipboardCheck, Flame, D
 import { useState, useEffect, useRef } from 'react';
 import sendaLogo from '../assets/senda-logo.png';
 import { playNotificationChime } from '../lib/notificationSound';
+import { TEAM_ROLE_SHORT } from '../lib/roles';
 
 const CATEGORY_ICON: Record<NotificationCategory, typeof Bell> = {
   trabajo_asignado: Briefcase,
@@ -30,8 +31,8 @@ function timeAgo(iso: string) {
 }
 
 const ROLE_LABELS: Record<Role, string> = {
-  clipper: 'Clipper',
-  editor: 'Editora',
+  clipper: TEAM_ROLE_SHORT,
+  editor: TEAM_ROLE_SHORT,
   admin: 'Admin',
 };
 

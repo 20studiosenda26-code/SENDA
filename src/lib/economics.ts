@@ -90,13 +90,10 @@ export function unpromotedOrders(orders: Order[], videos: Video[]): Order[] {
 
 /** Carga real de un creador: videos pendientes de SU etapa + pedidos preasignados sin promover. */
 export function workerWorkload(worker: Pick<Worker, 'id' | 'role'>, videos: Video[], orders: Order[]): number {
-  const mine = videos.filter(v =>
-    worker.role === 'clipper'
-      ? v.clipperId === worker.id && needsClipping(v)
-      : v.editorId === worker.id && needsEditing(v)
-  ).length;
+  // Rol único: la persona hace clips, imagen y video final, así que cuenta todo video no terminado
+  const mine = videos.filter(v => (v.clipperId === worker.id || v.editorId === worker.id) && needsEditing(v)).length;
   const pre = unpromotedOrders(orders, videos)
-    .filter(o => (worker.role === 'clipper' ? o.clipperId === worker.id : o.editorId === worker.id))
+    .filter(o => o.clipperId === worker.id || o.editorId === worker.id)
     .reduce((s, o) => s + Math.max(1, o.videoCount || 1), 0);
   return mine + pre;
 }
@@ -114,12 +111,14 @@ export function workerEarnedItems(
 ): PayrollReportItem[] {
   const items: PayrollReportItem[] = [];
   for (const v of flattenVideos(brands)) {
-    const isMine = worker.role === 'clipper' ? v.clipperId === worker.id : v.editorId === worker.id;
-    if (!isMine) continue;
+    const doesClips = v.clipperId === worker.id;
+    const doesEdit = v.editorId === worker.id;
+    if (!doesClips && !doesEdit) continue;
     if (v.qc !== 'aprobado_cliente' && !v.paid100) continue;
     const order = findOrderForVideo(v, v.brandName, orders);
     const eco = unitEconomics(v, order, settings);
-    const unitPay = worker.role === 'clipper' ? eco.clipperPay : eco.editorPay;
+    // Cobra la parte de clips + la parte de edición que le corresponda en ese video
+    const unitPay = (doesClips ? eco.clipperPay : 0) + (doesEdit ? eco.editorPay : 0);
     items.push({
       videoId: v.id,
       projectName: v.name,

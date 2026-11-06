@@ -7,6 +7,7 @@ import {
   User, FileDown, Link2, StickyNote, CheckCircle2, Trash2,
 } from "lucide-react";
 import { TasksBoard } from "./TasksView";
+import { TEAM_ROLE_LABEL, TEAM_ROLE_SHORT } from "../lib/roles";
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   aprobado_senda: "Aprobado Senda",
@@ -33,7 +34,7 @@ export function AdminTasksRoot() {
   const [folder, setFolder] = useState<Folder | null>(null);
 
   const availableCount = useMemo(
-    () => orders.filter(o => !(Boolean(o.clipperId) && Boolean(o.editorId))).length,
+    () => orders.filter(o => !o.clipperId).length,
     [orders]
   );
 
@@ -62,7 +63,7 @@ export function AdminTasksRoot() {
           title="Proyectos disponibles"
           count={availableCount}
           badgeLabel="por asignar"
-          desc="Brief, avatar y referencias del cliente, y asignación de clíper + editor(a)"
+          desc="Brief, avatar y referencias del cliente, y asignación del responsable"
           onClick={() => setFolder("disponibles")}
         />
         <FolderCard
@@ -184,36 +185,24 @@ function WorkerPicker({
 }
 
 function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: number; isOpen: boolean; onToggle: () => void }) {
-  const { workers, getWorkerWorkload, getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor, deleteOrder } = useStore();
+  const { workers, getWorkerWorkload, getWorkerCapacity, setWorkerCapacity, assignOrderClipper, deleteOrder } = useStore();
   const [clipperSel, setClipperSel] = useState<string | null>(order.clipperId || null);
-  const [editorSel, setEditorSel] = useState<string | null>(order.editorId || null);
   const [assigningClipper, setAssigningClipper] = useState(false);
-  const [assigningEditor, setAssigningEditor] = useState(false);
   const [justAssignedClipper, setJustAssignedClipper] = useState(false);
-  const [justAssignedEditor, setJustAssignedEditor] = useState(false);
   const [reassigningClipper, setReassigningClipper] = useState(false);
-  const [reassigningEditor, setReassigningEditor] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     setClipperSel(order.clipperId || null);
   }, [order.clipperId]);
 
-  useEffect(() => {
-    setEditorSel(order.editorId || null);
-  }, [order.editorId]);
-
+  // Un solo rol de equipo: todos los creadores pueden recibir el proyecto completo
   const clippers = useMemo(
-    () => workers.filter(w => w.role === "clipper").sort((a, b) => getWorkerWorkload(a.id) - getWorkerWorkload(b.id)),
-    [workers, getWorkerWorkload],
-  );
-  const editors = useMemo(
-    () => workers.filter(w => w.role === "editor").sort((a, b) => getWorkerWorkload(a.id) - getWorkerWorkload(b.id)),
+    () => [...workers].sort((a, b) => getWorkerWorkload(a.id) - getWorkerWorkload(b.id)),
     [workers, getWorkerWorkload],
   );
 
   const clipperName = workers.find(w => w.id === order.clipperId)?.name;
-  const editorName = workers.find(w => w.id === order.editorId)?.name;
 
   const handleAssignClipper = async () => {
     if (!clipperSel) return;
@@ -228,19 +217,6 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
     }
   };
 
-  const handleAssignEditor = async () => {
-    if (!editorSel) return;
-    setAssigningEditor(true);
-    try {
-      await assignOrderEditor(order.id, editorSel);
-      setJustAssignedEditor(true);
-      setReassigningEditor(false);
-      setTimeout(() => setJustAssignedEditor(false), 5000);
-    } finally {
-      setAssigningEditor(false);
-    }
-  };
-
   return (
     <div className="bg-surface-2 border border-line rounded-xl overflow-hidden">
       <button onClick={onToggle} className="w-full flex items-center gap-3 p-3.5 text-left hover:bg-surface-3/60 transition-colors">
@@ -250,8 +226,7 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
           <p className="text-sm font-medium truncate">{order.brand} · {order.videoCount} videos</p>
           <p className="text-xs text-muted-2 truncate">
             Entrega: {order.deliveryDate ? `${order.deliveryDate} · ${order.deliveryTime || "sin hora"}` : "sin fecha"} · {ORDER_STATUS_LABEL[order.status]}
-            {order.clipperId && <> · Clipper: <strong className="text-mint">{clipperName}</strong></>}
-            {order.editorId && <> · Editor(a): <strong className="text-mint">{editorName}</strong></>}
+            {order.clipperId && <> · {TEAM_ROLE_SHORT}: <strong className="text-mint">{clipperName}</strong></>}
           </p>
         </div>
         <div onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 shrink-0">
@@ -328,15 +303,15 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                   <div className="flex items-center justify-between gap-3 flex-wrap bg-surface-3 border border-mint/30 rounded-lg px-3 py-2.5">
                     <p className="text-sm flex items-center gap-1.5">
                       <CheckCircle2 size={15} className="text-mint shrink-0" />
-                      Clipper asignado: <span className="font-semibold text-mint">{clipperName}</span>
+                      Asignado a: <span className="font-semibold text-mint">{clipperName}</span>
                     </p>
-                    <button onClick={() => setReassigningClipper(true)} className="text-xs text-accent hover:text-accent-strong font-medium shrink-0">Cambiar Clipper</button>
+                    <button onClick={() => setReassigningClipper(true)} className="text-xs text-accent hover:text-accent-strong font-medium shrink-0">Cambiar responsable</button>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     <WorkerPicker
-                      title="Elige un Clipper"
-                      subtitle="Ordenados de menor a mayor volumen de trabajo activo"
+                      title={`Elige un ${TEAM_ROLE_LABEL}`}
+                      subtitle="Se encarga de imagen de referencia, clips y video final · ordenados de menor a mayor carga"
                       workers={clippers} selected={clipperSel} onSelect={setClipperSel}
                       getWorkerWorkload={getWorkerWorkload} getWorkerCapacity={getWorkerCapacity} setWorkerCapacity={setWorkerCapacity}
                     />
@@ -345,7 +320,7 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                         onClick={handleAssignClipper}
                         disabled={!clipperSel}
                         loading={assigningClipper}
-                        label="Asignar Clipper"
+                        label="Asignar proyecto"
                         loadingLabel="Asignando..."
                         icon={CheckCircle2}
                         variant="cyan"
@@ -354,51 +329,13 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
                         <button onClick={() => setReassigningClipper(false)} className="text-xs text-muted hover:text-text">Cancelar</button>
                       )}
                       {justAssignedClipper && (
-                        <p className="text-xs text-mint">Clipper asignado y notificado. Asigna ahora al Editor(a) para pasar el proyecto a Iniciados.</p>
+                        <p className="text-xs text-mint">Asignado y notificado. El proyecto pasó a Proyectos iniciados.</p>
                       )}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* --- Botón 2: Asignar Editor(a) --- */}
-              <div className="pt-3 border-t border-line/40">
-                {order.editorId && !reassigningEditor ? (
-                  <div className="flex items-center justify-between gap-3 flex-wrap bg-surface-3 border border-mint/30 rounded-lg px-3 py-2.5">
-                    <p className="text-sm flex items-center gap-1.5">
-                      <CheckCircle2 size={15} className="text-mint shrink-0" />
-                      Editor(a) asignado(a): <span className="font-semibold text-mint">{editorName}</span>
-                    </p>
-                    <button onClick={() => setReassigningEditor(true)} className="text-xs text-accent hover:text-accent-strong font-medium shrink-0">Cambiar Editor(a)</button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <WorkerPicker
-                      title="Elige un Editor(a)"
-                      subtitle="Ordenados de menor a mayor volumen de trabajo activo"
-                      workers={editors} selected={editorSel} onSelect={setEditorSel}
-                      getWorkerWorkload={getWorkerWorkload} getWorkerCapacity={getWorkerCapacity} setWorkerCapacity={setWorkerCapacity}
-                    />
-                    <div className="flex items-center gap-3 pt-1 flex-wrap">
-                      <LiquidMetalButton
-                        onClick={handleAssignEditor}
-                        disabled={!editorSel}
-                        loading={assigningEditor}
-                        label="Asignar Editor(a)"
-                        loadingLabel="Asignando..."
-                        icon={CheckCircle2}
-                        variant="cyan"
-                      />
-                      {reassigningEditor && (
-                        <button onClick={() => setReassigningEditor(false)} className="text-xs text-muted hover:text-text">Cancelar</button>
-                      )}
-                      {justAssignedEditor && (
-                        <p className="text-xs text-mint">Editor(a) asignado(a) y notificado(a). Asigna ahora al Clipper para pasar el proyecto a Iniciados.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -413,7 +350,7 @@ function ProyectosDisponibles({ onBack }: { onBack: () => void }) {
 
   const sorted = useMemo(() => {
     return [...orders]
-      .filter(o => !(Boolean(o.clipperId) && Boolean(o.editorId)))
+      .filter(o => !o.clipperId)
       .sort((a, b) => {
         if (a.status === "finalizado" && b.status !== "finalizado") return 1;
         if (b.status === "finalizado" && a.status !== "finalizado") return -1;
@@ -434,7 +371,7 @@ function ProyectosDisponibles({ onBack }: { onBack: () => void }) {
       <BackBar onBack={onBack} title="Proyectos disponibles" />
       <div className="p-6 max-w-3xl mx-auto space-y-4">
         <p className="text-xs text-muted-2">
-          Ordenados por hora de entrega — el más próximo primero. Usa los botones de "Asignar Clipper" y "Asignar Editor(a)": al asignar cada uno, su tarea queda guardada al instante; cuando ambos están asignados, el proyecto pasa automáticamente a "Proyectos iniciados".
+          Ordenados por hora de entrega — el más próximo primero. Asigna un responsable (Clipper · Asistente de edición): se encarga de la imagen de referencia, los clips y el video final, y el proyecto pasa al instante a "Proyectos iniciados".
         </p>
 
         {sorted.length === 0 ? (

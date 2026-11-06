@@ -127,7 +127,7 @@ export function openWorkerPayrollReportPdf(params: {
         <div class="box">
           <div class="box-title">Datos del Creador</div>
           <div class="row"><span style="color:#64748b;">Nombre:</span> <strong>${worker.name}</strong></div>
-          <div class="row"><span style="color:#64748b;">Rol:</span> <strong>${worker.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</strong></div>
+          <div class="row"><span style="color:#64748b;">Rol:</span> <strong>Clipper · Asistente de edición</strong></div>
           <div class="row"><span style="color:#64748b;">Correo:</span> <span>${worker.email || 'No registrado'}</span></div>
         </div>
         <div class="box">

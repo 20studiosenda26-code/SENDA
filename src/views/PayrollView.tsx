@@ -9,6 +9,7 @@ import {
   Copy, Check, Eye, Calendar, ChevronLeft, ChevronRight,
   Loader2, FileText, Download, Building2, CreditCard, UserCheck, Send,
 } from 'lucide-react';
+import { TEAM_ROLE_PLURAL } from '../lib/roles';
 
 function isImageFile(name?: string | null) {
   if (!name) return false;
@@ -84,8 +85,8 @@ export function PayrollView() {
     });
   }, [workers, brands, orders, financeSettings, payrollPayments, cycle.weekKey]);
 
-  const clippersRows = useMemo(() => workerPayrollRows.filter(r => r.worker.role === 'clipper'), [workerPayrollRows]);
-  const editorsRows = useMemo(() => workerPayrollRows.filter(r => r.worker.role === 'editor'), [workerPayrollRows]);
+  const clippersRows = workerPayrollRows;
+  const editorsRows = useMemo<typeof workerPayrollRows>(() => [], []);
   const currentList = roleTab === 'clipper' ? clippersRows : editorsRows;
 
   useEffect(() => {
@@ -255,7 +256,7 @@ export function PayrollView() {
                   : 'text-muted hover:text-text'
               }`}
             >
-              <Scissors size={13} /> Clippers
+              <Scissors size={13} /> {TEAM_ROLE_PLURAL}
               <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
                 roleTab === 'clipper' ? 'bg-black/20 text-on-accent' : 'bg-surface-2 text-muted'
               }`}>
@@ -263,22 +264,6 @@ export function PayrollView() {
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setRoleTab('editor')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                roleTab === 'editor'
-                  ? 'bg-mint text-on-accent shadow-sm'
-                  : 'text-muted hover:text-text'
-              }`}
-            >
-              <Film size={13} /> Editores
-              <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
-                roleTab === 'editor' ? 'bg-black/20 text-on-accent' : 'bg-surface-2 text-muted'
-              }`}>
-                {fmtMoneyClean(totals.pendingEditors)}
-              </span>
-            </button>
           </div>
 
           <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
@@ -313,7 +298,7 @@ export function PayrollView() {
         <div className="lg:col-span-4 bg-surface-2 border border-line rounded-2xl p-3 space-y-2">
           <div className="px-2 py-1.5 flex items-center justify-between text-xs text-muted border-b border-line/60">
             <span className="font-semibold">
-              {roleTab === 'clipper' ? 'Lista de Clippers' : 'Lista de Editores'} ({currentList.length})
+              Equipo ({currentList.length})
             </span>
             <span className="font-tech text-[11px]">Automático</span>
           </div>

@@ -13,13 +13,22 @@ import {
 } from "../lib/supabaseClient";
 import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
-  Play, AlertCircle, CheckCircle2, Plus, X, Film, MessageSquare, Upload, Folder,
+  Play, AlertCircle, CheckCircle2, Plus, X, Film, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
-  ThumbsUp, ThumbsDown, Check, RotateCcw, Flag, Loader2,
+  ThumbsUp, ThumbsDown, Check, RotateCcw, Loader2,
   Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
+import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
+
+/** Nombre(s) del responsable: uno solo si la misma persona hace clips y edición. */
+function teamNames(v?: Pick<Video, 'clipperName' | 'editorName' | 'clipperId' | 'editorId'> | null): string {
+  if (!v) return 'Sin asignar';
+  if (!v.editorId || v.editorId === v.clipperId) return v.clipperName || 'Sin asignar';
+  if (!v.clipperId) return v.editorName || 'Sin asignar';
+  return `${v.clipperName} + ${v.editorName}`;
+}
 
 function fmtTime(t: number) {
   const m = Math.floor(t / 60);
@@ -82,74 +91,6 @@ function getProcessBadgeLabel(v: Video): string {
   return `Proceso: ${BOARD_QC_LABEL[v.qc]}`;
 }
 
-function VideoTimeline({
-  durationSeconds,
-  corrections,
-  editable,
-  onDragTime,
-  onTimelineClick,
-}: {
-  durationSeconds: number;
-  corrections: Correction[];
-  editable: boolean;
-  onDragTime: (correctionId: string, time: number) => void;
-  onTimelineClick?: (time: number) => void;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-
-  const timeFromClientX = useCallback((clientX: number) => {
-    const el = trackRef.current;
-    if (!el) return 0;
-    const rect = el.getBoundingClientRect();
-    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return Math.round(pct * durationSeconds);
-  }, [durationSeconds]);
-
-  useEffect(() => {
-    if (!draggingId) return;
-    const move = (e: MouseEvent) => onDragTime(draggingId, timeFromClientX(e.clientX));
-    const up = () => setDraggingId(null);
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-    };
-  }, [draggingId, onDragTime, timeFromClientX]);
-
-  return (
-    <div className="pt-1">
-      <div
-        ref={trackRef}
-        onClick={e => {
-          if (!editable || !onTimelineClick) return;
-          onTimelineClick(timeFromClientX(e.clientX));
-        }}
-        className={`relative h-8 flex items-center ${editable ? 'cursor-pointer' : ''}`}
-      >
-        <div className="w-full h-[2px] bg-line rounded-full" />
-        {corrections.map(c => {
-          const pct = Math.min(100, Math.max(0, (c.time / Math.max(durationSeconds, 1)) * 100));
-          return (
-            <div
-              key={c.id}
-              onMouseDown={e => { if (!editable) return; e.stopPropagation(); setDraggingId(c.id); }}
-              title={`${fmtTime(c.time)} · ${c.text}`}
-              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[3px] h-6 bg-red-500 rounded-full ${editable ? 'cursor-ew-resize hover:w-1' : ''}`}
-              style={{ left: `${pct}%` }}
-            />
-          );
-        })}
-      </div>
-      <div className="flex justify-between text-[10px] text-muted-2 mt-1">
-        <span>0:00</span>
-        <span>{fmtTime(durationSeconds)}</span>
-      </div>
-    </div>
-  );
-}
-
 export function TasksView() {
   const {
     brands, orders, role, currentWorkerId, setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
@@ -164,7 +105,7 @@ export function TasksView() {
     return brands
       .map(b => {
         const myVids = b.videos
-          .filter(v => (role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId))
+          .filter(v => isAssignedTo(v, currentWorkerId))
           .sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
         const linkedOrder = orders.find(o => myVids.some(v => v.orderId === o.id) || `brand-${o.id}` === b.id) || orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
         return {
@@ -174,7 +115,7 @@ export function TasksView() {
         };
       })
       .filter(group => group.videos.length > 0);
-  }, [brands, orders, role, currentWorkerId]);
+  }, [brands, orders, currentWorkerId]);
 
   if (selectedVideo) {
     const parentBrand = brands.find(b => b.videos.some(v => v.id === selectedVideo.id));
@@ -250,8 +191,7 @@ export function TasksView() {
                         <span className="inline-flex items-center gap-1">
                           <Clock size={12} /> Entrega: {linkedOrder?.deliveryDate ? `${linkedOrder.deliveryDate} · ${linkedOrder.deliveryTime || ''}` : videos[0]?.date}
                         </span>
-                        <span>· Clipper: {videos[0]?.clipperName}</span>
-                        <span>· Editor(a): {videos[0]?.editorName}</span>
+                        <span>· {TEAM_ROLE_SHORT}: {teamNames(videos[0])}</span>
                       </p>
                     </div>
                   </div>
@@ -336,7 +276,6 @@ function VideoDetail({
   onSetMainImageStatus: (id: string, status: MainImageStatus, comment: string) => void; onSendVideo: (id: string) => void; role: string;
 }) {
   const [showClipForm, setShowClipForm] = useState(false);
-  const [showCorrForm, setShowCorrForm] = useState(false);
   const [showFinalForm, setShowFinalForm] = useState(false);
   const [clipName, setClipName] = useState('');
   const [clipNote, setClipNote] = useState('');
@@ -346,8 +285,6 @@ function VideoDetail({
   const [finalNote, setFinalNote] = useState('');
   const [finalFileName, setFinalFileName] = useState('');
   const [finalFileUrl, setFinalFileUrl] = useState('');
-  const [corrTime, setCorrTime] = useState('');
-  const [corrText, setCorrText] = useState('');
   const [mainImageComment, setMainImageComment] = useState('');
   const [showMainImagePreview, setShowMainImagePreview] = useState(false);
   // Lo que se reproduce en el visor grande de la izquierda (clip o video final)
@@ -372,10 +309,18 @@ function VideoDetail({
   const mainImageInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const playerRef = useRef<HTMLVideoElement>(null);
+  const [mediaTime, setMediaTime] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(0);
+  const seekTo = (t: number) => {
+    const el = playerRef.current;
+    if (el) { el.currentTime = t; el.pause(); }
+    setMediaTime(t);
+  };
 
   const isAdmin = role === 'admin';
-  const isClipper = role === 'clipper';
-  const isEditor = role === 'editor';
+  // Rol único de equipo: la misma persona sube imagen, clips y video final
+  const isClipper = role !== 'admin';
+  const isEditor = role !== 'admin';
   const isMainImageApproved = video.mainImageStatus === 'aprobada';
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
@@ -554,7 +499,7 @@ function VideoDetail({
                 {getProcessBadgeLabel(video)}
               </span>
             </div>
-            <p className="text-sm text-muted">{video.clipperName} → {video.editorName} · {video.date}</p>
+            <p className="text-sm text-muted">{TEAM_ROLE_SHORT}: {teamNames(video)} · Entrega {video.date}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -562,7 +507,7 @@ function VideoDetail({
             <div className="flex items-center gap-2.5 bg-surface-2 border border-mint/40 rounded-lg px-3.5 py-2 hover:border-mint transition-colors">
               <VideoIcon size={16} className="text-mint shrink-0" />
               <div className="text-xs min-w-[115px]">
-                <p className="font-medium text-text">Google Drive (Editor)</p>
+                <p className="font-medium text-text">Google Drive (Video final)</p>
                 <p className="text-muted truncate max-w-[150px]">
                   {getGoogleDriveBridgeUrl()
                     ? "Puente automático activo"
@@ -613,15 +558,7 @@ function VideoDetail({
                 </button>
               </>
             )}
-            <a
-              href={video.briefFileUrl || undefined}
-              download={video.briefFileName || undefined}
-              className={`text-xs rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1 transition-all duration-300 ${
-                video.briefFileUrl ? 'bg-surface-3 text-text hover:bg-accent/20 hover:text-accent' : 'bg-surface-3 text-muted-2 pointer-events-none'
-              }`}
-            >
-              <Download size={12} /> Descargar
-            </a>
+            <DownloadButton url={video.briefFileUrl} fileName={video.briefFileName} label="Descargar" />
           </div>
           {(isClipper || isAdmin) && (
             <div className="flex items-center gap-3 bg-surface-2 border border-line rounded-lg px-3.5 py-2 hover:border-muted-2 transition-colors">
@@ -725,6 +662,8 @@ function VideoDetail({
                   controls
                   autoPlay={Boolean(playing)}
                   playsInline
+                  onLoadedMetadata={e => { setMediaDuration(e.currentTarget.duration || 0); setMediaTime(0); }}
+                  onTimeUpdate={e => setMediaTime(e.currentTarget.currentTime)}
                   className="w-full h-[560px] object-contain bg-black animate-fadeIn"
                 />
               )
@@ -742,6 +681,19 @@ function VideoDetail({
               </div>
             )}
           </div>
+
+          {activeFinal && (
+            <FinalReviewPanel
+              video={video}
+              final={activeFinal}
+              isAdmin={isAdmin}
+              canResolve={!isAdmin}
+              duration={mediaDuration || video.durationSeconds || 60}
+              currentTime={mediaTime}
+              canReadPlayerTime={Boolean(resolvedClipUrl && !isGoogleDriveUrl(resolvedClipUrl))}
+              onSeek={seekTo}
+            />
+          )}
 
           {activeClip && (
             <div className="space-y-3 pt-2 border-t border-line">
@@ -820,7 +772,7 @@ function VideoDetail({
           <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
-                <Film size={16} className="text-accent" /> {isEditor ? `Clips enviados (${video.name})` : `Clips generados (${video.name})`}
+                <Film size={16} className="text-accent" /> {`Clips generados (${video.name})`}
               </h3>
               {isClipper && (
                 isMainImageApproved ? (
@@ -965,7 +917,7 @@ function VideoDetail({
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-2">Sin clips {isEditor ? "enviados" : "generados"}</p>
+                  <p className="text-sm text-muted-2">Sin clips generados</p>
                 )}
               </div>
             ) : (
@@ -992,9 +944,10 @@ function VideoDetail({
                           <p className="text-xs text-amber mb-1">Comentario: {c.rejectionReason || c.adminNote}</p>
                         )}
                         {c.fileName && (
-                          <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(c.fileUrl, c.fileName); }} className="text-xs text-accent flex items-center gap-1 hover:underline text-left"><Download size={11} /> {c.fileName}</button>
+                          <p className="text-[11px] text-muted-2 truncate flex items-center gap-1"><Film size={11} className="shrink-0" /> {c.fileName}</p>
                         )}
                       </div>
+                      {c.fileUrl && <DownloadButton url={c.fileUrl} fileName={c.fileName} />}
                       {isClipper && (
                         <div onClick={e => e.stopPropagation()} className="shrink-0">
                           <input
@@ -1050,22 +1003,9 @@ function VideoDetail({
                   <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
                 <div className="flex items-center gap-2">
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBridgeUrlDraft(getGoogleDriveBridgeUrl());
-                        setFolderUrlDraft(getGoogleDriveFolderUrl());
-                        setShowDriveConfigModal(true);
-                      }}
-                      className="text-xs bg-mint/15 hover:bg-mint/25 border border-mint/40 text-mint rounded-md px-2.5 py-1 font-medium flex items-center gap-1 transition-colors"
-                    >
-                      <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Drive Conectado" : "Conectar Drive"}
-                    </button>
-                  )}
                   {(isEditor || isAdmin) && (
                     <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
-                      <Plus size={14} /> Agregar en Drive
+                      <Plus size={14} /> Agregar versión
                     </button>
                   )}
                 </div>
@@ -1166,6 +1106,11 @@ function VideoDetail({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-sm font-medium text-text">{fv.name}</p>
+                              {(() => {
+                                const open = video.corrections.filter(c => !c.resolved && (c.finalId === fv.id || (!c.finalId && isLatest))).length;
+                                return open > 0 ? <span className="text-[10px] font-tech px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{open} corrección(es)</span> : null;
+                              })()}
+                              {fv.status === 'approved' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-mint-dim text-mint">Aprobado</span>}
                               {video.finalVideos.length > 1 && (
                                 <span className={`text-[10px] font-tech px-1.5 py-0.5 rounded ${isLatest ? 'bg-mint-dim text-mint' : 'bg-surface-2 text-muted-2'}`}>
                                   {isLatest ? 'Última versión' : `v${idx + 1}`}
@@ -1174,9 +1119,10 @@ function VideoDetail({
                             </div>
                             {fv.note && <p className="text-xs text-muted mb-1">{fv.note}</p>}
                             {fv.fileName && (
-                              <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(fv.fileUrl, fv.fileName); }} className="text-xs text-accent flex items-center gap-1 hover:underline text-left"><Download size={11} /> {fv.fileName}</button>
+                              <p className="text-[11px] text-muted-2 truncate flex items-center gap-1"><VideoIcon size={11} className="shrink-0" /> {fv.fileName}</p>
                             )}
                           </div>
+                          {fv.fileUrl && <DownloadButton url={fv.fileUrl} fileName={fv.fileName || `${fv.name}.mp4`} />}
                           {fv.fileUrl && (
                             isPlayingThis ? (
                               <span className="text-[11px] text-mint flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-mint-dim border border-mint/30">
@@ -1253,8 +1199,8 @@ function VideoDetail({
           >
             <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h3 className="font-display text-base font-bold text-text">Conectar Google Drive (Videos Finales de Editores)</h3>
-                <p className="text-xs text-muted">Exclusivo para cuando el rol Editor sube el Video Final, sin llenar ni cobrar extra en Supabase.</p>
+                <h3 className="font-display text-base font-bold text-text">Conectar Google Drive (Videos finales)</h3>
+                <p className="text-xs text-muted">Para que el equipo suba el video final directo a Drive, sin llenar ni cobrar extra en Supabase.</p>
               </div>
               <button
                 type="button"
@@ -1268,7 +1214,7 @@ function VideoDetail({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-text mb-1">
-                  1. Enlace de tu Carpeta Compartida de Google Drive para Editores
+                  1. Enlace de tu carpeta compartida de Google Drive
                 </label>
                 <input
                   value={folderUrlDraft}
@@ -1440,6 +1386,322 @@ function VideoDetail({
   );
 }
 
+function parseTime(input: string): number | null {
+  const t = input.trim();
+  if (!t) return null;
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.max(0, Math.round(Number(t)));
+  const m = t.match(/^(\d{1,3}):([0-5]?\d)$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** Botón sutil de descarga directa (sin abrir pestañas) con progreso y confirmación. */
+function DownloadButton({ url, fileName, label, className = '' }: { url?: string | null; fileName?: string | null; label?: string; className?: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [pct, setPct] = useState(0);
+  const disabled = !url || state === 'loading';
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={url ? `Descargar ${fileName || ''}`.trim() : 'Sin archivo'}
+      onClick={async e => {
+        e.stopPropagation();
+        if (!url) return;
+        setState('loading');
+        setPct(0);
+        try {
+          await downloadMediaFile(url, fileName, p => setPct(p));
+          setState('done');
+        } catch {
+          setState('error');
+        } finally {
+          setTimeout(() => setState(prev => (prev === 'loading' ? prev : 'idle')), 1800);
+        }
+      }}
+      className={`inline-flex items-center justify-center gap-1.5 h-8 ${label ? 'px-2.5' : 'w-8'} rounded-lg border text-[11px] font-medium shrink-0 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+        state === 'done'
+          ? 'bg-mint-dim text-mint border-mint/30'
+          : state === 'error'
+          ? 'bg-red-500/10 text-red-400 border-red-500/30'
+          : 'bg-surface border-line text-muted hover:text-accent hover:border-accent/50 hover:bg-accent/10'
+      } ${className}`}
+    >
+      {state === 'loading' ? (
+        <><Loader2 size={13} className="animate-spin text-accent" />{pct > 0 && pct < 100 && <span className="font-tech text-accent">{pct}%</span>}</>
+      ) : state === 'done' ? (
+        <Check size={13} />
+      ) : state === 'error' ? (
+        <AlertCircle size={13} />
+      ) : (
+        <Download size={13} />
+      )}
+      {label && state !== 'loading' && <span>{state === 'done' ? 'Listo' : state === 'error' ? 'Reintentar' : label}</span>}
+    </button>
+  );
+}
+
+/** Barra de tiempo del video final: cabezal, marcas de corrección y punto seleccionado. */
+function CorrectionTimeline({
+  duration, currentTime, corrections, pickTime, onPick, onSeek, editable,
+}: {
+  duration: number; currentTime: number; corrections: Correction[]; pickTime: number | null;
+  onPick: (t: number) => void; onSeek: (t: number) => void; editable: boolean;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const safeDur = Math.max(1, duration);
+  const pctOf = (t: number) => `${Math.min(100, Math.max(0, (t / safeDur) * 100))}%`;
+  const timeAt = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    return Math.round(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * safeDur);
+  };
+  return (
+    <div className="select-none">
+      <div
+        ref={trackRef}
+        onClick={e => { const t = timeAt(e.clientX); if (editable) onPick(t); onSeek(t); }}
+        className="relative h-9 flex items-center cursor-pointer group"
+        title={editable ? 'Haz clic para marcar el momento exacto de la corrección' : 'Haz clic para saltar a ese momento'}
+      >
+        <div className="w-full h-1.5 bg-surface-3 border border-line rounded-full overflow-hidden">
+          <div className="h-full bg-accent/40 transition-[width] duration-150" style={{ width: pctOf(currentTime) }} />
+        </div>
+        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-accent shadow-[0_0_10px_rgba(53,214,228,0.6)] pointer-events-none" style={{ left: pctOf(currentTime) }} />
+        {corrections.map(c => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={e => { e.stopPropagation(); onSeek(c.time); }}
+            title={`${fmtTime(c.time)} · ${c.text}`}
+            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-6 rounded-full hover:w-1.5 hover:h-7 transition-all ${c.resolved ? 'bg-mint' : 'bg-red-500'}`}
+            style={{ left: pctOf(c.time) }}
+          />
+        ))}
+        {editable && pickTime !== null && (
+          <div className="absolute -top-1 -translate-x-1/2 flex flex-col items-center pointer-events-none animate-fadeIn" style={{ left: pctOf(pickTime) }}>
+            <span className="text-[9px] font-tech font-bold bg-amber text-on-accent rounded px-1 leading-4">{fmtTime(pickTime)}</span>
+            <span className="w-px h-5 bg-amber" />
+          </div>
+        )}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-2 font-tech">
+        <span>0:00</span>
+        <span>{fmtTime(currentTime)} / {fmtTime(safeDur)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Revisión del video final: aprobar / pedir correcciones con marcas de tiempo. */
+function FinalReviewPanel({
+  video, final, isAdmin, canResolve, duration, currentTime, canReadPlayerTime, onSeek,
+}: {
+  video: Video; final: Clip; isAdmin: boolean; canResolve: boolean; duration: number; currentTime: number;
+  canReadPlayerTime: boolean; onSeek: (t: number) => void;
+}) {
+  const { setFinalVideoStatus, addCorrection, toggleCorrectionResolved, deleteCorrection } = useStore();
+  const [comment, setComment] = useState('');
+  const [rejectHint, setRejectHint] = useState(false);
+  const [pickTime, setPickTime] = useState<number | null>(null);
+  const [timeInput, setTimeInput] = useState('');
+  const [corrText, setCorrText] = useState('');
+  const [justAdded, setJustAdded] = useState(false);
+
+  const isLatest = video.finalVideos[video.finalVideos.length - 1]?.id === final.id;
+  const corrections = useMemo(
+    () => video.corrections
+      .filter(c => c.finalId === final.id || (!c.finalId && isLatest))
+      .sort((a, b) => a.time - b.time),
+    [video.corrections, final.id, isLatest]
+  );
+  const pending = corrections.filter(c => !c.resolved).length;
+  const effectiveTime = pickTime ?? Math.round(currentTime);
+
+  useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
+  useEffect(() => { setPickTime(null); setComment(''); setRejectHint(false); }, [final.id]);
+
+  const submitCorrection = () => {
+    const text = corrText.trim();
+    if (!text) return;
+    const t = parseTime(timeInput) ?? effectiveTime;
+    addCorrection(video.id, t, text, final.id);
+    setCorrText('');
+    setPickTime(null);
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1600);
+  };
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-line">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-text truncate">Revisión: {final.name}</p>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {pending > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-tech">{pending} por corregir</span>
+          )}
+          <span className={`text-[10px] px-2 py-0.5 rounded-full ${final.status === 'approved' ? 'bg-mint-dim text-mint' : final.status === 'rejected' ? 'bg-red-500/10 text-red-400' : 'bg-amber-dim text-amber'}`}>
+            {final.status === 'approved' ? 'Aprobado' : final.status === 'rejected' ? 'Con correcciones' : 'Pendiente de revisión'}
+          </span>
+        </div>
+      </div>
+
+      {(final.rejectionReason || final.adminNote) && (
+        <p className="text-xs text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2">
+          Comentario: <strong>{final.rejectionReason || final.adminNote}</strong>
+        </p>
+      )}
+
+      {isAdmin && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => { setFinalVideoStatus(video.id, final.id, 'approved', comment.trim() || undefined); setComment(''); setRejectHint(false); }}
+              title="Aprobar video final"
+              className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
+                final.status === 'approved' ? 'bg-mint text-on-accent border-mint shadow-[0_0_15px_rgba(111,231,200,0.3)]' : 'bg-mint/10 text-mint border-mint/30 hover:bg-mint/20'
+              }`}
+            >
+              <Check size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (comment.trim() || pending > 0) {
+                  setFinalVideoStatus(video.id, final.id, 'rejected', comment.trim() || `${pending} corrección(es) marcadas en el video`);
+                  setComment('');
+                  setRejectHint(false);
+                } else {
+                  setRejectHint(true);
+                }
+              }}
+              title="Pedir correcciones"
+              className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
+                final.status === 'rejected' ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+              }`}
+            >
+              <X size={18} />
+            </button>
+            <input
+              value={comment}
+              onChange={e => setComment(e.target.value)}
+              placeholder="Comentario general del video final..."
+              className="flex-1 bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
+            />
+          </div>
+          {rejectHint && (
+            <p className="text-[11px] text-red-400">Escribe un comentario o marca al menos una corrección con tiempo, y vuelve a presionar la X.</p>
+          )}
+        </div>
+      )}
+
+      <div className="bg-surface-3/60 border border-line rounded-xl p-3 space-y-2.5">
+        <p className="text-[11px] font-semibold text-muted flex items-center gap-1.5">
+          <Clock size={12} className="text-accent" /> Correcciones en el tiempo del video
+        </p>
+        <CorrectionTimeline
+          duration={duration}
+          currentTime={currentTime}
+          corrections={corrections}
+          pickTime={pickTime}
+          onPick={setPickTime}
+          onSeek={onSeek}
+          editable={isAdmin}
+        />
+
+        {isAdmin && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-lg pl-2 focus-within:border-amber transition-colors">
+              <Clock size={12} className="text-amber" />
+              <input
+                value={timeInput}
+                onChange={e => { setTimeInput(e.target.value); const t = parseTime(e.target.value); if (t !== null) setPickTime(t); }}
+                className="w-14 bg-transparent py-2 text-xs font-tech font-bold text-amber outline-none"
+                title="Minuto:segundo de la corrección"
+              />
+            </div>
+            {canReadPlayerTime && (
+              <button
+                type="button"
+                onClick={() => setPickTime(Math.round(currentTime))}
+                className="text-[11px] text-muted hover:text-accent px-2 py-2 rounded-lg bg-surface-2 border border-line hover:border-accent/50 transition-colors"
+                title="Usar el momento donde está pausado el video"
+              >
+                Usar tiempo actual
+              </button>
+            )}
+            <input
+              value={corrText}
+              onChange={e => setCorrText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submitCorrection(); }}
+              placeholder="¿Qué hay que corregir en este momento?"
+              className="flex-1 min-w-[160px] bg-surface-2 border border-line rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
+            />
+            <button
+              type="button"
+              onClick={submitCorrection}
+              disabled={!corrText.trim()}
+              className="flex items-center gap-1 text-xs font-semibold bg-accent text-on-accent rounded-lg px-3 py-2 hover:bg-accent-strong disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {justAdded ? <><Check size={13} /> Marcada</> : <><Plus size={13} /> Marcar</>}
+            </button>
+          </div>
+        )}
+        {isAdmin && !canReadPlayerTime && (
+          <p className="text-[10px] text-muted-2">Video de Google Drive: pausa donde quieras corregir y escribe el minuto (ej. 0:42), o haz clic en la barra.</p>
+        )}
+
+        {corrections.length === 0 ? (
+          <p className="text-[11px] text-muted-2 text-center py-2">
+            {isAdmin ? 'Sin correcciones. Pausa el video o haz clic en la barra y describe el ajuste.' : 'Sin correcciones en este video final.'}
+          </p>
+        ) : (
+          <ul className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            {corrections.map(c => (
+              <li key={c.id} className={`flex items-start gap-2 rounded-lg px-2.5 py-2 border transition-colors ${c.resolved ? 'bg-mint/5 border-mint/20' : 'bg-surface-2 border-line'}`}>
+                <button
+                  type="button"
+                  onClick={() => onSeek(c.time)}
+                  className={`font-tech text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 transition-colors ${c.resolved ? 'bg-mint-dim text-mint' : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'}`}
+                  title="Ir a este momento"
+                >
+                  {fmtTime(c.time)}
+                </button>
+                <p className={`flex-1 text-xs leading-snug ${c.resolved ? 'text-muted line-through' : 'text-text'}`}>
+                  {c.author === 'cliente' && <span className="text-[10px] font-semibold text-violet mr-1">CLIENTE</span>}
+                  {c.text}
+                </p>
+                {(canResolve || isAdmin) && (
+                  <button
+                    type="button"
+                    onClick={() => toggleCorrectionResolved(video.id, c.id)}
+                    title={c.resolved ? 'Marcar como pendiente' : 'Marcar como corregida'}
+                    className={`w-6 h-6 rounded-md border flex items-center justify-center shrink-0 transition-colors ${c.resolved ? 'bg-mint text-on-accent border-mint' : 'border-line text-muted-2 hover:text-mint hover:border-mint/50'}`}
+                  >
+                    <Check size={12} />
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => deleteCorrection(video.id, c.id)}
+                    title="Eliminar corrección"
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-muted-2 hover:text-red-400 hover:bg-red-500/10 shrink-0 transition-colors"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Tablero de Proyectos Iniciados del Administrador
 export function TasksBoard() {
   const { brands, orders, setSelectedVideo, deleteBrandProject } = useStore();
@@ -1511,7 +1773,7 @@ export function TasksBoard() {
                         {brand.name} · <span className="text-accent font-tech text-sm">{totalVideos} videos</span>
                       </p>
                       <p className="text-xs text-muted truncate flex gap-2">
-                        <span>Equipo: <strong className="text-muted">{videos[0]?.clipperName} + {videos[0]?.editorName}</strong></span>
+                        <span>{TEAM_ROLE_SHORT}: <strong className="text-muted">{teamNames(videos[0])}</strong></span>
                         {linkedOrder?.deliveryDate ? <span className="text-muted-2">| Entrega: {linkedOrder.deliveryDate}</span> : ''}
                       </p>
                     </div>

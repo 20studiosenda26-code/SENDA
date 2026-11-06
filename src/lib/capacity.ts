@@ -108,8 +108,9 @@ export interface WorkerDayLoad {
 }
 
 export function workerDayLoad(worker: Pick<Worker, 'id' | 'role'>, units: WorkUnit[]): WorkerDayLoad {
-  const mine = units.filter(u => (worker.role === 'clipper' ? u.clipperId === worker.id : u.editorId === worker.id));
-  const pick = (u: WorkUnit) => (worker.role === 'clipper' ? u.clipRemaining : u.editRemaining);
+  // Rol único: cada video pendiente ocupa a la persona de principio a fin
+  const mine = units.filter(u => u.clipperId === worker.id || u.editorId === worker.id);
+  const pick = (u: WorkUnit) => u.editRemaining;
   const load = spreadLoad(mine, pick);
   const res: WorkerDayLoad = { todayLoad: Math.ceil(load[todayIso()] || 0), pendingTotal: 0, simple: 0, estandar: 0, alta: 0, brands: [] };
   for (const u of mine) {

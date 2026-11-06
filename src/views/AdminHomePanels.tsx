@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { needsClipping, needsEditing, unpromotedOrders as unpromotedOrdersOf } from '../lib/economics';
+import { needsEditing, unpromotedOrders as unpromotedOrdersOf } from '../lib/economics';
+import { TEAM_ROLE_SHORT } from '../lib/roles';
 import type { Order, OrderStatus, Video, Worker } from '../types';
 import {
   DollarSign, Users, X, ClipboardCheck, Clock3, ChevronRight, Film, Scissors, Eye, Trash2
@@ -168,9 +169,7 @@ export function AdminHomePanels({
 
       // Videos reales en Tareas del trabajador que aún no han sido finalizados por el cliente
       // Solo lo que aún depende de este creador en su etapa (clipping o edición)
-      const myActiveVideos = allVideos.filter(v =>
-        w.role === 'clipper' ? v.clipperId === w.id && needsClipping(v) : v.editorId === w.id && needsEditing(v)
-      );
+      const myActiveVideos = allVideos.filter(v => (v.clipperId === w.id || v.editorId === w.id) && needsEditing(v));
 
       let activeVideosLoad = 0;
       const brandCounts = new Map<string, number>();
@@ -189,7 +188,7 @@ export function AdminHomePanels({
 
       // Solo sumar órdenes donde ya fue preasignado este rol pero aún no se ha promovido a brands
       const unpromotedOrders = unpromotedOrdersOf(orders, allVideos).filter(o =>
-        (w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id) && !coveredOrderIds.has(o.id)
+        (o.clipperId === w.id || o.editorId === w.id) && !coveredOrderIds.has(o.id)
       );
 
       for (const o of unpromotedOrders) {
@@ -253,7 +252,9 @@ export function AdminHomePanels({
   const pendingFinalVideos = useMemo(
     () => allVideos.filter(v => {
       if (v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente' || v.qc === 'sin_iniciar') return false;
-      return v.finalVideos.length > 0 || v.qc === 'revision' || v.qc === 'correcciones';
+      // Pendiente solo si la última versión del video final aún no se revisó
+      const latest = v.finalVideos[v.finalVideos.length - 1];
+      return Boolean(latest && (!latest.status || latest.status === 'pending'));
     }),
     [allVideos]
   );
@@ -364,7 +365,7 @@ export function AdminHomePanels({
         </button>
 
         <div className="bg-surface-2 border border-line rounded-xl p-5">
-          <p className="text-sm font-medium text-muted mb-3">Clippers / Editores</p>
+          <p className="text-sm font-medium text-muted mb-3">Equipo · Clippers / Asistentes</p>
           <div className="grid grid-cols-3 gap-2">
             <button onClick={() => { setEquipoFilter('lleno'); setHighlightedWorkerId(null); setOpenFolder('equipo'); }} className="flex flex-col items-center gap-1.5 bg-surface-3 hover:bg-line/40 border border-line rounded-lg py-2.5 transition-colors">
               <span className={`w-2.5 h-2.5 rounded-full ${workerLoadColor('lleno')}`} />
@@ -392,12 +393,12 @@ export function AdminHomePanels({
             <button onClick={() => { if (pendingFinalVideos.length === 1) goToVideo(pendingFinalVideos[0]); else if (pendingFinalVideos.length > 1) setOpenFolder('qc_editores'); }} disabled={pendingFinalVideos.length === 0} className="flex flex-col items-center gap-1 bg-surface-3 hover:bg-line/40 border border-line rounded-lg py-3 transition-colors disabled:opacity-50 disabled:cursor-default">
               <Film size={14} className="text-accent" />
               <span className="font-display text-xl font-bold leading-none">{pendingFinalVideos.length}</span>
-              <span className="text-[9px] text-muted-2">Editores (video final)</span>
+              <span className="text-[9px] text-muted-2">Video final</span>
             </button>
             <button onClick={() => { if (pendingClipVideos.length === 1) goToVideo(pendingClipVideos[0]); else if (pendingClipVideos.length > 1) setOpenFolder('qc_clippers'); }} disabled={pendingClipVideos.length === 0} className="flex flex-col items-center gap-1 bg-surface-3 hover:bg-line/40 border border-line rounded-lg py-3 transition-colors disabled:opacity-50 disabled:cursor-default">
               <Scissors size={14} className="text-violet" />
               <span className="font-display text-xl font-bold leading-none">{pendingClipVideos.length}</span>
-              <span className="text-[9px] text-muted-2">Clippers</span>
+              <span className="text-[9px] text-muted-2">Clips</span>
             </button>
           </div>
         </div>
@@ -516,7 +517,7 @@ export function AdminHomePanels({
       )}
 
       {openFolder === 'equipo' && (
-        <FolderModal title="Estado Real de Clippers y Editores (Conectado a Tareas)" onClose={() => setOpenFolder(null)}>
+        <FolderModal title="Estado real del equipo (conectado a Tareas)" onClose={() => setOpenFolder(null)}>
           <div className="flex gap-2 mb-4">
             {(['lleno', 'meta', 'sin_trabajo'] as WorkerLoad[]).map(f => (
               <button
@@ -551,7 +552,7 @@ export function AdminHomePanels({
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${workerLoadColor(equipoFilter)}`} />
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">
-                            {w.name} <span className="text-xs text-muted-2">({w.role === 'clipper' ? 'Clipper' : 'Editor(a)'})</span>
+                            {w.name} <span className="text-xs text-muted-2">({TEAM_ROLE_SHORT})</span>
                           </p>
                           <p className="text-xs text-muted-2 truncate">
                             {info.activeBrandNames.length > 0
@@ -595,14 +596,14 @@ export function AdminHomePanels({
       )}
 
       {openFolder === 'qc_editores' && (
-        <FolderModal title="Control de Calidad · Editores (Video Final)" onClose={() => setOpenFolder(null)}>
+        <FolderModal title="Control de Calidad · Video final" onClose={() => setOpenFolder(null)}>
           <p className="text-xs text-muted-2 mb-2">Proyectos iniciados esperando tu visto bueno o correcciones sobre el video final:</p>
           <div className="space-y-2">
             {pendingFinalVideos.map(v => (
               <button key={v.id} onClick={() => { setOpenFolder(null); goToVideo(v); }} className="w-full flex items-center justify-between gap-3 p-3 bg-surface-3 hover:bg-line/40 border border-line rounded-lg text-left transition-colors">
                 <div>
                   <p className="text-sm font-medium">{brandNameForVideo[v.id] ? `${brandNameForVideo[v.id]} · ${v.name}` : v.name}</p>
-                  <p className="text-xs text-muted-2">Editor(a): {v.editorName} · {v.finalVideos.length} corte(s) final(es) · Estado: {v.qc.replace(/_/g, ' ')}</p>
+                  <p className="text-xs text-muted-2">Responsable: {v.clipperName || v.editorName} · {v.finalVideos.length} corte(s) final(es) · Estado: {v.qc.replace(/_/g, ' ')}</p>
                 </div>
                 <span className="text-xs text-accent font-medium flex items-center gap-1">Revisar <Eye size={13} /></span>
               </button>

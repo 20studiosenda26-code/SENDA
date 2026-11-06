@@ -10,6 +10,7 @@ import {
 } from '../lib/payrollPdf';
 import { workerEarnedItems } from '../lib/economics';
 import type { PayrollReportItem, Order } from '../types';
+import { isAssignedTo } from '../lib/roles';
 
 export function ProfileView() {
   const {
@@ -45,7 +46,7 @@ export function ProfileView() {
 
   const myVideos = useMemo(() => {
     return brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))).filter(v =>
-      role === 'admin' ? true : role === 'clipper' ? v.clipperId === currentWorkerId : v.editorId === currentWorkerId
+      role === 'admin' ? true : isAssignedTo(v, currentWorkerId)
     );
   }, [brands, role, currentWorkerId]);
 

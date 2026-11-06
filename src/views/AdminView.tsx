@@ -6,10 +6,11 @@ import {
   Scissors, Film, SlidersHorizontal, Check, X, RotateCcw,
 } from 'lucide-react';
 import { workerLoadColor, workerLoadBorder, WorkerLoad } from './AdminHomePanels';
+import { TEAM_ROLE_PLURAL, TEAM_ROLE_SHORT } from '../lib/roles';
 
 export function AdminView() {
   const { workers, registeredUsersCount, brands, orders, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals, getWorkerCapacity, getWorkerWorkload } = useStore();
-  const [teamTab, setTeamTab] = useState<'clipper' | 'editor'>('clipper');
+  const [teamTab, setTeamTab] = useState<'clipper'>('clipper');
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [ptsTodayInput, setPtsTodayInput] = useState<string>('');
   const [ptsMonthInput, setPtsMonthInput] = useState<string>('');
@@ -24,8 +25,7 @@ export function AdminView() {
   const onlineWorkers = useMemo(() => workers.filter(w => w.online), [workers]);
 
   const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
-  const editors = useMemo(() => workers.filter(w => w.role === 'editor'), [workers]);
-  const visibleWorkers = teamTab === 'clipper' ? clippers : editors;
+  const visibleWorkers = clippers;
 
   // CORRECCIÓN MATEMÁTICA INTEGRADA: Reutilizar lógica de conteo de asignaciones exactas
   const workerWorkloads = useMemo(() => {
@@ -112,7 +112,7 @@ export function AdminView() {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium truncate leading-tight">{w.name}</p>
                     <p className={`text-[10px] leading-tight truncate mt-0.5 ${isFilled ? 'text-amber' : 'text-mint'}`}>
-                      En línea · <span className="text-muted-2">{w.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</span>
+                      En línea · <span className="text-muted-2">{TEAM_ROLE_SHORT}</span>
                     </p>
                   </div>
                 </div>
@@ -127,7 +127,7 @@ export function AdminView() {
           <div>
             <h3 className="font-display text-lg font-semibold">Equipo y Metas de Puntos</h3>
             <p className="text-xs text-muted mt-0.5">
-              Selecciona Clippers o Editores para gestionar sus puntos recolectados hoy/mes, la meta individual y su cierre de día.
+              Gestiona los puntos de hoy/mes, la meta individual y el cierre de día de cada Clipper · Asistente de edición.
             </p>
           </div>
 
@@ -139,23 +139,14 @@ export function AdminView() {
                 teamTab === 'clipper' ? 'bg-accent text-on-accent shadow-sm' : 'text-muted hover:text-text'
               }`}
             >
-              <Scissors size={13} /> Clippers ({clippers.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTeamTab('editor'); setEditingWorkerId(null); }}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                teamTab === 'editor' ? 'bg-mint text-on-accent shadow-sm' : 'text-muted hover:text-text'
-              }`}
-            >
-              <Film size={13} /> Editores ({editors.length})
+              <Scissors size={13} /> {TEAM_ROLE_PLURAL} ({clippers.length})
             </button>
           </div>
         </div>
 
         {visibleWorkers.length === 0 ? (
           <p className="text-sm text-muted text-center py-6">
-            No hay {teamTab === 'clipper' ? 'clippers' : 'editores'} registrados todavía.
+            No hay miembros del equipo registrados todavía.
           </p>
         ) : (
           <div className="overflow-x-auto">

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, loadShared, saveShared } from './supabaseClient';
+import { normalizeRole } from './roles';
 import type { Role } from '../types';
 
 export interface AuthUser {
@@ -58,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id: data.id,
       email: authUser.email || (data.contact_email as string) || '',
       name: data.name,
-      role: data.role as Role,
+      role: normalizeRole(data.role),
     };
   }, []);
 

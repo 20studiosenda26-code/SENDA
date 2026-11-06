@@ -4,6 +4,7 @@ import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Send, Search, Paperclip, Plus, X, Users, Bell, Loader2, Download, Check, Trash2 } from 'lucide-react';
 import type { NotificationCategory } from '../types';
+import { TEAM_ROLE_SHORT } from '../lib/roles';
 
 function timeShort(iso: string) {
   const d = new Date(iso);
@@ -159,7 +160,7 @@ export function ChatView() {
               {workers.filter(w => !chatGroups.some(g => g.isDm && g.memberIds.includes(w.id))).map(w => (
                 <button key={w.id} onClick={() => handleCreateDm(w.id)} className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-2 flex items-center justify-between">
                   <span>{w.name}</span>
-                  <span className="text-[10px] text-muted-2">{w.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</span>
+                  <span className="text-[10px] text-muted-2">{TEAM_ROLE_SHORT}</span>
                 </button>
               ))}
               {workers.filter(w => !chatGroups.some(g => g.isDm && g.memberIds.includes(w.id))).length === 0 && (
@@ -179,7 +180,7 @@ export function ChatView() {
                 {workers.map(w => (
                   <label key={w.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-surface-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={selectedMembers.includes(w.id)} onChange={() => toggleMember(w.id)} className="accent-accent" />
-                    {w.name} <span className="text-[10px] text-muted-2">({w.role === 'clipper' ? 'Clipper' : 'Editor(a)'})</span>
+                    {w.name} <span className="text-[10px] text-muted-2">({TEAM_ROLE_SHORT})</span>
                   </label>
                 ))}
               </div>

@@ -4,6 +4,7 @@ import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HI
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { workerWorkload } from './lib/economics';
+import { TEAM_ROLE_LABEL } from './lib/roles';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -50,8 +51,9 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
   return {
     id: p.id as string,
     name: (p.name as string) || '',
-    role: (p.role as 'clipper' | 'editor'),
-    cargo: (p.cargo as string) || ((p.role as string) === 'clipper' ? 'Clipper' : 'Editor(a)'),
+    // Rol único de equipo: los antiguos editores pasan a "Clipper · Asistente de edición"
+    role: 'clipper',
+    cargo: !p.cargo || /^(clipper|editor|editora|editor\(a\))$/i.test(String(p.cargo).trim()) ? TEAM_ROLE_LABEL : (p.cargo as string),
     ingreso: (p.created_at as string) ? String(p.created_at).slice(0, 10) : '',
     estado: (p.estado as string) || 'Activo',
     pointsToday: (p.points_today as number) || 0,
@@ -114,7 +116,7 @@ function saveState<T>(key: string, value: T) {
 }
 
 const CATEGORIES_BY_ROLE: Record<Role, NotificationCategory[]> = {
-  clipper: ['trabajo_asignado', 'qc_clip', 'racha', 'pago_50', 'pago_100', 'mensaje'],
+  clipper: ['trabajo_asignado', 'clips_enviados', 'qc_clip', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   editor: ['trabajo_asignado', 'clips_enviados', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   admin: ['trabajo_asignado', 'clips_enviados', 'qc_clip', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje', 'sistema'],
 };
@@ -181,7 +183,10 @@ interface Store {
   setClipStatus: (videoId: string, clipId: string, status: ClipStatus, reason?: string) => void;
   setClipMarkerTime: (videoId: string, clipId: string, time: number) => void;
   acceptAllClips: (videoId: string) => void;
-  addCorrection: (videoId: string, time: number, text: string) => void;
+  addCorrection: (videoId: string, time: number, text: string, finalId?: string | null) => void;
+  toggleCorrectionResolved: (videoId: string, correctionId: string) => void;
+  deleteCorrection: (videoId: string, correctionId: string) => void;
+  setFinalVideoStatus: (videoId: string, finalId: string, status: ClipStatus, reason?: string) => void;
   updateCorrectionTime: (videoId: string, correctionId: string, time: number) => void;
   submitClientFeedbackBatch: (videoId: string, items: { time: number; text: string }[]) => void;
   enableExtraClientFeedbackRound: (videoId: string) => void;
@@ -669,11 +674,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const inPresence = presenceOnlineIds.has(w.id);
       const lastBeat = heartbeatMap[w.id] || 0;
       const hasRecentBeat = lastBeat > 0 && (nowTick - lastBeat) < HEARTBEAT_TTL_MS;
-      const defaultGoals = config.goals[w.role];
+      const defaultGoals = config.goals.clipper;
       const customGoals = workerGoalsMap[w.id];
       const override = workerPointsOverride[w.id];
       return {
         ...w,
+        role: 'clipper' as const,
         online: isSupabaseConfigured ? (isSelf || inPresence || hasRecentBeat) : w.online,
         pointsToday: override?.pointsToday !== undefined ? override.pointsToday : w.pointsToday,
         pointsMonth: override?.pointsMonth !== undefined ? override.pointsMonth : w.pointsMonth,
@@ -821,8 +827,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return brandsRef.current.flatMap(b => b.videos).find(v => v.id === videoId) || null;
   }, []);
 
-  const pushNotification = useCallback((role: Role, category: NotificationCategory, text: string, workerId?: string | null) => {
+  const recentNotifRef = useRef<Map<string, number>>(new Map());
+  const pushNotification = useCallback((rawRole: Role, category: NotificationCategory, text: string, workerId?: string | null) => {
+    // Un solo rol de equipo: lo dirigido al "editor" llega al mismo Clipper · Asistente de edición
+    const role: Role = rawRole === 'editor' ? 'clipper' : rawRole;
     if (!CATEGORIES_BY_ROLE[role].includes(category)) return;
+    // Evita duplicados cuando la misma persona era clipper y editor del video
+    const dedupeKey = `${role}|${workerId || ''}|${text}`;
+    const nowMs = Date.now();
+    const last = recentNotifRef.current.get(dedupeKey);
+    if (last && nowMs - last < 4000) return;
+    recentNotifRef.current.set(dedupeKey, nowMs);
     const item: NotificationItem = {
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       role, workerId: workerId ?? null, category, text,
@@ -1076,13 +1091,68 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
-  const addCorrection = useCallback((videoId: string, time: number, text: string) => {
+  const addCorrection = useCallback((videoId: string, time: number, text: string, finalId?: string | null) => {
     updateVideo(videoId, v => ({
       ...v,
-      corrections: [...v.corrections, { id: `corr-${Date.now()}`, time, text, author: 'admin' }],
-      qc: v.qc === 'sin_iniciar' || v.qc === 'pendiente' ? 'correcciones' : v.qc,
+      corrections: [...v.corrections, {
+        id: `corr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time: Math.max(0, Math.round(time)),
+        text,
+        author: 'admin',
+        finalId: finalId ?? null,
+        resolved: false,
+        createdAt: new Date().toISOString(),
+      }],
+      // Una corrección devuelve el video a "Correcciones" mientras no esté aprobado
+      qc: v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente' ? v.qc : 'correcciones',
+      editorQc: v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente' ? v.editorQc : 'correcciones',
+    }));
+    const v = findVideo(videoId);
+    if (v) {
+      const m = Math.floor(time / 60);
+      const sec = String(Math.floor(time % 60)).padStart(2, '0');
+      pushNotification('clipper', 'qc_video', `Nueva corrección en "${v.name}" en ${m}:${sec}: ${text}`, v.clipperId);
+    }
+  }, [updateVideo, findVideo, pushNotification]);
+
+  const toggleCorrectionResolved = useCallback((videoId: string, correctionId: string) => {
+    updateVideo(videoId, v => ({
+      ...v,
+      corrections: v.corrections.map(c => c.id === correctionId ? { ...c, resolved: !c.resolved } : c),
     }));
   }, [updateVideo]);
+
+  const deleteCorrection = useCallback((videoId: string, correctionId: string) => {
+    updateVideo(videoId, v => ({ ...v, corrections: v.corrections.filter(c => c.id !== correctionId) }));
+  }, [updateVideo]);
+
+  const setFinalVideoStatus = useCallback((videoId: string, finalId: string, status: ClipStatus, reason?: string) => {
+    updateVideo(videoId, v => ({
+      ...v,
+      finalVideos: v.finalVideos.map(f => f.id === finalId ? {
+        ...f,
+        status,
+        rejectionReason: status === 'rejected' ? (reason || '') : null,
+        adminNote: reason ? reason : f.adminNote,
+        reviewedBy: 'Admin',
+        reviewedAt: new Date().toISOString(),
+      } : f),
+      qc: status === 'rejected' && v.qc !== 'aprobado_cliente' ? 'correcciones' : v.qc,
+      editorQc: status === 'rejected' && v.qc !== 'aprobado_cliente' ? 'correcciones' : v.editorQc,
+    }));
+    const v = findVideo(videoId);
+    const f = v?.finalVideos.find(x => x.id === finalId);
+    if (v) {
+      pushNotification(
+        'clipper',
+        'qc_video',
+        status === 'approved'
+          ? `Video final aprobado: "${f?.name || v.name}"${reason ? ` · ${reason}` : ''}`
+          : `Video final con correcciones: "${f?.name || v.name}". ${reason || 'Revisa las correcciones marcadas en el video.'}`,
+        v.clipperId
+      );
+    }
+  }, [updateVideo, findVideo, pushNotification]);
 
   const updateCorrectionTime = useCallback((videoId: string, correctionId: string, time: number) => {
     updateVideo(videoId, v => ({
@@ -1104,10 +1174,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addFinalVideo = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
     updateVideo(videoId, v => ({
       ...v,
-      qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' ? 'revision' : v.qc,
-      finalVideos: [...v.finalVideos, { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null }],
+      // Subir una nueva versión vuelve a poner el video en revisión (también tras correcciones)
+      qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' || v.qc === 'correcciones' ? 'revision' : v.qc,
+      finalVideos: [...v.finalVideos, { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null, status: 'pending' }],
     }));
-  }, [updateVideo]);
+    const v = findVideo(videoId);
+    if (v) pushNotification('admin', 'qc_video', `${v.clipperName} subió el video final de "${v.name}" para revisión`);
+  }, [updateVideo, findVideo, pushNotification]);
 
   const uploadMainImage = useCallback((videoId: string, fileName: string, fileUrl: string) => {
     updateVideo(videoId, v => ({
@@ -1147,7 +1220,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
     const v = findVideo(videoId);
     if (v) {
-      pushNotification('editor', 'clips_enviados', `Clips de "${v.name}" enviados, listos para empezar a editar`, v.editorId);
+      if (v.editorId && v.editorId !== v.clipperId) {
+        pushNotification('editor', 'clips_enviados', `Clips de "${v.name}" enviados, listos para empezar a editar`, v.editorId);
+      }
       pushNotification('admin', 'clips_enviados', `${v.clipperName} envió los clips de "${v.name}"`);
     }
   }, [updateVideo, findVideo, pushNotification]);
@@ -1405,6 +1480,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...v,
         clipperId: workerId,
         clipperName: workersWithOnline.find(w => w.id === workerId)?.name || 'Desconocido',
+        editorId: workerId,
+        editorName: workersWithOnline.find(w => w.id === workerId)?.name || 'Desconocido',
         qc: 'pendiente'
       } : v),
     })));
@@ -1582,8 +1659,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const getWorkerCapacity = useCallback((workerId: string): number => {
     const w = workersRef.current.find(x => x.id === workerId);
-    const defaultByRole = w?.role === 'editor' ? capacityConfig.defaultEditorDailyVideos : capacityConfig.defaultClipperDailyVideos;
-    return workerCapacities[workerId] ?? w?.dailyCapacity ?? defaultByRole;
+    return workerCapacities[workerId] ?? w?.dailyCapacity ?? capacityConfig.defaultClipperDailyVideos;
   }, [workerCapacities, capacityConfig.defaultClipperDailyVideos, capacityConfig.defaultEditorDailyVideos]);
 
   const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
@@ -1594,7 +1670,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const w = workersRef.current.find(x => x.id === workerId);
     const allVids = brands.flatMap(b => b.videos);
     if (w) return workerWorkload(w, allVids, orders);
-    return workerWorkload({ id: workerId, role: 'clipper' }, allVids, orders) + workerWorkload({ id: workerId, role: 'editor' }, allVids, orders);
+    return workerWorkload({ id: workerId, role: 'clipper' }, allVids, orders);
   }, [brands, orders]);
 
   const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
@@ -1742,70 +1818,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ]);
     }
     if (clipperId) await notifyPersonAssigned(updatedOrder, "clipper", clipperId);
-    if (editorId) await notifyPersonAssigned(updatedOrder, "editor", editorId);
+    if (editorId && editorId !== clipperId) await notifyPersonAssigned(updatedOrder, "editor", editorId);
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
+  // Rol único: asignar a la persona la deja a cargo de clips + imagen + video final del pedido completo
   const assignOrderClipper = useCallback(async (orderId: string, clipperId: string) => {
-    const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order || !clipperId) return;
-    const currentEditorId = order.editorId || null;
-    const nowFull = Boolean(clipperId && currentEditorId);
-    // Siempre creamos/actualizamos los videos en brands para que al Clipper le aparezca su tarea al instante
-    const videoId = upsertBoardVideoForOrder(order, clipperId, currentEditorId);
-
-    const updatedOrder: Order = {
-      ...order,
-      clipperId,
-      assignedWorkerIds: Array.from(new Set([clipperId, ...(currentEditorId ? [currentEditorId] : [])])),
-      status: (nowFull ? "asignado" : "sin_asignar") as OrderStatus,
-      promotedToBoard: nowFull,
-      boardVideoId: videoId,
-    };
-
-    const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
-    ordersRef.current = nextOrders;
-    setOrders(nextOrders);
-    saveState("orders", nextOrders);
-    if (isSupabaseConfigured) {
-      markLocalWrite();
-      await Promise.all([
-        saveShared("orders", nextOrders),
-        saveShared("brands", brandsRef.current),
-      ]);
-    }
-    await notifyPersonAssigned(updatedOrder, "clipper", clipperId);
-  }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
+    if (!clipperId) return;
+    await assignOrderTeam(orderId, clipperId, clipperId);
+  }, [assignOrderTeam]);
 
   const assignOrderEditor = useCallback(async (orderId: string, editorId: string) => {
-    const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order || !editorId) return;
-    const currentClipperId = order.clipperId || null;
-    const nowFull = Boolean(currentClipperId && editorId);
-    // Siempre creamos/actualizamos los videos en brands para que al Editor(a) le aparezca su tarea al instante
-    const videoId = upsertBoardVideoForOrder(order, currentClipperId, editorId);
-
-    const updatedOrder: Order = {
-      ...order,
-      editorId,
-      assignedWorkerIds: Array.from(new Set([...(currentClipperId ? [currentClipperId] : []), editorId])),
-      status: (nowFull ? "asignado" : "sin_asignar") as OrderStatus,
-      promotedToBoard: nowFull,
-      boardVideoId: videoId,
-    };
-
-    const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
-    ordersRef.current = nextOrders;
-    setOrders(nextOrders);
-    saveState("orders", nextOrders);
-    if (isSupabaseConfigured) {
-      markLocalWrite();
-      await Promise.all([
-        saveShared("orders", nextOrders),
-        saveShared("brands", brandsRef.current),
-      ]);
-    }
-    await notifyPersonAssigned(updatedOrder, "editor", editorId);
-  }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
+    if (!editorId) return;
+    await assignOrderTeam(orderId, editorId, editorId);
+  }, [assignOrderTeam]);
 
   const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
     setFinanceSettings(prev => {
@@ -1943,7 +1968,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     selectedVideo, setSelectedVideo,
     selectedClassroomModuleId, setSelectedClassroomModuleId,
     setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
-    addCorrection, updateCorrectionTime, submitClientFeedbackBatch, enableExtraClientFeedbackRound,
+    addCorrection, updateCorrectionTime, toggleCorrectionResolved, deleteCorrection, setFinalVideoStatus, submitClientFeedbackBatch, enableExtraClientFeedbackRound,
     uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,
     sendChat, closeDay, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals,

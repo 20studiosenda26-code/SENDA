@@ -5,6 +5,7 @@ import { CardNodeDeco } from '../components/BrandBackground';
 import { CLASSROOM_MODULES } from '../data';
 import { AdminHomePanels, workerLoadColor, type WorkerLoad } from './AdminHomePanels';
 import { pendingRoleSuffix } from '../lib/qcLabel';
+import { isAssignedTo } from '../lib/roles';
 
 export function HomeView() {
   const { role, workers, currentWorkerId, brands, getWorkerCapacity, getWorkerWorkload, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
@@ -16,7 +17,7 @@ export function HomeView() {
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
 
   const myVideos = allVideos.filter(v =>
-    role === 'clipper' ? v.clipperId === currentWorkerId : role === 'editor' ? v.editorId === currentWorkerId : true
+    role === 'admin' ? true : isAssignedTo(v, currentWorkerId)
   );
   const inProgress = myVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
   const done = myVideos.filter(v => v.qc === 'aprobado_cliente');

@@ -34,7 +34,8 @@ function WorkerContracts({
   workers: ReturnType<typeof useStore>['workers'];
 }) {
   const myContracts = useMemo(
-    () => contracts.filter(c => c.role === role && (c.workerId === null || c.workerId === workerId)),
+    // Rol único: ve los contratos de clipper y los antiguos de editor
+    () => contracts.filter(c => (c.workerId === null || c.workerId === workerId) && (role === 'clipper' || c.role === role)),
     [contracts, role, workerId]
   );
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -58,7 +59,7 @@ function WorkerContracts({
           </div>
           <div>
             <h2 className="font-display text-lg font-semibold">Mis Contratos</h2>
-            <p className="text-sm text-muted">{role === 'clipper' ? 'Contratos de Clipper' : 'Contratos de Editor(a)'}</p>
+            <p className="text-sm text-muted">Contratos · Clipper / Asistente de edición</p>
           </div>
         </div>
       </div>
@@ -164,7 +165,7 @@ function AdminContracts() {
           </div>
           <div>
             <h2 className="font-display text-lg font-semibold">Contratos</h2>
-            <p className="text-sm text-muted">Clipper primero, luego Editor(a) · sube, titula o elimina cualquier contrato</p>
+            <p className="text-sm text-muted">Sube, titula o elimina cualquier contrato del equipo</p>
           </div>
         </div>
         <button onClick={() => setShowForm(s => !s)} className="flex items-center gap-1.5 bg-accent text-on-accent rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent-strong transition-colors">
@@ -181,11 +182,10 @@ function AdminContracts() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título del contrato" className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
             <select value={targetRole} onChange={e => { setTargetRole(e.target.value as 'clipper' | 'editor'); setTargetWorker(''); }} className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent">
-              <option value="clipper">Clipper</option>
-              <option value="editor">Editor(a)</option>
+              <option value="clipper">Clipper · Asistente de edición</option>
             </select>
             <select value={targetWorker} onChange={e => setTargetWorker(e.target.value)} className="w-full bg-surface-3 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent md:col-span-2">
-              <option value="">Plantilla general (todos los {targetRole === 'clipper' ? 'clippers' : 'editores'})</option>
+              <option value="">Plantilla general (todo el equipo)</option>
               {workers.filter(w => w.role === targetRole).map(w => (
                 <option key={w.id} value={w.id}>Solo para {w.name}</option>
               ))}
@@ -228,7 +228,7 @@ function AdminContracts() {
                   <p className="text-sm text-muted mt-0.5">{c.fileName}</p>
                   <div className="flex gap-2 mt-1.5 text-xs">
                     <span className={`px-2 py-0.5 rounded ${c.role === 'clipper' ? 'bg-accent-dim text-accent' : 'bg-mint-dim text-mint'}`}>
-                      {c.role === 'clipper' ? 'Clipper' : 'Editor(a)'}
+                      {c.role === 'clipper' ? 'Equipo' : 'Equipo (antes Editor)'}
                     </span>
                     <span className="text-muted-2">{c.workerId ? `Para ${workerName(c.workerId)}` : 'Plantilla general'}</span>
                   </div>

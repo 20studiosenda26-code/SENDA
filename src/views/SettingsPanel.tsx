@@ -91,10 +91,10 @@ export function SettingsPanel() {
   const marginPct = fin.clientPricePerVideo > 0 ? Math.round((margin / fin.clientPricePerVideo) * 100) : 0;
 
   const teamCapacity = useMemo(() => {
-    const clip = workers.filter(w => w.role === 'clipper').reduce((s, w) => s + getWorkerCapacity(w.id), 0);
-    const edit = workers.filter(w => w.role === 'editor').reduce((s, w) => s + getWorkerCapacity(w.id), 0);
+    // Rol único: cada persona produce el video completo (clips + edición)
+    const total = workers.reduce((s, w) => s + getWorkerCapacity(w.id), 0);
     const factor = Math.max(0.5, (100 - cap.safetyMarginPct) / 100);
-    return { safe: Math.floor(Math.min(clip, edit) * factor), clip, edit };
+    return { safe: Math.floor(total * factor), clip: total, edit: workers.length };
   }, [workers, getWorkerCapacity, cap.safetyMarginPct]);
 
   const flashSaved = (t: Tab) => {
@@ -174,10 +174,10 @@ export function SettingsPanel() {
               <NumberField label="Precio al cliente por video" prefix="$" min={1} value={fin.clientPricePerVideo}
                 onChange={n => setFin(f => ({ ...f, clientPricePerVideo: n }))}
                 hint="Se precarga al crear un pedido nuevo." />
-              <NumberField label="Pago al Clipper por video" prefix="$" value={fin.defaultClipperCost}
+              <NumberField label="Pago por clips (por video)" prefix="$" value={fin.defaultClipperCost}
                 onChange={n => setFin(f => ({ ...f, defaultClipperCost: n }))}
                 hint="Se usa si el pedido no define su propio pago." />
-              <NumberField label="Pago al Editor por video" prefix="$" value={fin.defaultEditorCost}
+              <NumberField label="Pago por edición (por video)" prefix="$" value={fin.defaultEditorCost}
                 onChange={n => setFin(f => ({ ...f, defaultEditorCost: n }))}
                 hint="Se usa si el pedido no define su propio pago." />
             </div>
@@ -190,7 +190,7 @@ export function SettingsPanel() {
                 {fmtMoney(margin)} <span className="text-xs font-tech text-muted-2">({marginPct}%)</span>
               </p>
             </div>
-            <p className="text-[11px] text-muted-2">Los pedidos que ya tienen precios propios no cambian. Los videos sin precio propio se recalculan al instante en Finanzas y Nóminas.</p>
+            <p className="text-[11px] text-muted-2">La persona asignada cobra clips + edición de cada video aprobado por el cliente. Los pedidos que ya tienen precios propios no cambian. Los videos sin precio propio se recalculan al instante en Finanzas y Nóminas.</p>
           </>
         )}
 
@@ -199,10 +199,8 @@ export function SettingsPanel() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <NumberField label="Margen de seguridad" suffix="%" min={0} max={50} value={cap.safetyMarginPct}
                 onChange={n => setCap(c => ({ ...c, safetyMarginPct: n }))} hint="Reserva para imprevistos y correcciones." />
-              <NumberField label="Capacidad base Clipper" suffix="videos/día" min={1} value={cap.defaultClipperDailyVideos}
-                onChange={n => setCap(c => ({ ...c, defaultClipperDailyVideos: n }))} hint="Para clippers sin capacidad individual." />
-              <NumberField label="Capacidad base Editor" suffix="videos/día" min={1} value={cap.defaultEditorDailyVideos}
-                onChange={n => setCap(c => ({ ...c, defaultEditorDailyVideos: n }))} hint="Para editores sin capacidad individual." />
+              <NumberField label="Capacidad base por persona" suffix="videos/día" min={1} value={cap.defaultClipperDailyVideos}
+                onChange={n => setCap(c => ({ ...c, defaultClipperDailyVideos: n, defaultEditorDailyVideos: n }))} hint="Videos completos al día para quien no tenga capacidad propia." />
               <NumberField label="Alerta de urgencia" suffix="horas" min={1} max={72} value={cap.urgentThresholdHours}
                 onChange={n => setCap(c => ({ ...c, urgentThresholdHours: n }))} hint="Horas antes de la entrega para marcar urgente." />
               <NumberField label="Inicio de jornada" suffix="h" min={0} max={22} value={cap.workdayStartHour}
@@ -216,12 +214,12 @@ export function SettingsPanel() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-surface-3 border border-line rounded-xl p-3">
-                <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2 flex items-center gap-1"><Scissors size={11} /> Clipping físico</p>
+                <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2 flex items-center gap-1"><Scissors size={11} /> Capacidad física</p>
                 <p className="font-display text-xl font-bold text-accent">{teamCapacity.clip}<span className="text-xs text-muted-2 font-tech"> /día</span></p>
               </div>
               <div className="bg-surface-3 border border-line rounded-xl p-3">
-                <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2 flex items-center gap-1"><Film size={11} /> Edición física</p>
-                <p className="font-display text-xl font-bold text-mint">{teamCapacity.edit}<span className="text-xs text-muted-2 font-tech"> /día</span></p>
+                <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2 flex items-center gap-1"><Film size={11} /> Personas en equipo</p>
+                <p className="font-display text-xl font-bold text-mint">{teamCapacity.edit}</p>
               </div>
               <div className="bg-surface-3 border border-accent/30 rounded-xl p-3">
                 <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2 flex items-center gap-1"><Gauge size={11} /> Capacidad segura</p>
@@ -250,7 +248,7 @@ export function SettingsPanel() {
                   </a>
                 )}
               </div>
-              <span className="text-[11px] text-muted-2 block mt-1.5">Los editores verán el botón “Abrir Drive” en cada video.</span>
+              <span className="text-[11px] text-muted-2 block mt-1.5">El equipo verá el botón “Abrir Drive” en cada video.</span>
             </label>
             <label className="block bg-surface-3 border border-line rounded-xl p-3.5">
               <span className="text-xs font-medium text-muted block mb-1.5">Puente de subida directa (Google Apps Script)</span>

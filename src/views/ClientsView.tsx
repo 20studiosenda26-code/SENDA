@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store';
 import { uploadSharedFile } from '../lib/supabaseClient';
+import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { CardNodeDeco } from '../components/BrandBackground';
 import { fmtMoneyClean } from '../lib/payrollPdf';
 import type { Order, Video } from '../types';
@@ -97,8 +98,9 @@ export function ClientsView() {
   const invoiceInputRef = useRef<HTMLInputElement | null>(null);
   const portalPlayerRef = useRef<HTMLVideoElement | null>(null);
 
-  const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
-  const editors = useMemo(() => workers.filter(w => w.role === 'editor'), [workers]);
+  // Rol único: todo el equipo produce el video completo
+  const clippers = workers;
+  const editors = workers;
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
 
   const activePortalBrand = useMemo(() => {
@@ -122,16 +124,14 @@ export function ClientsView() {
     const safeClip = Math.max(1, Math.floor(physicalClip * safetyFactor));
     const safeEdit = Math.max(1, Math.floor(physicalEdit * safetyFactor));
     const safeDailyLimit = Math.min(safeClip, safeEdit);
-    const bottleneckStage = safeEdit <= safeClip ? 'Edición' : 'Clipping';
+    const bottleneckStage = 'Equipo';
 
+    // Mismo motor que Capacidad: cada video pendiente cuenta una vez, repartido hasta su entrega
     const activeOrders = orders.filter(o => o.status !== 'finalizado');
+    const load = spreadLoad(buildWorkUnits(activeOrders, brands), u => u.editRemaining);
     const committedByDate: Record<string, number> = {};
-    for (const o of activeOrders) {
-      const d = o.deliveryDate || todayIso();
-      committedByDate[d] = (committedByDate[d] || 0) + Math.max(1, o.videoCount || 1);
-    }
-
-    const inProgressBoard = allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar').length;
+    for (const [d, n] of Object.entries(load)) committedByDate[d] = Math.ceil(n);
+    const inProgressBoard = 0;
     const targetDate = deliveryDate || todayIso();
     const committedOnTarget =
       (committedByDate[targetDate] || 0) + (targetDate === todayIso() ? inProgressBoard : 0);
@@ -222,7 +222,7 @@ export function ClientsView() {
     clippers,
     editors,
     orders,
-    allVideos,
+    brands,
     deliveryDate,
     deliveryTime,
     videoCount,
@@ -1229,7 +1229,7 @@ export function ClientsView() {
                       <Users size={11} className="text-accent" /> Fuerza Sugerida
                     </span>
                     <p className="font-tech text-xs font-bold text-text mt-1">
-                      {capacityPreview.recommendedClippers}C + {capacityPreview.recommendedEditors}E
+                      {capacityPreview.recommendedClippers} persona(s)
                     </p>
                   </div>
 

@@ -22,6 +22,7 @@ import { SettingsPanel } from './views/SettingsPanel';
 import MorphOrb from './components/ui/ai-thiking-orb-and-input';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { downloadMediaFile } from './lib/supabaseClient';
 
 function Shell() {
   const { view, setView, theme } = useStore();
@@ -31,6 +32,19 @@ function Shell() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Cualquier enlace con "download" en la app descarga directo, sin abrir otra pestaña
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.('a[download]') as HTMLAnchorElement | null;
+      if (!a || !a.href || a.href.startsWith(window.location.origin)) return;
+      e.preventDefault();
+      void downloadMediaFile(a.href, a.getAttribute('download') || undefined);
+    };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
 
   // Cada sección abre arriba (antes conservaba el scroll de la vista anterior)
   useEffect(() => {

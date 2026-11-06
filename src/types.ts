@@ -42,6 +42,11 @@ export interface Correction {
   text: string;
   author?: 'admin' | 'cliente';
   round?: number;
+  /** Versión del video final a la que pertenece la corrección */
+  finalId?: string | null;
+  /** El creador la marcó como corregida */
+  resolved?: boolean;
+  createdAt?: string;
 }
 
 export interface Video {

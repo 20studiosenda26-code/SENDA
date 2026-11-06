@@ -82,7 +82,7 @@ export function CapacityView() {
   // --- Estado Punto 2 (Simulador) ---
   const [simExtraVideos, setSimExtraVideos] = useState<number>(40);
   const [simExtraClippers, setSimExtraClippers] = useState<number>(0);
-  const [simExtraEditors, setSimExtraEditors] = useState<number>(0);
+  const [, setSimExtraEditors] = useState<number>(0);
   const [simUnavailablePct, setSimUnavailablePct] = useState<number>(0);
   const [simEditorDemandBoostPct, setSimEditorDemandBoostPct] = useState<number>(0);
 
@@ -91,11 +91,12 @@ export function CapacityView() {
   const [expandedWorkerId, setExpandedWorkerId] = useState<string | null>(null);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [selectedClipperByOrder, setSelectedClipperByOrder] = useState<Record<string, string>>({});
-  const [selectedEditorByOrder, setSelectedEditorByOrder] = useState<Record<string, string>>({});
+  const [selectedEditorByOrder] = useState<Record<string, string>>({});
   const [reassignedToastId, setReassignedToastId] = useState<string | null>(null);
 
-  const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
-  const editors = useMemo(() => workers.filter(w => w.role === 'editor'), [workers]);
+  // Rol único (Clipper · Asistente de edición): todo el equipo produce el video completo
+  const clippers = workers;
+  const editors = workers;
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
 
   // MOTOR DE CÁLCULO EN VIVO (Datos 100% intactos)
@@ -118,8 +119,11 @@ export function CapacityView() {
 
     const activeOrders = orders.filter(o => o.status !== 'finalizado');
     const units = buildWorkUnits(activeOrders, brands);
-    const clipLoadByDate = spreadLoad(units, u => u.clipRemaining);
-    const editLoadByDate = spreadLoad(units, u => u.editRemaining);
+    // La misma persona hace clips y video final: un video pendiente ocupa su capacidad de principio a fin
+    const clipLoadByDate = spreadLoad(units, u => u.editRemaining);
+    const editLoadByDate = clipLoadByDate;
+    const waitingClips = units.reduce((s, u) => s + u.clipRemaining, 0);
+    const inFinalStage = units.reduce((s, u) => s + Math.max(0, u.editRemaining - u.clipRemaining), 0);
 
     const today = todayIso();
     // Carga "equivalente" por día = la etapa más exigida (el cuello de botella real de ese día)
@@ -177,6 +181,8 @@ export function CapacityView() {
       effectiveRealCapacity,
       activeOrders,
       units,
+      waitingClips,
+      inFinalStage,
       clipToday,
       editToday,
     };
@@ -255,7 +261,7 @@ export function CapacityView() {
       (engine.physicalClippingDaily + simExtraClippers * engine.avgClipperDaily) * availFactor
     );
     const simPhysicalEdit = Math.floor(
-      (engine.physicalEditingDaily + simExtraEditors * engine.avgEditorDaily) * availFactor
+      (engine.physicalEditingDaily + simExtraClippers * engine.avgClipperDaily) * availFactor
     );
 
     const simSafeClip = Math.max(1, Math.floor(simPhysicalClip * safetyFactor));
@@ -286,7 +292,6 @@ export function CapacityView() {
     engine,
     simExtraVideos,
     simExtraClippers,
-    simExtraEditors,
     simUnavailablePct,
     simEditorDemandBoostPct,
     capacityConfig.safetyMarginPct,
@@ -370,7 +375,7 @@ export function CapacityView() {
           level = 'critico';
         } else if (hoursUntilMaxReassign <= 2.5) {
           level = 'urgente';
-        } else if (!o.clipperId || !o.editorId || complexity === 'alta') {
+        } else if (!o.clipperId || complexity === 'alta') {
           level = 'prioritario';
         }
 
@@ -469,7 +474,7 @@ export function CapacityView() {
               </span>
             </div>
             <p className="text-[11px] font-tech text-muted-2 mt-0.5">
-              TELEMETRÍA EN TIEMPO REAL · CUELLO DE BOTELLA: <strong className="text-accent">{engine.bottleneckStage.toUpperCase()}</strong>
+              TELEMETRÍA EN TIEMPO REAL · LÍMITE: <strong className="text-accent">CAPACIDAD DEL EQUIPO</strong>
             </p>
           </div>
         </div>
@@ -681,7 +686,7 @@ export function CapacityView() {
                       {engine.overallUtilPct}%
                     </span>
                     <span className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-3/90 border border-line text-[10px] font-tech text-accent">
-                      <Activity size={10} /> Límite: {engine.bottleneckStage}
+                      <Activity size={10} /> Límite: Equipo
                     </span>
                   </div>
                 </div>
@@ -777,7 +782,7 @@ export function CapacityView() {
                           <Scissors size={15} />
                         </div>
                         <div>
-                          <p className="text-xs font-bold">Etapa Clipping ({clippers.length})</p>
+                          <p className="text-xs font-bold">Equipo ({clippers.length})</p>
                           <p className="text-[10px] font-tech text-muted-2">Promedio: {engine.avgClipperDaily} vid/día por persona</p>
                         </div>
                       </div>
@@ -805,38 +810,26 @@ export function CapacityView() {
                     </div>
                   </div>
 
-                  {/* Telemetría Editores */}
+                  {/* Pipeline del equipo: dónde está el trabajo pendiente */}
                   <div className="bg-surface/85 backdrop-blur-md border border-line hover:border-mint/40 rounded-2xl p-4 space-y-3 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-mint-dim text-mint flex items-center justify-center">
-                          <Film size={15} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold">Etapa Edición ({editors.length})</p>
-                          <p className="text-[10px] font-tech text-muted-2">Promedio: {engine.avgEditorDaily} vid/día por persona</p>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-mint-dim text-mint flex items-center justify-center">
+                        <Film size={15} />
                       </div>
-                      <div className="text-right font-tech">
-                        <span className="text-sm font-bold text-mint">{engine.safeEditingDaily}</span>
-                        <span className="text-[11px] text-muted-2"> / {engine.physicalEditingDaily} fís</span>
+                      <div>
+                        <p className="text-xs font-bold">Trabajo pendiente por etapa</p>
+                        <p className="text-[10px] font-tech text-muted-2">Imagen + clips → video final</p>
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-10 gap-1">
-                      {Array.from({ length: 10 }).map((_, idx) => {
-                        const activeSeg = (idx + 1) * 10 <= Math.max(10, engine.editingUtilPct);
-                        return (
-                          <div
-                            key={idx}
-                            className={`h-2 rounded-sm transition-all duration-500 ${
-                              activeSeg && engine.editingUtilPct > 0
-                                ? 'bg-mint shadow-[0_0_8px_rgba(111,231,200,0.6)]'
-                                : 'bg-surface-3'
-                            }`}
-                          />
-                        );
-                      })}
+                    <div className="grid grid-cols-2 gap-2 font-tech">
+                      <div className="bg-surface-3 border border-line rounded-lg px-3 py-2">
+                        <p className="text-[10px] text-muted-2 flex items-center gap-1"><Scissors size={10} /> Esperando clips</p>
+                        <p className="text-lg font-bold text-accent">{engine.waitingClips}</p>
+                      </div>
+                      <div className="bg-surface-3 border border-line rounded-lg px-3 py-2">
+                        <p className="text-[10px] text-muted-2 flex items-center gap-1"><Film size={10} /> En video final</p>
+                        <p className="text-lg font-bold text-mint">{engine.inFinalStage}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1092,7 +1085,7 @@ export function CapacityView() {
                 <div className="bg-surface-3/90 border border-accent/25 rounded-2xl p-4">
                   <div className="flex justify-between items-baseline mb-2">
                     <span className="text-xs font-semibold flex items-center gap-1">
-                      <Scissors size={12} className="text-accent" /> + Clippers
+                      <Scissors size={12} className="text-accent" /> + Personas en el equipo
                     </span>
                     <span className="font-display text-2xl font-bold font-tech text-accent">+{simExtraClippers}</span>
                   </div>
@@ -1109,25 +1102,6 @@ export function CapacityView() {
                   </span>
                 </div>
 
-                <div className="bg-surface-3/90 border border-mint/25 rounded-2xl p-4">
-                  <div className="flex justify-between items-baseline mb-2">
-                    <span className="text-xs font-semibold flex items-center gap-1">
-                      <Film size={12} className="text-mint" /> + Editores
-                    </span>
-                    <span className="font-display text-2xl font-bold font-tech text-mint">+{simExtraEditors}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    value={simExtraEditors}
-                    onChange={e => setSimExtraEditors(Number(e.target.value))}
-                    className="w-full accent-mint cursor-pointer"
-                  />
-                  <span className="text-[10px] font-tech text-muted-2 block mt-1.5">
-                    Aporte: +{simExtraEditors * engine.avgEditorDaily} vid/día fís.
-                  </span>
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1197,7 +1171,7 @@ export function CapacityView() {
               <div className="bg-surface-3/90 border border-accent/30 rounded-2xl p-5">
                 <span className="text-[10px] font-tech uppercase text-accent block">Cuello de Botella</span>
                 <p className="font-display text-3xl sm:text-4xl font-bold font-tech text-accent mt-2">
-                  {simulation.simBottleneck}
+                  Equipo
                 </p>
                 <span className="text-xs text-muted font-tech mt-1.5 block">
                   Etapa que marca el techo
@@ -1249,7 +1223,7 @@ export function CapacityView() {
               </span>
 
               <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
-                {(['todos', 'clipper', 'editor'] as const).map(r => (
+                {(['todos'] as const).map(r => (
                   <button
                     key={r}
                     type="button"
@@ -1258,7 +1232,7 @@ export function CapacityView() {
                       protocolRoleFilter === r ? 'bg-accent text-on-accent' : 'text-muted hover:text-text'
                     }`}
                   >
-                    {r === 'todos' ? 'Todos' : r === 'clipper' ? 'Clippers' : 'Editores'}
+                    {r === 'todos' ? `Equipo (${workers.length})` : r}
                   </button>
                 ))}
               </div>
@@ -1394,7 +1368,6 @@ export function CapacityView() {
                   }[complexity];
 
                   const selectedClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';
-                  const selectedEditorId = selectedEditorByOrder[order.id] ?? order.editorId ?? '';
 
                   return (
                     <div
@@ -1463,14 +1436,14 @@ export function CapacityView() {
                           <div className="flex items-center justify-between text-[11px] font-tech text-muted-2">
                             <span>Producción requerida: <strong className="text-text">{productionHoursNeeded}h netas</strong></span>
                             <span>
-                              Actual: {currentClipper?.name || 'Sin Clipper'} / {currentEditor?.name || 'Sin Editor'}
+                              Actual: {currentClipper?.name || currentEditor?.name || 'Sin asignar'}
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div className="grid grid-cols-1 gap-2.5">
                             <div>
                               <label className="text-[10px] font-tech uppercase text-accent block mb-1">
-                                Asignar Clipper
+                                Reasignar a (Clipper · Asistente de edición)
                               </label>
                               <select
                                 value={selectedClipperId}
@@ -1479,9 +1452,9 @@ export function CapacityView() {
                                 }
                                 className="w-full bg-surface-3 border border-line rounded-xl px-2.5 py-2 text-xs outline-none focus:border-accent"
                               >
-                                <option value="">Seleccionar Clipper...</option>
-                                {workersWorkloadToday
-                                  .filter(x => x.worker.role === 'clipper')
+                                <option value="">Seleccionar persona...</option>
+                                {[...workersWorkloadToday]
+                                  .sort((x, y) => y.freeCapacity - x.freeCapacity)
                                   .map(x => (
                                     <option key={x.worker.id} value={x.worker.id}>
                                       {x.worker.name} ({x.totalVideosToday}/{x.capacity} hoy · {x.freeCapacity} libres)
@@ -1490,27 +1463,6 @@ export function CapacityView() {
                               </select>
                             </div>
 
-                            <div>
-                              <label className="text-[10px] font-tech uppercase text-mint block mb-1">
-                                Asignar Editor(a)
-                              </label>
-                              <select
-                                value={selectedEditorId}
-                                onChange={e =>
-                                  setSelectedEditorByOrder(prev => ({ ...prev, [order.id]: e.target.value }))
-                                }
-                                className="w-full bg-surface-3 border border-line rounded-xl px-2.5 py-2 text-xs outline-none focus:border-mint"
-                              >
-                                <option value="">Seleccionar Editor(a)...</option>
-                                {workersWorkloadToday
-                                  .filter(x => x.worker.role === 'editor')
-                                  .map(x => (
-                                    <option key={x.worker.id} value={x.worker.id}>
-                                      {x.worker.name} ({x.totalVideosToday}/{x.capacity} hoy · {x.freeCapacity} libres)
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
                           </div>
 
                           <div className="flex justify-end">
@@ -1595,26 +1547,26 @@ export function CapacityView() {
             <div className="bg-gradient-to-br from-mint/15 via-surface-3 to-accent/10 border border-mint/40 rounded-2xl p-6 space-y-3 my-auto relative z-10">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="text-xs font-tech uppercase text-mint font-bold">
-                  Etapa Limitante Actual: {engine.bottleneckStage}
+                  Límite actual: capacidad del equipo
                 </span>
                 <span className="font-tech text-xs px-3 py-0.5 rounded-full bg-surface-2 border border-mint/30 text-mint">
-                  Promedio {engine.bottleneckStage}: {engine.bottleneckStage === 'Edición' ? engine.avgEditorDaily : engine.avgClipperDaily} vid/día
+                  Promedio por persona: {engine.avgClipperDaily} vid/día
                 </span>
               </div>
 
               <p className="font-display text-3xl sm:text-4xl font-bold text-text tracking-tight">
-                +1 {engine.bottleneckStage === 'Edición' ? 'Editor(a)' : 'Clipper'} = +{Math.floor((engine.bottleneckStage === 'Edición' ? engine.avgEditorDaily : engine.avgClipperDaily) * ((100 - capacityConfig.safetyMarginPct) / 100))} videos seguros / día
+                +1 persona = +{Math.floor(engine.avgClipperDaily * ((100 - capacityConfig.safetyMarginPct) / 100))} videos seguros / día
               </p>
 
               <p className="text-xs text-muted font-tech">
-                Expansión mensual proyectada: <strong className="text-mint">+{Math.floor((engine.bottleneckStage === 'Edición' ? engine.avgEditorDaily : engine.avgClipperDaily) * ((100 - capacityConfig.safetyMarginPct) / 100)) * 26} videos comerciales al mes</strong>.
+                Expansión mensual proyectada: <strong className="text-mint">+{Math.floor(engine.avgClipperDaily * ((100 - capacityConfig.safetyMarginPct) / 100)) * 26} videos comerciales al mes</strong>.
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4 relative z-10">
               <div className="bg-surface-3/90 border border-line rounded-2xl p-4 flex items-center justify-between">
                 <div>
-                  <span className="text-[11px] text-muted-2 block">Promedio Clipper</span>
+                  <span className="text-[11px] text-muted-2 block">Promedio por persona</span>
                   <p className="font-display text-2xl font-bold font-tech text-accent">{engine.avgClipperDaily} vid/día</p>
                 </div>
                 <Scissors size={22} className="text-accent opacity-60" />
@@ -1622,8 +1574,8 @@ export function CapacityView() {
 
               <div className="bg-surface-3/90 border border-line rounded-2xl p-4 flex items-center justify-between">
                 <div>
-                  <span className="text-[11px] text-muted-2 block">Promedio Editor(a)</span>
-                  <p className="font-display text-2xl font-bold font-tech text-mint">{engine.avgEditorDaily} vid/día</p>
+                  <span className="text-[11px] text-muted-2 block">Personas en el equipo</span>
+                  <p className="font-display text-2xl font-bold font-tech text-mint">{clippers.length}</p>
                 </div>
                 <Film size={22} className="text-mint opacity-60" />
               </div>
@@ -1694,10 +1646,10 @@ export function CapacityView() {
               </label>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-72 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-4 max-h-72 overflow-y-auto pr-1">
               <div className="space-y-2">
                 <span className="text-xs font-semibold text-accent flex items-center justify-between">
-                  <span>Clippers</span>
+                  <span>Clippers · Asistentes de edición (videos completos / día)</span>
                   <span className="font-tech">Prom: {engine.avgClipperDaily} v/d</span>
                 </span>
                 {clippers.map(w => (
@@ -1714,24 +1666,6 @@ export function CapacityView() {
                 ))}
               </div>
 
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-mint flex items-center justify-between">
-                  <span>Editores</span>
-                  <span className="font-tech">Prom: {engine.avgEditorDaily} v/d</span>
-                </span>
-                {editors.map(w => (
-                  <div key={w.id} className="bg-surface-3 border border-line rounded-xl px-3 py-2 flex items-center justify-between">
-                    <span className="text-xs font-medium truncate">{w.name}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={getWorkerCapacity(w.id)}
-                      onChange={e => setWorkerCapacity(w.id, Number(e.target.value) || 1)}
-                      className="w-16 bg-surface-2 border border-line rounded-md px-2 py-1 text-xs font-tech text-center outline-none focus:border-mint"
-                    />
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         </div>

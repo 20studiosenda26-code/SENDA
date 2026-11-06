@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type { Role } from '../types';
 import type { AuthUser } from '../lib/auth';
+import { normalizeRole, TEAM_ROLE_LABEL, TEAM_ROLE_PLURAL, TEAM_ROLE_SHORT } from '../lib/roles';
 
 export function UserManagement() {
   const { session, user: currentUser } = useAuth();
@@ -47,7 +48,7 @@ export function UserManagement() {
           id,
           email: contactEmail || fallbackEmail || '',
           name: (p.name as string) || '',
-          role: p.role as Role,
+          role: normalizeRole(p.role),
         };
       }));
     }
@@ -111,7 +112,6 @@ export function UserManagement() {
     return {
       total: users.length,
       clipper: users.filter(u => u.role === 'clipper').length,
-      editor: users.filter(u => u.role === 'editor').length,
       admin: users.filter(u => u.role === 'admin').length,
     };
   }, [users]);
@@ -153,7 +153,7 @@ export function UserManagement() {
               </span>
             </div>
             <p className="text-xs text-muted-2 truncate">
-              {counts.clipper} Clippers · {counts.editor} Editores · {counts.admin} Admins — {isExpanded ? 'Haz clic para ocultar la lista' : 'Haz clic en la flecha para desplegar el directorio'}
+              {counts.clipper} {TEAM_ROLE_PLURAL} · {counts.admin} Admins — {isExpanded ? 'Haz clic para ocultar la lista' : 'Haz clic en la flecha para desplegar el directorio'}
             </p>
           </div>
         </button>
@@ -212,8 +212,7 @@ export function UserManagement() {
                 <div>
                   <label className="text-xs text-muted block mb-1">Rol</label>
                   <select value={formRole} onChange={e => setFormRole(e.target.value as Role)} className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent">
-                    <option value="clipper">Clipper</option>
-                    <option value="editor">Editora</option>
+                    <option value="clipper">{TEAM_ROLE_LABEL}</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
@@ -252,7 +251,7 @@ export function UserManagement() {
               />
             </div>
             <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-lg p-1">
-              {(['todos', 'clipper', 'editor', 'admin'] as const).map(r => (
+              {(['todos', 'clipper', 'admin'] as const).map(r => (
                 <button
                   key={r}
                   type="button"
@@ -261,7 +260,7 @@ export function UserManagement() {
                     roleFilter === r ? 'bg-accent text-on-accent' : 'text-muted hover:text-text'
                   }`}
                 >
-                  {r === 'todos' ? `Todos (${counts.total})` : r === 'clipper' ? `Clippers (${counts.clipper})` : r === 'editor' ? `Editores (${counts.editor})` : `Admins (${counts.admin})`}
+                  {r === 'todos' ? `Todos (${counts.total})` : r === 'clipper' ? `${TEAM_ROLE_PLURAL} (${counts.clipper})` : `Admins (${counts.admin})`}
                 </button>
               ))}
             </div>
@@ -301,9 +300,9 @@ export function UserManagement() {
                   </div>
 
                   <span className={`text-[11px] px-2.5 py-1 rounded-md flex items-center gap-1 shrink-0 font-medium ${
-                    u.role === 'admin' ? 'bg-violet-dim text-violet' : u.role === 'editor' ? 'bg-mint-dim text-mint' : 'bg-accent-dim text-accent'
+                    u.role === 'admin' ? 'bg-violet-dim text-violet' : 'bg-accent-dim text-accent'
                   }`}>
-                    <Shield size={11} /> {u.role === 'clipper' ? 'Clipper' : u.role === 'editor' ? 'Editor(a)' : 'Admin'}
+                    <Shield size={11} /> {u.role === 'admin' ? 'Admin' : TEAM_ROLE_SHORT}
                   </span>
                 </div>
               ))}
