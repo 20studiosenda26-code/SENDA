@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
+import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
@@ -1171,15 +1171,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [updateVideo, findVideo, pushNotification]);
 
+  // Solo existe UN video final por video: si ya hay uno, se reemplaza el archivo (las correcciones se conservan)
   const addFinalVideo = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
-    updateVideo(videoId, v => ({
-      ...v,
-      // Subir una nueva versión vuelve a poner el video en revisión (también tras correcciones)
-      qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' || v.qc === 'correcciones' ? 'revision' : v.qc,
-      finalVideos: [...v.finalVideos, { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null, status: 'pending' }],
-    }));
-    const v = findVideo(videoId);
-    if (v) pushNotification('admin', 'qc_video', `${v.clipperName} subió el video final de "${v.name}" para revisión`);
+    const prev = findVideo(videoId);
+    const current = prev?.finalVideos[prev.finalVideos.length - 1];
+    updateVideo(videoId, v => {
+      const existing = v.finalVideos[v.finalVideos.length - 1];
+      const nextFinal: Clip = existing
+        ? {
+            ...existing,
+            note: note || existing.note,
+            fileName: fileName || null,
+            fileUrl: fileUrl || null,
+            status: 'pending',
+            rejectionReason: null,
+            reviewedBy: null,
+            reviewedAt: null,
+            version: (existing.version || 1) + 1,
+            previousVersions: [
+              ...(existing.previousVersions || []),
+              { fileName: existing.fileName || null, fileUrl: existing.fileUrl || null, replacedAt: new Date().toISOString() },
+            ],
+          }
+        : { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null, status: 'pending', version: 1, previousVersions: [] };
+      return {
+        ...v,
+        // Subir o reemplazar el final lo pone en revisión (también tras correcciones)
+        qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' || v.qc === 'correcciones' ? 'revision' : v.qc,
+        finalVideos: [nextFinal],
+      };
+    });
+    if (prev) {
+      pushNotification('admin', 'qc_video', current
+        ? `${prev.clipperName} reemplazó el video final de "${prev.name}" con las correcciones`
+        : `${prev.clipperName} subió el video final de "${prev.name}" para revisión`);
+    }
   }, [updateVideo, findVideo, pushNotification]);
 
   const uploadMainImage = useCallback((videoId: string, fileName: string, fileUrl: string) => {

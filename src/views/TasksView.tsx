@@ -18,7 +18,7 @@ import {
   ThumbsUp, ThumbsDown, Check, RotateCcw, Loader2,
   Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
 } from 'lucide-react';
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 
@@ -503,44 +503,6 @@ function VideoDetail({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {(isAdmin || isEditor) && (
-            <div className="flex items-center gap-2.5 bg-surface-2 border border-mint/40 rounded-lg px-3.5 py-2 hover:border-mint transition-colors">
-              <VideoIcon size={16} className="text-mint shrink-0" />
-              <div className="text-xs min-w-[115px]">
-                <p className="font-medium text-text">Google Drive (Video final)</p>
-                <p className="text-muted truncate max-w-[150px]">
-                  {getGoogleDriveBridgeUrl()
-                    ? "Puente automático activo"
-                    : getGoogleDriveFolderUrl()
-                    ? "Carpeta vinculada"
-                    : "Sin configurar"}
-                </p>
-              </div>
-              {getGoogleDriveFolderUrl() && (
-                <a
-                  href={getGoogleDriveFolderUrl()}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs bg-mint/20 hover:bg-mint/30 border border-mint/40 text-mint rounded-md px-2.5 py-1.5 font-medium transition-all flex items-center gap-1 shrink-0"
-                >
-                  <Upload size={12} /> Abrir Drive
-                </a>
-              )}
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBridgeUrlDraft(getGoogleDriveBridgeUrl());
-                    setFolderUrlDraft(getGoogleDriveFolderUrl());
-                    setShowDriveConfigModal(true);
-                  }}
-                  className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-bold hover:opacity-90 transition-all flex items-center gap-1 shrink-0"
-                >
-                  <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Configurar Drive" : "Conectar Drive"}
-                </button>
-              )}
-            </div>
-          )}
           <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2 hover:border-muted-2 transition-colors">
             <FileText size={16} className="text-accent shrink-0" />
             <div className="text-xs">
@@ -633,7 +595,7 @@ function VideoDetail({
                 {activeFinal ? <VideoIcon size={12} /> : <Play size={12} />}
                 {activeFinal ? 'Video final' : `Clip ${activeMedia.name}`}
               </span>
-              <span className="text-[11px] text-muted-2 truncate max-w-[60%]">{activeMedia.fileName || ''}</span>
+
             </div>
           )}
           <div className="relative w-full min-h-[520px] max-h-[640px] bg-surface-3 border border-line rounded-xl flex items-center justify-center overflow-hidden mx-auto">
@@ -796,6 +758,21 @@ function VideoDetail({
                   </span>
                 )
               )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBridgeUrlDraft(getGoogleDriveBridgeUrl());
+                    setFolderUrlDraft(getGoogleDriveFolderUrl());
+                    setShowDriveConfigModal(true);
+                  }}
+                  title={getGoogleDriveBridgeUrl() ? 'Puente automático activo' : getGoogleDriveFolderUrl() ? 'Carpeta vinculada' : 'Sin configurar'}
+                  className="ml-auto mr-2 text-xs text-muted hover:text-mint bg-surface-3 border border-line hover:border-mint/40 rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? 'bg-mint' : 'bg-muted-2'}`} />
+                  {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? 'Configurar Drive' : 'Conectar Drive'}
+                </button>
+              )}
               {isAdmin && video.clips.some(c => c.fileUrl && c.status !== "approved") && (
                 <button onClick={() => setConfirmAcceptAll(true)} className="text-xs bg-mint-dim text-mint rounded-md px-2.5 py-1.5 font-medium hover:bg-mint/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1">
                   <Check size={12} /> Aceptar todos los clips
@@ -943,11 +920,8 @@ function VideoDetail({
                         {(c.rejectionReason || c.adminNote) && (
                           <p className="text-xs text-amber mb-1">Comentario: {c.rejectionReason || c.adminNote}</p>
                         )}
-                        {c.fileName && (
-                          <p className="text-[11px] text-muted-2 truncate flex items-center gap-1"><Film size={11} className="shrink-0" /> {c.fileName}</p>
-                        )}
+
                       </div>
-                      {c.fileUrl && <DownloadButton url={c.fileUrl} fileName={c.fileName} />}
                       {isClipper && (
                         <div onClick={e => e.stopPropagation()} className="shrink-0">
                           <input
@@ -1003,16 +977,18 @@ function VideoDetail({
                   <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
                 <div className="flex items-center gap-2">
-                  {(isEditor || isAdmin) && (
+                  {!isAdmin && (
                     <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
-                      <Plus size={14} /> Agregar versión
+                      {latestFinal ? <><RotateCcw size={14} /> Reemplazar</> : <><Plus size={14} /> Subir video final</>}
                     </button>
                   )}
                 </div>
               </div>
-              {showFinalForm && (isEditor || isAdmin) && (
-                <div className="mb-4 space-y-3 p-4 bg-surface-3 rounded-lg border border-line">
-                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final (ej. Video 1 Final)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
+              {showFinalForm && !isAdmin && (
+                <div className="mb-4 space-y-3 p-4 bg-surface-3 rounded-lg border border-line animate-fadeIn">
+                  {latestFinal && (
+                    <p className="text-xs text-muted">Se reemplazará el video final actual. Las correcciones marcadas se conservan para que el administrador las verifique.</p>
+                  )}
                   <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
 
                   <label className="block bg-surface border border-line border-dashed rounded-md px-3 py-3 text-sm text-muted cursor-pointer hover:border-accent hover:text-accent transition-colors space-y-2">
@@ -1080,7 +1056,7 @@ function VideoDetail({
                     disabled={uploadingFinalVideo || (!finalFileUrl && !finalDriveLinkInput.trim())}
                     className="w-full bg-accent text-on-accent rounded-md py-2.5 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                   >
-                    {uploadingFinalVideo ? `Subiendo a Google Drive (${uploadPct}%)...` : "Guardar video final"}
+                    {uploadingFinalVideo ? `Subiendo (${uploadPct}%)...` : latestFinal ? "Reemplazar video final" : "Guardar video final"}
                   </button>
                 </div>
               )}
@@ -1090,9 +1066,8 @@ function VideoDetail({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {video.finalVideos.map((fv, idx) => {
+                  {video.finalVideos.slice(-1).map(fv => {
                     const isPlayingThis = activeFinal?.id === fv.id;
-                    const isLatest = idx === video.finalVideos.length - 1;
                     return (
                       <div
                         key={fv.id}
@@ -1107,22 +1082,15 @@ function VideoDetail({
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-sm font-medium text-text">{fv.name}</p>
                               {(() => {
-                                const open = video.corrections.filter(c => !c.resolved && (c.finalId === fv.id || (!c.finalId && isLatest))).length;
+                                const open = video.corrections.filter(c => !c.resolved).length;
                                 return open > 0 ? <span className="text-[10px] font-tech px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{open} corrección(es)</span> : null;
                               })()}
                               {fv.status === 'approved' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-mint-dim text-mint">Aprobado</span>}
-                              {video.finalVideos.length > 1 && (
-                                <span className={`text-[10px] font-tech px-1.5 py-0.5 rounded ${isLatest ? 'bg-mint-dim text-mint' : 'bg-surface-2 text-muted-2'}`}>
-                                  {isLatest ? 'Última versión' : `v${idx + 1}`}
-                                </span>
-                              )}
+                              {fv.status === 'rejected' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">Rechazado</span>}
+                              {(fv.version || 1) > 1 && <span className="text-[10px] font-tech px-1.5 py-0.5 rounded bg-surface-2 text-muted-2">Reemplazado {(fv.version || 1) - 1}×</span>}
                             </div>
                             {fv.note && <p className="text-xs text-muted mb-1">{fv.note}</p>}
-                            {fv.fileName && (
-                              <p className="text-[11px] text-muted-2 truncate flex items-center gap-1"><VideoIcon size={11} className="shrink-0" /> {fv.fileName}</p>
-                            )}
                           </div>
-                          {fv.fileUrl && <DownloadButton url={fv.fileUrl} fileName={fv.fileName || `${fv.name}.mp4`} />}
                           {fv.fileUrl && (
                             isPlayingThis ? (
                               <span className="text-[11px] text-mint flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-mint-dim border border-mint/30">
@@ -1502,25 +1470,22 @@ function FinalReviewPanel({
   canReadPlayerTime: boolean; onSeek: (t: number) => void;
 }) {
   const { setFinalVideoStatus, addCorrection, toggleCorrectionResolved, deleteCorrection } = useStore();
-  const [comment, setComment] = useState('');
-  const [rejectHint, setRejectHint] = useState(false);
   const [pickTime, setPickTime] = useState<number | null>(null);
   const [timeInput, setTimeInput] = useState('');
   const [corrText, setCorrText] = useState('');
   const [justAdded, setJustAdded] = useState(false);
 
-  const isLatest = video.finalVideos[video.finalVideos.length - 1]?.id === final.id;
   const corrections = useMemo(
     () => video.corrections
-      .filter(c => c.finalId === final.id || (!c.finalId && isLatest))
+      .slice()
       .sort((a, b) => a.time - b.time),
-    [video.corrections, final.id, isLatest]
+    [video.corrections]
   );
   const pending = corrections.filter(c => !c.resolved).length;
   const effectiveTime = pickTime ?? Math.round(currentTime);
 
   useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
-  useEffect(() => { setPickTime(null); setComment(''); setRejectHint(false); }, [final.id]);
+  useEffect(() => { setPickTime(null); }, [final.id]);
 
   const submitCorrection = () => {
     const text = corrText.trim();
@@ -1554,47 +1519,34 @@ function FinalReviewPanel({
       )}
 
       {isAdmin && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => { setFinalVideoStatus(video.id, final.id, 'approved', comment.trim() || undefined); setComment(''); setRejectHint(false); }}
-              title="Aprobar video final"
-              className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
-                final.status === 'approved' ? 'bg-mint text-on-accent border-mint shadow-[0_0_15px_rgba(111,231,200,0.3)]' : 'bg-mint/10 text-mint border-mint/30 hover:bg-mint/20'
-              }`}
-            >
-              <Check size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (comment.trim() || pending > 0) {
-                  setFinalVideoStatus(video.id, final.id, 'rejected', comment.trim() || `${pending} corrección(es) marcadas en el video`);
-                  setComment('');
-                  setRejectHint(false);
-                } else {
-                  setRejectHint(true);
-                }
-              }}
-              title="Pedir correcciones"
-              className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
-                final.status === 'rejected' ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
-              }`}
-            >
-              <X size={18} />
-            </button>
-            <input
-              value={comment}
-              onChange={e => setComment(e.target.value)}
-              placeholder="Comentario general del video final..."
-              className="flex-1 bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
-            />
-          </div>
-          {rejectHint && (
-            <p className="text-[11px] text-red-400">Escribe un comentario o marca al menos una corrección con tiempo, y vuelve a presionar la X.</p>
-          )}
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setFinalVideoStatus(video.id, final.id, 'approved')}
+            title="Aceptar video final"
+            className={`flex-1 h-10 rounded-lg border flex items-center justify-center gap-1.5 text-xs font-semibold hover:-translate-y-0.5 transition-all duration-200 ${
+              final.status === 'approved' ? 'bg-mint text-on-accent border-mint shadow-[0_0_15px_rgba(111,231,200,0.3)]' : 'bg-mint/10 text-mint border-mint/30 hover:bg-mint/20'
+            }`}
+          >
+            <Check size={16} /> {final.status === 'approved' ? 'Aceptado' : 'Aceptar'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFinalVideoStatus(video.id, final.id, 'rejected', pending > 0 ? `${pending} corrección(es) marcadas en el video` : undefined)}
+            title="Rechazar: el clipper debe subir el video corregido"
+            className={`flex-1 h-10 rounded-lg border flex items-center justify-center gap-1.5 text-xs font-semibold hover:-translate-y-0.5 transition-all duration-200 ${
+              final.status === 'rejected' ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+            }`}
+          >
+            <X size={16} /> {final.status === 'rejected' ? 'Rechazado' : 'Rechazar'}
+          </button>
         </div>
+      )}
+
+      {!isAdmin && final.status === 'rejected' && (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+          El video final fue rechazado. Aplica las correcciones y usa <strong>Reemplazar</strong> en “Video final”.
+        </p>
       )}
 
       <div className="bg-surface-3/60 border border-line rounded-xl p-3 space-y-2.5">
