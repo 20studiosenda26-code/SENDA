@@ -106,6 +106,12 @@ export function getGoogleDrivePreviewUrl(url?: string | null): string | null {
   return `https://drive.google.com/file/d/${id}/preview`;
 }
 
+/** URL directa del archivo de Drive para reproducirlo en un <video> propio (permite controlar el tiempo). */
+export function getGoogleDriveStreamUrl(url?: string | null): string | null {
+  const id = extractGoogleDriveId(url);
+  return id ? `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t` : null;
+}
+
 export function getGoogleDriveDownloadUrl(url?: string | null): string | null {
   const id = extractGoogleDriveId(url);
   if (!id) return null;

@@ -1,11 +1,12 @@
 import { useStore } from '../store';
-import type { Video, QcStatus, ClipStatus, Correction, MainImageStatus, Clip } from '../types';
+import type { Video, QcStatus, ClipStatus, MainImageStatus, Clip } from '../types';
 import {
   uploadSharedFile,
   resolveMediaUrl,
   downloadMediaFile,
   isGoogleDriveUrl,
   getGoogleDrivePreviewUrl,
+  getGoogleDriveStreamUrl,
   getGoogleDriveBridgeUrl,
   setGoogleDriveBridgeUrl,
   getGoogleDriveFolderUrl,
@@ -15,7 +16,7 @@ import { qcStatusLabel, pendingRoleSuffix } from '../lib/qcLabel';
 import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
-  ThumbsUp, ThumbsDown, Check, RotateCcw, Loader2,
+  ThumbsUp, ThumbsDown, Check, RotateCcw, Loader2, FolderOpen,
   Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
 } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -281,8 +282,6 @@ function VideoDetail({
   const [clipFileUrl, setClipFileUrl] = useState('');
   const [finalName, setFinalName] = useState('');
   const [finalNote, setFinalNote] = useState('');
-  const [finalFileName, setFinalFileName] = useState('');
-  const [finalFileUrl, setFinalFileUrl] = useState('');
   const [mainImageComment, setMainImageComment] = useState('');
   const [showMainImagePreview, setShowMainImagePreview] = useState(false);
   // Lo que se reproduce en el visor grande de la izquierda (clip o video final)
@@ -296,7 +295,6 @@ function VideoDetail({
   const [uploadingNewClip, setUploadingNewClip] = useState(false);
   const [uploadingMainImage, setUploadingMainImage] = useState(false);
   const [uploadingBrief, setUploadingBrief] = useState(false);
-  const [uploadingFinalVideo, setUploadingFinalVideo] = useState(false);
   const [uploadPct, setUploadPct] = useState<number>(0);
   const [finalDriveLinkInput, setFinalDriveLinkInput] = useState("");
   const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
@@ -309,6 +307,8 @@ function VideoDetail({
   const playerRef = useRef<HTMLVideoElement>(null);
   const [mediaTime, setMediaTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
+  // Drive se reproduce en el reproductor propio; si Google lo bloquea, se usa su visor (sin control de tiempo)
+  const [driveFallback, setDriveFallback] = useState(false);
   const seekTo = (t: number) => {
     const el = playerRef.current;
     if (el) { el.currentTime = t; el.pause(); }
@@ -346,6 +346,7 @@ function VideoDetail({
   useEffect(() => {
     let cancelled = false;
     const raw = activeMedia?.fileUrl || null;
+    setDriveFallback(false);
     if (!raw) {
       setResolvedClipUrl(null);
       setLoadingClipMedia(false);
@@ -416,32 +417,6 @@ function VideoDetail({
       e.target.value = '';
       setTimeout(() => {
         setUploadingClipId(null);
-        setUploadPct(0);
-      }, 250);
-    }
-  };
-
-  const handleFinalFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploadErrorMsg(null);
-    setFinalFileName(f.name);
-    setUploadingFinalVideo(true);
-    setUploadPct(2);
-    try {
-      const url = await uploadSharedFile(f, `finals/${video.id}`, pct => setUploadPct(pct), { driveFolderUrl: projectDriveUrl });
-      setFinalFileUrl(url);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "";
-      if (msg === "DRIVE_REQUIRED_FOR_LARGE_FILE") {
-        setUploadErrorMsg(`El video final pesa ${(f.size / (1024 * 1024)).toFixed(1)} MB. Súbelo a la carpeta de Google Drive y pega el enlace abajo (o pide al Admin activar el Puente de Google Drive).`);
-      } else {
-        setUploadErrorMsg("Error al subir. Usa el enlace de Google Drive abajo.");
-      }
-      setFinalFileUrl("");
-    } finally {
-      setTimeout(() => {
-        setUploadingFinalVideo(false);
         setUploadPct(0);
       }, 250);
     }
@@ -609,7 +584,7 @@ function VideoDetail({
                 <p className="text-xs text-muted">Cargando archivo en alta calidad...</p>
               </div>
             ) : activeMedia?.fileUrl && resolvedClipUrl ? (
-              isGoogleDriveUrl(resolvedClipUrl) ? (
+              isGoogleDriveUrl(resolvedClipUrl) && driveFallback ? (
                 <iframe
                   key={`gdrive-${activeMedia.id}-${resolvedClipUrl}`}
                   src={getGoogleDrivePreviewUrl(resolvedClipUrl) || resolvedClipUrl}
@@ -624,7 +599,8 @@ function VideoDetail({
                 <video
                   key={`${activeMedia.id}-${resolvedClipUrl}`}
                   ref={playerRef}
-                  src={resolvedClipUrl}
+                  src={isGoogleDriveUrl(resolvedClipUrl) ? getGoogleDriveStreamUrl(resolvedClipUrl) || resolvedClipUrl : resolvedClipUrl}
+                  onError={() => { if (isGoogleDriveUrl(resolvedClipUrl)) setDriveFallback(true); }}
                   controls
                   autoPlay={Boolean(playing)}
                   playsInline
@@ -656,7 +632,7 @@ function VideoDetail({
               canResolve={!isAdmin}
               duration={mediaDuration || video.durationSeconds || 60}
               currentTime={mediaTime}
-              canReadPlayerTime={Boolean(resolvedClipUrl && !isGoogleDriveUrl(resolvedClipUrl))}
+              canReadPlayerTime={Boolean(resolvedClipUrl && !(isGoogleDriveUrl(resolvedClipUrl) && driveFallback))}
               onSeek={seekTo}
             />
           )}
@@ -997,74 +973,64 @@ function VideoDetail({
                   {latestFinal && (
                     <p className="text-xs text-muted">Se reemplazará el video final actual. Las correcciones marcadas se conservan para que el administrador las verifique.</p>
                   )}
-                  <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
+                  {/* El video final se entrega SOLO por Google Drive: 1) subirlo a la carpeta del proyecto 2) pegar su enlace */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <a
+                      href={projectDriveUrl || undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-disabled={!projectDriveUrl}
+                      className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold border transition-colors ${
+                        projectDriveUrl ? 'bg-mint/10 border-mint/40 text-mint hover:bg-mint/20' : 'bg-surface border-line text-muted-2 pointer-events-none'
+                      }`}
+                    >
+                      <FolderOpen size={16} /> 1. Abrir carpeta de Drive
+                    </a>
+                    <div className="flex items-center gap-2 text-xs text-muted bg-surface border border-line rounded-lg px-3 py-2">
+                      <Upload size={14} className="text-accent shrink-0" /> Sube ahí el video y copia su enlace
+                    </div>
+                  </div>
+                  {!projectDriveUrl && (
+                    <p className="text-[11px] text-amber">El administrador aún no vinculó la carpeta de Drive de este proyecto.</p>
+                  )}
 
-                  <label className="block bg-surface border border-line border-dashed rounded-md px-3 py-3 text-sm text-muted cursor-pointer hover:border-accent hover:text-accent transition-colors space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 truncate">
-                        {uploadingFinalVideo ? <Loader2 size={16} className="animate-spin text-accent shrink-0" /> : <Upload size={16} className="shrink-0" />}
-                        <span className="truncate">
-                          {finalFileName || (getGoogleDriveBridgeUrl() ? "Subir archivo (se enviará directo a Google Drive)" : "Seleccionar archivo de video final")}
-                        </span>
-                      </span>
-                      {uploadingFinalVideo && (
-                        <span className="text-xs font-tech font-bold text-accent shrink-0">{uploadPct}%</span>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-muted">2. Pega el enlace del video final</span>
+                    <div className="flex items-center gap-2 bg-surface border border-line rounded-lg px-3 focus-within:border-mint transition-colors">
+                      <Link2 size={14} className="text-muted-2 shrink-0" />
+                      <input
+                        value={finalDriveLinkInput}
+                        onChange={e => { setFinalDriveLinkInput(e.target.value); setUploadErrorMsg(null); }}
+                        placeholder="https://drive.google.com/file/d/..."
+                        className="flex-1 bg-transparent py-2.5 text-xs text-text placeholder:text-muted-2 outline-none"
+                      />
+                      {finalDriveLinkInput.trim() && (
+                        isGoogleDriveUrl(finalDriveLinkInput.trim())
+                          ? <CheckCircle2 size={15} className="text-mint shrink-0" />
+                          : <AlertCircle size={15} className="text-red-400 shrink-0" />
                       )}
                     </div>
-                    {uploadingFinalVideo && (
-                      <div className="w-full h-1.5 bg-surface-3 rounded-full overflow-hidden">
-                        <div className="h-full bg-accent transition-all duration-150 rounded-full" style={{ width: `${uploadPct}%` }} />
-                      </div>
-                    )}
-                    <input type="file" accept="video/*" className="hidden" onChange={handleFinalFile} disabled={uploadingFinalVideo} />
-                  </label>
-
-                  <div className="bg-surface border border-mint/30 rounded-md p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-mint font-medium flex items-center gap-1.5">
-                        <Upload size={13} /> Enlace de Google Drive (Video Final):
-                      </span>
-                      {projectDriveUrl && (
-                        <a href={projectDriveUrl} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline font-medium shrink-0">
-                          Abrir carpeta Drive →
-                        </a>
-                      )}
-                    </div>
-                    <input
-                      value={finalDriveLinkInput}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setFinalDriveLinkInput(val);
-                        if (val.trim()) {
-                          setFinalFileUrl(val.trim());
-                          if (!finalFileName) setFinalFileName(`${finalName || video.name} (Google Drive)`);
-                          setUploadErrorMsg(null);
-                        }
-                      }}
-                      placeholder="Pega aquí el link de Google Drive del video final..."
-                      className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-mint"
-                    />
+                    <p className="text-[10px] text-muted-2">En Drive: clic derecho al video → Compartir → “Cualquier persona con el enlace” → Copiar enlace.</p>
                   </div>
 
                   {uploadErrorMsg && (
-                    <p className="text-xs text-amber bg-amber-dim/40 border border-amber/40 rounded-md px-3 py-2">
-                      {uploadErrorMsg}
-                    </p>
+                    <p className="text-xs text-amber bg-amber-dim/40 border border-amber/40 rounded-md px-3 py-2">{uploadErrorMsg}</p>
                   )}
 
                   <button
                     onClick={() => {
-                      const fUrl = finalDriveLinkInput.trim() || finalFileUrl;
-                      const fName = finalFileName || (finalDriveLinkInput.trim() ? `${finalName || video.name} (Drive)` : "");
-                      if ((finalName || video.name) && fUrl) {
-                        onAddFinalVideo(video.id, finalName || video.name, finalNote, fName || undefined, fUrl);
-                        setFinalName(""); setFinalNote(""); setFinalFileName(""); setFinalFileUrl(""); setFinalDriveLinkInput(""); setUploadErrorMsg(null); setShowFinalForm(false);
+                      const link = finalDriveLinkInput.trim();
+                      if (!isGoogleDriveUrl(link)) {
+                        setUploadErrorMsg('Pega un enlace de un archivo de Google Drive (drive.google.com/file/d/...).');
+                        return;
                       }
+                      onAddFinalVideo(video.id, finalName || `${video.name} final`, finalNote, `${video.name} final (Drive)`, link);
+                      setFinalName(""); setFinalNote(""); setFinalDriveLinkInput(""); setUploadErrorMsg(null); setShowFinalForm(false);
                     }}
-                    disabled={uploadingFinalVideo || (!finalFileUrl && !finalDriveLinkInput.trim())}
+                    disabled={!finalDriveLinkInput.trim()}
                     className="w-full bg-accent text-on-accent rounded-md py-2.5 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                   >
-                    {uploadingFinalVideo ? `Subiendo (${uploadPct}%)...` : latestFinal ? "Reemplazar video final" : "Guardar video final"}
+                    {latestFinal ? "Reemplazar video final" : "Guardar video final"}
                   </button>
                 </div>
               )}

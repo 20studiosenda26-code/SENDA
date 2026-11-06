@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { Brand, Correction, Video } from '../types';
-import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl } from '../lib/supabaseClient';
+import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
 import {
@@ -194,8 +194,9 @@ function VideoCard({ video, index, onOpen }: { video: Video; index: number; onOp
 
   useEffect(() => {
     let off = false;
-    if (delivered && final?.fileUrl && !isGoogleDriveUrl(final.fileUrl)) {
-      void resolveMediaUrl(final.fileUrl).then(u => { if (!off) setThumb(u); });
+    if (delivered && final?.fileUrl) {
+      // Miniaturas solo para archivos de la plataforma: con Drive se evitaría descargar cada video al abrir la marca
+      if (!isGoogleDriveUrl(final.fileUrl)) void resolveMediaUrl(final.fileUrl).then(u => { if (!off) setThumb(u); });
     }
     return () => { off = true; };
   }, [delivered, final?.fileUrl]);
@@ -205,7 +206,7 @@ function VideoCard({ video, index, onOpen }: { video: Video; index: number; onOp
       className="group text-left rounded-2xl border border-line bg-surface-3/60 overflow-hidden hover:border-accent/50 hover:-translate-y-0.5 transition-all disabled:hover:translate-y-0 disabled:hover:border-line disabled:cursor-default">
       <div className="relative aspect-video bg-gradient-to-br from-surface-3 to-surface flex items-center justify-center overflow-hidden">
         {thumb ? (
-          <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
+          <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline onError={() => setThumb(null)} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
         ) : (
           <span className="font-display text-5xl font-bold text-line">{String(num).padStart(2, '0')}</span>
         )}
@@ -265,7 +266,10 @@ function VideoReview({
     return () => { off = true; };
   }, [final?.fileUrl]);
 
-  const isDrive = Boolean(src && isGoogleDriveUrl(src));
+  // Drive se intenta reproducir en el reproductor propio (línea de tiempo enlazada); si falla, visor de Google
+  const [driveFallback, setDriveFallback] = useState(false);
+  const isDrive = Boolean(src && isGoogleDriveUrl(src) && driveFallback);
+  const playSrc = src && isGoogleDriveUrl(src) ? getGoogleDriveStreamUrl(src) || src : src;
   const mode = orientation === 'auto' ? (isDrive ? 'horizontal' : detected) : orientation;
   const effectiveTime = pickTime ?? Math.round(time);
   useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
@@ -359,7 +363,8 @@ function VideoReview({
             ) : (
               <video
                 ref={playerRef}
-                src={src}
+                src={playSrc || undefined}
+                onError={() => { if (src && isGoogleDriveUrl(src)) setDriveFallback(true); }}
                 controls
                 playsInline
                 onLoadedMetadata={e => {
