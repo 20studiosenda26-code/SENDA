@@ -19,6 +19,8 @@ import { AdminView } from './views/AdminView';
 import { LoginView } from './views/LoginView';
 import { UserManagement } from './views/UserManagement';
 import { SettingsPanel } from './views/SettingsPanel';
+import { ClientHome, ClientBriefs } from './views/ClientArea';
+import { ClientPortal } from './views/ClientPortal';
 import MorphOrb from './components/ui/ai-thiking-orb-and-input';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -96,6 +98,15 @@ function Shell() {
   }
 
   const renderView = () => {
+    // El cliente solo ve su portal: inicio, brief de sus proyectos, revisión de videos y chat con SENDA
+    if (user.role === 'cliente') {
+      switch (view) {
+        case 'brief': return <ClientBriefs />;
+        case 'revision': return <div className="p-6 max-w-7xl mx-auto"><ClientPortal /></div>;
+        case 'chat': return <ChatView />;
+        default: return <ClientHome />;
+      }
+    }
     switch (view) {
       case 'home': return <HomeView />;
       case 'tareas': return <TasksView />;

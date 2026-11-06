@@ -113,6 +113,7 @@ export function UserManagement() {
       total: users.length,
       clipper: users.filter(u => u.role === 'clipper').length,
       admin: users.filter(u => u.role === 'admin').length,
+      cliente: users.filter(u => u.role === 'cliente').length,
     };
   }, [users]);
 
@@ -153,7 +154,7 @@ export function UserManagement() {
               </span>
             </div>
             <p className="text-xs text-muted-2 truncate">
-              {counts.clipper} {TEAM_ROLE_PLURAL} · {counts.admin} Admins — {isExpanded ? 'Haz clic para ocultar la lista' : 'Haz clic en la flecha para desplegar el directorio'}
+              {counts.clipper} {TEAM_ROLE_PLURAL} · {counts.cliente} Clientes · {counts.admin} Admins — {isExpanded ? 'Haz clic para ocultar la lista' : 'Haz clic en la flecha para desplegar el directorio'}
             </p>
           </div>
         </button>
@@ -213,6 +214,7 @@ export function UserManagement() {
                   <label className="text-xs text-muted block mb-1">Rol</label>
                   <select value={formRole} onChange={e => setFormRole(e.target.value as Role)} className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent">
                     <option value="clipper">{TEAM_ROLE_LABEL}</option>
+                    <option value="cliente">Cliente (portal de revisión)</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
@@ -251,7 +253,7 @@ export function UserManagement() {
               />
             </div>
             <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-lg p-1">
-              {(['todos', 'clipper', 'admin'] as const).map(r => (
+              {(['todos', 'clipper', 'cliente', 'admin'] as const).map(r => (
                 <button
                   key={r}
                   type="button"
@@ -260,7 +262,7 @@ export function UserManagement() {
                     roleFilter === r ? 'bg-accent text-on-accent' : 'text-muted hover:text-text'
                   }`}
                 >
-                  {r === 'todos' ? `Todos (${counts.total})` : r === 'clipper' ? `${TEAM_ROLE_PLURAL} (${counts.clipper})` : `Admins (${counts.admin})`}
+                  {r === 'todos' ? `Todos (${counts.total})` : r === 'clipper' ? `${TEAM_ROLE_PLURAL} (${counts.clipper})` : r === 'cliente' ? `Clientes (${counts.cliente})` : `Admins (${counts.admin})`}
                 </button>
               ))}
             </div>
@@ -300,9 +302,9 @@ export function UserManagement() {
                   </div>
 
                   <span className={`text-[11px] px-2.5 py-1 rounded-md flex items-center gap-1 shrink-0 font-medium ${
-                    u.role === 'admin' ? 'bg-violet-dim text-violet' : 'bg-accent-dim text-accent'
+                    u.role === 'admin' ? 'bg-violet-dim text-violet' : u.role === 'cliente' ? 'bg-amber-dim text-amber' : 'bg-accent-dim text-accent'
                   }`}>
-                    <Shield size={11} /> {u.role === 'admin' ? 'Admin' : TEAM_ROLE_SHORT}
+                    <Shield size={11} /> {u.role === 'admin' ? 'Admin' : u.role === 'cliente' ? 'Cliente' : TEAM_ROLE_SHORT}
                   </span>
                 </div>
               ))}

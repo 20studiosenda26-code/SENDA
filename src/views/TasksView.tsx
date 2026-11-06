@@ -25,6 +25,7 @@ import { CorrectionTimeline, fmtTime, parseTime } from '../components/Correction
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo } from '../lib/economics';
 import { DriveFolderField } from '../components/DriveFolderField';
+import { ClientAccountField } from '../components/ClientAccountField';
 
 /** Nombre(s) del responsable: uno solo si la misma persona hace clips y edición. */
 function teamNames(v?: Pick<Video, 'clipperName' | 'editorName' | 'clipperId' | 'editorId'> | null): string {
@@ -199,11 +200,12 @@ export function TasksView() {
 
                 {isOpen && (
                   <div className="p-4 pt-2 border-t border-line/60 space-y-3 bg-surface-3/30">
-                    {linkedOrder && (linkedOrder.avatarName || linkedOrder.briefFileName || (linkedOrder.references && linkedOrder.references.length > 0) || linkedOrder.clientNotes) && (
+                    {linkedOrder && (linkedOrder.avatarName || linkedOrder.editingStyleName || linkedOrder.briefFileName || (linkedOrder.references && linkedOrder.references.length > 0) || linkedOrder.clientNotes) && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                         <div className="bg-surface-2 border border-line rounded-lg p-2.5">
                           <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
                           <p className="truncate">{linkedOrder.avatarName || 'Sin avatar especificado'}</p>
+                          {linkedOrder.editingStyleName && <p className="truncate text-accent text-[11px] mt-0.5">Estilo: {linkedOrder.editingStyleName}</p>}
                         </div>
                         <div className="bg-surface-2 border border-line rounded-lg p-2.5">
                           <p className="text-[10px] text-muted-2 uppercase flex items-center gap-1 mb-1"><FileText size={11} /> Brief</p>
@@ -1513,8 +1515,13 @@ function FinalReviewPanel({
             </button>
           </div>
         )}
-        {isAdmin && !canReadPlayerTime && (
-          <p className="text-[10px] text-muted-2">Video de Google Drive: pausa donde quieras corregir y escribe el minuto (ej. 0:42), o haz clic en la barra.</p>
+        {!canReadPlayerTime && (
+          <p className="text-[11px] text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-2.5 py-2 leading-snug">
+            La línea no está enlazada: Google Drive no dejó reproducir este video en el reproductor de SENDA y se muestra con su visor.
+            {isAdmin
+              ? <> Actívalo en <strong>Admin → Ajustes → Google Drive → Clave de API</strong>. Mientras tanto, escribe el minuto a mano (ej. 0:42).</>
+              : <> Verifica que el archivo esté compartido como “Cualquier persona con el enlace”.</>}
+          </p>
         )}
 
         {corrections.length === 0 ? (
@@ -1680,7 +1687,12 @@ export function TasksBoard() {
 
                 {isOpen && (
                   <div className="p-4 pt-2 border-t border-line bg-surface space-y-3">
-                    {linkedOrder && <DriveFolderField order={linkedOrder} compact />}
+                    {linkedOrder && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <ClientAccountField order={linkedOrder} />
+                        <DriveFolderField order={linkedOrder} compact />
+                      </div>
+                    )}
                     {videos.map((v, vIndex) => (
                       <button
                         key={v.id}

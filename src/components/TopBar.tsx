@@ -33,6 +33,7 @@ function timeAgo(iso: string) {
 const ROLE_LABELS: Record<Role, string> = {
   clipper: TEAM_ROLE_SHORT,
   editor: TEAM_ROLE_SHORT,
+  cliente: 'Cliente',
   admin: 'Admin',
 };
 
@@ -49,6 +50,8 @@ const VIEW_TITLES: Record<string, string> = {
   nominas: 'Nóminas',
   capacidad: 'Motor de Capacidad y Entrega',
   administracion: 'Administración',
+  brief: 'Mis proyectos',
+  revision: 'Revisión de videos',
 };
 
 export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut: () => void }) {

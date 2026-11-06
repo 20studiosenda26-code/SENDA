@@ -7,19 +7,23 @@ import {
   getGoogleDriveFolderUrl,
   setGoogleDriveBridgeUrl,
   setGoogleDriveFolderUrl,
+  getGoogleDriveApiKey,
+  setGoogleDriveApiKey,
 } from '../lib/supabaseClient';
 import { fmtMoney } from '../lib/economics';
+import { ClientCatalogEditor } from '../components/ClientCatalogEditor';
 import {
   Settings, DollarSign, Gauge, HardDrive, Palette, Check, RotateCcw, Save,
-  Cloud, CloudOff, Moon, Sun, Scissors, Film, Info, ExternalLink,
+  Cloud, CloudOff, Moon, Sun, Scissors, Film, Info, ExternalLink, Sparkles,
 } from 'lucide-react';
 
-type Tab = 'finanzas' | 'capacidad' | 'drive' | 'apariencia';
+type Tab = 'finanzas' | 'capacidad' | 'drive' | 'catalogo' | 'apariencia';
 
 const TABS: { key: Tab; label: string; icon: typeof Settings }[] = [
   { key: 'finanzas', label: 'Precios y pagos', icon: DollarSign },
   { key: 'capacidad', label: 'Capacidad', icon: Gauge },
   { key: 'drive', label: 'Google Drive', icon: HardDrive },
+  { key: 'catalogo', label: 'Catálogo del cliente', icon: Sparkles },
   { key: 'apariencia', label: 'Apariencia', icon: Palette },
 ];
 
@@ -69,12 +73,13 @@ export function SettingsPanel() {
   const [cap, setCap] = useState<CapacityProtocolConfig>(capacityConfig);
   const [folderUrl, setFolderUrl] = useState(() => getGoogleDriveFolderUrl());
   const [bridgeUrl, setBridgeUrl] = useState(() => getGoogleDriveBridgeUrl());
+  const [apiKey, setApiKey] = useState(() => getGoogleDriveApiKey());
   const [savedTab, setSavedTab] = useState<Tab | null>(null);
 
   // Si otro admin cambia los ajustes en vivo, refrescamos el borrador (solo si no hay cambios locales)
   const finDirty = JSON.stringify(fin) !== JSON.stringify(financeSettings);
   const capDirty = JSON.stringify(cap) !== JSON.stringify(capacityConfig);
-  const driveDirty = folderUrl.trim() !== getGoogleDriveFolderUrl() || bridgeUrl.trim() !== getGoogleDriveBridgeUrl();
+  const driveDirty = folderUrl.trim() !== getGoogleDriveFolderUrl() || bridgeUrl.trim() !== getGoogleDriveBridgeUrl() || apiKey.trim() !== getGoogleDriveApiKey();
   // Tras guardar, adoptamos los valores normalizados por el store (p. ej. límites de horario)
   const syncAfterSave = useRef(false);
   useEffect(() => {
@@ -85,7 +90,7 @@ export function SettingsPanel() {
     syncAfterSave.current = false;
   }, [capacityConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirtyByTab: Record<Tab, boolean> = { finanzas: finDirty, capacidad: capDirty, drive: driveDirty, apariencia: false };
+  const dirtyByTab: Record<Tab, boolean> = { finanzas: finDirty, capacidad: capDirty, drive: driveDirty, catalogo: false, apariencia: false };
 
   const margin = fin.clientPricePerVideo - fin.defaultClipperCost - fin.defaultEditorCost;
   const marginPct = fin.clientPricePerVideo > 0 ? Math.round((margin / fin.clientPricePerVideo) * 100) : 0;
@@ -109,6 +114,8 @@ export function SettingsPanel() {
     if (tab === 'drive') {
       setGoogleDriveFolderUrl(folderUrl);
       setGoogleDriveBridgeUrl(bridgeUrl);
+      setGoogleDriveApiKey(apiKey);
+      setApiKey(apiKey.trim());
       setFolderUrl(folderUrl.trim());
       setBridgeUrl(bridgeUrl.trim());
     }
@@ -118,7 +125,7 @@ export function SettingsPanel() {
   const discard = () => {
     if (tab === 'finanzas') setFin(financeSettings);
     if (tab === 'capacidad') setCap(capacityConfig);
-    if (tab === 'drive') { setFolderUrl(getGoogleDriveFolderUrl()); setBridgeUrl(getGoogleDriveBridgeUrl()); }
+    if (tab === 'drive') { setFolderUrl(getGoogleDriveFolderUrl()); setBridgeUrl(getGoogleDriveBridgeUrl()); setApiKey(getGoogleDriveApiKey()); }
   };
 
   const isDirty = dirtyByTab[tab];
@@ -260,7 +267,29 @@ export function SettingsPanel() {
               />
               <span className="text-[11px] text-muted-2 block mt-1.5">Opcional. Con el puente activo, los videos finales pesados suben directo a Drive sin pegar enlaces. Las instrucciones están en “Configurar Drive” dentro de cualquier video.</span>
             </label>
+            <label className="block bg-surface-3 border border-accent/30 rounded-xl p-3.5">
+              <span className="text-xs font-medium text-muted block mb-1.5">Clave de API de Google (reproducción directa de videos de Drive)</span>
+              <input
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder="AIza..."
+                className="w-full bg-surface-2 border border-line rounded-lg px-3 py-2 text-xs font-tech outline-none focus:border-accent placeholder:text-muted-2"
+              />
+              <details className="mt-2 text-[11px] text-muted-2">
+                <summary className="cursor-pointer text-accent">¿Para qué sirve y cómo la obtengo? (2 minutos, gratis)</summary>
+                <div className="mt-1.5 space-y-1 leading-snug">
+                  <p>Con esta clave los videos de Drive se ven en el reproductor de SENDA y la <strong>línea de tiempo de correcciones queda enlazada</strong> (adelantar, atrasar y marcar el segundo exacto). Sin ella, Google a veces obliga a usar su visor, que no se puede controlar.</p>
+                  <p>1. Entra a <strong>console.cloud.google.com</strong> → crea un proyecto.</p>
+                  <p>2. “APIs y servicios” → “Biblioteca” → activa <strong>Google Drive API</strong>.</p>
+                  <p>3. “Credenciales” → “Crear credenciales” → <strong>Clave de API</strong>. Restríngela a “Google Drive API” y al sitio <code>senda-equipo.bolt.host</code>.</p>
+                  <p>4. Pega la clave aquí. Los videos deben estar compartidos como “Cualquier persona con el enlace”.</p>
+                </div>
+              </details>
+            </label>
             <div className="flex gap-2 flex-wrap">
+              <span className={`text-[11px] px-2.5 py-1 rounded-full ${getGoogleDriveApiKey() ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
+                Reproducción directa: {getGoogleDriveApiKey() ? 'activa' : 'inactiva'}
+              </span>
               <span className={`text-[11px] px-2.5 py-1 rounded-full ${getGoogleDriveFolderUrl() ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
                 Carpeta: {getGoogleDriveFolderUrl() ? 'vinculada' : 'sin vincular'}
               </span>
@@ -268,6 +297,13 @@ export function SettingsPanel() {
                 Puente: {getGoogleDriveBridgeUrl() ? 'activo' : 'inactivo'}
               </span>
             </div>
+          </div>
+        )}
+
+        {tab === 'catalogo' && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted">Lo que los clientes pueden elegir en “Mis proyectos”. Los cambios se guardan al instante.</p>
+            <ClientCatalogEditor />
           </div>
         )}
 
@@ -299,7 +335,7 @@ export function SettingsPanel() {
         )}
       </div>
 
-      {tab !== 'apariencia' && (
+      {tab !== 'apariencia' && tab !== 'catalogo' && (
         <div className="px-4 sm:px-5 py-3 border-t border-line bg-surface-3/40 flex items-center justify-between gap-3 flex-wrap">
           <p className="text-xs text-muted-2">
             {savedTab === tab ? (

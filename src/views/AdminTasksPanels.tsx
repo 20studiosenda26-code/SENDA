@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { TasksBoard } from "./TasksView";
 import { DriveFolderField } from "../components/DriveFolderField";
+import { ClientAccountField } from "../components/ClientAccountField";
 import { TEAM_ROLE_LABEL, TEAM_ROLE_SHORT } from "../lib/roles";
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
@@ -269,6 +270,9 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
             <InfoBlock icon={<User size={13} />} label="Avatar elegido por el cliente">
               {order.avatarName || <span className="text-muted-2">El cliente no ha elegido avatar todavía.</span>}
             </InfoBlock>
+            <InfoBlock icon={<StickyNote size={13} />} label="Estilo de edición">
+              {order.editingStyleName || <span className="text-muted-2">El cliente no ha elegido estilo todavía.</span>}
+            </InfoBlock>
             <InfoBlock icon={<FileDown size={13} />} label="Brief">
               {order.briefFileName ? (
                 <a href={order.briefFileUrl || "#"} target="_blank" rel="noreferrer" className="text-accent hover:text-accent-strong inline-flex items-center gap-1.5 break-all">
@@ -296,7 +300,10 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
             </InfoBlock>
           </div>
 
-          <DriveFolderField order={order} />
+          <div className="grid grid-cols-1 gap-2">
+            <ClientAccountField order={order} />
+            <DriveFolderField order={order} />
+          </div>
 
           {order.status !== "finalizado" && (
             <div className="pt-3 border-t border-line/70 space-y-4">

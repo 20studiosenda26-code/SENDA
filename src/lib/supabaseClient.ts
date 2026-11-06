@@ -12,6 +12,30 @@ export const supabase = isSupabaseConfigured
 const MEDIA_BUCKET = "senda-media";
 const GDRIVE_BRIDGE_STORAGE_KEY = "senda_gdrive_bridge_url";
 const GDRIVE_FOLDER_STORAGE_KEY = "senda_gdrive_folder_url";
+const GDRIVE_APIKEY_STORAGE_KEY = "senda_gdrive_api_key";
+
+function saveGdriveConfig() {
+  if (!supabase) return;
+  void supabase.from("platform_kv").upsert({
+    key: "gdrive_config",
+    value: { bridgeUrl: getGoogleDriveBridgeUrl(), folderUrl: getGoogleDriveFolderUrl(), apiKey: getGoogleDriveApiKey() },
+    updated_at: new Date().toISOString(),
+  });
+}
+
+/** Clave de API de Google (Drive API) para reproducir videos de Drive en el reproductor propio. */
+export function getGoogleDriveApiKey(): string {
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem(GDRIVE_APIKEY_STORAGE_KEY);
+    if (saved && saved.trim()) return saved.trim();
+  }
+  return (import.meta.env.VITE_GDRIVE_API_KEY as string | undefined) || "";
+}
+
+export function setGoogleDriveApiKey(key: string): void {
+  if (typeof window !== "undefined") window.localStorage.setItem(GDRIVE_APIKEY_STORAGE_KEY, key.trim());
+  saveGdriveConfig();
+}
 
 // Límite para considerar un archivo "pequeño" (ej. imagen o clip corto de <= 10 seg ~ 12 MB)
 export const SMALL_FILE_MAX_BYTES = 12 * 1024 * 1024;
@@ -28,13 +52,7 @@ export function setGoogleDriveBridgeUrl(url: string): void {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(GDRIVE_BRIDGE_STORAGE_KEY, url.trim());
   }
-  if (supabase) {
-    void supabase.from("platform_kv").upsert({
-      key: "gdrive_config",
-      value: { bridgeUrl: url.trim(), folderUrl: getGoogleDriveFolderUrl() },
-      updated_at: new Date().toISOString(),
-    });
-  }
+  saveGdriveConfig();
 }
 
 export function getGoogleDriveFolderUrl(): string {
@@ -49,13 +67,7 @@ export function setGoogleDriveFolderUrl(url: string): void {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(GDRIVE_FOLDER_STORAGE_KEY, url.trim());
   }
-  if (supabase) {
-    void supabase.from("platform_kv").upsert({
-      key: "gdrive_config",
-      value: { bridgeUrl: getGoogleDriveBridgeUrl(), folderUrl: url.trim() },
-      updated_at: new Date().toISOString(),
-    });
-  }
+  saveGdriveConfig();
 }
 
 // Sincronizar configuración de Google Drive guardada por el Admin para que todos los Clippers y Editores la usen automáticamente
@@ -67,9 +79,10 @@ if (supabase && typeof window !== "undefined") {
         .select("value")
         .eq("key", "gdrive_config")
         .maybeSingle();
-      const val = data?.value as { bridgeUrl?: string; folderUrl?: string } | undefined;
+      const val = data?.value as { bridgeUrl?: string; folderUrl?: string; apiKey?: string } | undefined;
       if (val?.bridgeUrl) window.localStorage.setItem(GDRIVE_BRIDGE_STORAGE_KEY, val.bridgeUrl);
       if (val?.folderUrl) window.localStorage.setItem(GDRIVE_FOLDER_STORAGE_KEY, val.folderUrl);
+      if (val?.apiKey) window.localStorage.setItem(GDRIVE_APIKEY_STORAGE_KEY, val.apiKey);
     } catch {
       // Ignorar
     }
@@ -109,7 +122,11 @@ export function getGoogleDrivePreviewUrl(url?: string | null): string | null {
 /** URL directa del archivo de Drive para reproducirlo en un <video> propio (permite controlar el tiempo). */
 export function getGoogleDriveStreamUrl(url?: string | null): string | null {
   const id = extractGoogleDriveId(url);
-  return id ? `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t` : null;
+  if (!id) return null;
+  // Con clave de API: streaming oficial de Drive (permite adelantar/atrasar y leer el tiempo exacto)
+  const apiKey = getGoogleDriveApiKey();
+  if (apiKey) return `https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${encodeURIComponent(apiKey)}`;
+  return `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
 }
 
 export function getGoogleDriveDownloadUrl(url?: string | null): string | null {
@@ -470,8 +487,15 @@ export async function loadShared<T>(key: string): Promise<T | null> {
   }
 }
 
+// Candado de escritura: una sesión de cliente solo puede escribir su propia bandeja de acciones
+let sharedWriteGuard: ((key: string) => boolean) | null = null;
+export function setSharedWriteGuard(guard: ((key: string) => boolean) | null): void {
+  sharedWriteGuard = guard;
+}
+
 export async function saveShared<T>(key: string, value: T): Promise<void> {
   if (!supabase) return;
+  if (sharedWriteGuard && !sharedWriteGuard(key)) return;
   markKeyWrittenLocally(key);
   const seq = (keyWriteSeq[key] || 0) + 1;
   keyWriteSeq[key] = seq;

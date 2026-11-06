@@ -1,6 +1,6 @@
-export type Role = 'clipper' | 'editor' | 'admin';
+export type Role = 'clipper' | 'editor' | 'admin' | 'cliente';
 export type ThemeMode = 'dark' | 'light';
-export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'clientes' | 'finanzas' | 'nominas' | 'capacidad' | 'administracion';
+export type ViewKey = 'home' | 'tareas' | 'chat' | 'calendario' | 'classroom' | 'contratos' | 'perfil' | 'clientes' | 'finanzas' | 'nominas' | 'capacidad' | 'administracion' | 'brief' | 'revision';
 export type QcStatus = 'sin_iniciar' | 'pendiente' | 'revision' | 'correcciones' | 'aprobado' | 'aprobado_senda' | 'aprobado_cliente';
 export type EditorQcStatus = 'pendiente' | 'revision' | 'correcciones' | 'aprobado_senda' | 'aprobado_cliente';
 export type MainImageStatus = 'pendiente' | 'aprobada' | 'rechazada';
@@ -258,6 +258,52 @@ export interface Order {
   invoiceFileUrl?: string | null;
   /** Carpeta de Google Drive de este proyecto/marca: allí van los videos finales */
   driveFolderUrl?: string | null;
+  /** Cuenta del cliente (rol "cliente") dueña de este pedido */
+  clientId?: string | null;
+  avatarId?: string | null;
+  editingStyleId?: string | null;
+  editingStyleName?: string | null;
+  /** El cliente confirmó su brief (referencias, estilo y avatar) */
+  briefConfirmedAt?: string | null;
+}
+
+export interface CatalogAvatar {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  description?: string;
+}
+
+export interface CatalogStyle {
+  id: string;
+  name: string;
+  description: string;
+  exampleUrl?: string | null;
+}
+
+/** Opciones que el admin ofrece a los clientes para armar su brief */
+export interface ClientCatalog {
+  avatars: CatalogAvatar[];
+  styles: CatalogStyle[];
+}
+
+export interface ClientProfile {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** Acciones que hace el cliente; se aplican en su vista al instante y el equipo las procesa */
+export type ClientAction =
+  | { id: string; type: 'brief'; orderId: string; patch: Pick<Order, 'references' | 'avatarId' | 'avatarName' | 'editingStyleId' | 'editingStyleName' | 'clientNotes' | 'briefConfirmedAt'>; at: string }
+  | { id: string; type: 'feedback'; videoId: string; items: { time: number; text: string }[]; at: string }
+  | { id: string; type: 'approve'; videoId: string; at: string };
+
+/** Copia limpia (sin precios, pagos ni datos del equipo) que recibe cada cliente */
+export interface ClientView {
+  orders: Order[];
+  brands: Brand[];
+  updatedAt: string;
 }
 
 export interface FinanceSettings {

@@ -1,10 +1,12 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally } from './lib/supabaseClient';
+import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
+import { applyClientActions, buildClientView, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
+import type { ClientAction, ClientCatalog, ClientProfile, ClientView } from './types';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -97,7 +99,7 @@ type SharedKey =
   | 'workerGoals' | 'workerPointsOverride' | 'financeSettings'
   | 'financeClosings' | 'appExpenses' | 'payrollPayments'
   | 'payrollAdjustments' | 'capacityProtocolConfig' | 'workerCapacities'
-  | 'classroomModules' | 'lessonCompletions';
+  | 'classroomModules' | 'lessonCompletions' | 'clientCatalog';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -119,6 +121,7 @@ const CATEGORIES_BY_ROLE: Record<Role, NotificationCategory[]> = {
   clipper: ['trabajo_asignado', 'clips_enviados', 'qc_clip', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   editor: ['trabajo_asignado', 'clips_enviados', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje'],
   admin: ['trabajo_asignado', 'clips_enviados', 'qc_clip', 'qc_video', 'racha', 'pago_50', 'pago_100', 'mensaje', 'sistema'],
+  cliente: [],
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -251,6 +254,12 @@ interface Store {
   revertPayrollPayment: (paymentId: string) => void;
   capacityConfig: CapacityProtocolConfig;
   updateCapacityConfig: (patch: Partial<CapacityProtocolConfig>) => void;
+  clientCatalog: ClientCatalog;
+  updateClientCatalog: (next: ClientCatalog) => void;
+  clientProfiles: ClientProfile[];
+  /** Acciones del cliente aún no confirmadas por el equipo */
+  clientPendingCount: number;
+  clientViewReady: boolean;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -312,6 +321,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [payrollPayments, setPayrollPayments] = useState<PayrollPayment[]>(() => loadState('payrollPayments', [] as PayrollPayment[]));
   const [payrollAdjustments, setPayrollAdjustments] = useState<Record<string, number>>(() => loadState('payrollAdjustments', {} as Record<string, number>));
   const [capacityConfig, setCapacityConfig] = useState<CapacityProtocolConfig>(() => loadState('capacityProtocolConfig', DEFAULT_CAPACITY_CONFIG));
+  const [clientCatalog, setClientCatalog] = useState<ClientCatalog>(() => loadState('clientCatalog', { avatars: [], styles: [] } as ClientCatalog));
+  const [clientProfiles, setClientProfiles] = useState<ClientProfile[]>([]);
+  const [clientView, setClientView] = useState<ClientView | null>(null);
+  const [clientPending, setClientPending] = useState<ClientAction[]>([]);
+  const isClient = role === 'cliente';
+  const processClientInboxRef = useRef<(clientId: string) => Promise<void>>(async () => {});
+  const roleRef = useRef<Role>(role);
+  useEffect(() => { roleRef.current = role; }, [role]);
+
+  // Una sesión de cliente nunca escribe datos internos: solo su bandeja de acciones
+  useEffect(() => {
+    setSharedWriteGuard(isClient && user?.id ? (key: string) => key === clientInboxKey(user.id) : null);
+    return () => setSharedWriteGuard(null);
+  }, [isClient, user?.id]);
 
   const localWriteLockUntil = useRef<number>(0);
   const hydratedRef = useRef<boolean>(!isSupabaseConfigured);
@@ -328,6 +351,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistShared = useCallback(<T,>(key: SharedKey, value: T) => {
+    if (roleRef.current === 'cliente') return;
     saveState(key, value);
     if (applyingRemoteRef.current) return;
     if (isSupabaseConfigured && hydratedRef.current) {
@@ -348,6 +372,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('payrollAdjustments', payrollAdjustments); }, [payrollAdjustments, persistShared]);
   useEffect(() => { persistShared('capacityProtocolConfig', capacityConfig); }, [capacityConfig, persistShared]);
   useEffect(() => { persistShared('workerCapacities', workerCapacities); }, [workerCapacities, persistShared]);
+  useEffect(() => { persistShared('clientCatalog', clientCatalog); }, [clientCatalog, persistShared]);
   useEffect(() => { saveState('chat', chat); }, [chat]);
   useEffect(() => { saveState('paidHistory', paidHistory); }, [paidHistory]);
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
@@ -420,6 +445,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
       const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
       if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
+      const remoteCatalog = await loadShared<ClientCatalog>(CLIENT_CATALOG_KEY);
+      if (active && remoteCatalog && typeof remoteCatalog === 'object') setClientCatalog({ avatars: remoteCatalog.avatars || [], styles: remoteCatalog.styles || [] });
       const remoteClassroom = await loadShared<ClassroomModule[]>('classroomModules');
       if (active && Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
       else if (active && remoteClassroom === null) {
@@ -445,6 +472,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Si lo que cambió fue el latido de presencia online, solo actualizamos presencia y NO tocamos pedidos ni tareas
         if (changedKey === "online_heartbeats") {
           await refreshOnlineHeartbeats();
+          return;
+        }
+        // Portal de clientes: el admin procesa la bandeja; las vistas/confirmaciones las escucha el propio cliente
+        if (changedKey?.startsWith("client_inbox_")) {
+          if (roleRef.current === "admin") void processClientInboxRef.current(changedKey.slice("client_inbox_".length));
+          return;
+        }
+        if (changedKey?.startsWith("client_view_") || changedKey?.startsWith("client_ack_")) return;
+        if (roleRef.current === "cliente") return;
+        if (changedKey === CLIENT_CATALOG_KEY) {
+          const remoteCatalog = await loadShared<ClientCatalog>(CLIENT_CATALOG_KEY);
+          if (remoteCatalog && typeof remoteCatalog === "object" && Date.now() - getLastLocalWriteAt(CLIENT_CATALOG_KEY) > 8000) {
+            setClientCatalog({ avatars: remoteCatalog.avatars || [], styles: remoteCatalog.styles || [] });
+          }
           return;
         }
 
@@ -547,6 +588,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (clipperEditor.length > 0) {
       setWorkers(clipperEditor.map(workerFromProfileRow));
     }
+    setClientProfiles(
+      data
+        .filter((p: Record<string, unknown>) => p.role === 'cliente')
+        .map((p: Record<string, unknown>) => ({ id: p.id as string, name: (p.name as string) || '', email: (p.contact_email as string) || '' }))
+    );
     setAdminProfiles(
       data
         .filter((p: Record<string, unknown>) => p.role === 'admin')
@@ -571,7 +617,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const sb = supabase;
 
     const sendHeartbeat = async (isAlive: boolean) => {
-      if (role === 'admin') return;
+      if (role === 'admin' || role === 'cliente') return;
       try {
         const currentMap = (await loadShared<Record<string, number>>('online_heartbeats')) || {};
         const now = Date.now();
@@ -1987,6 +2033,158 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [markLocalWrite]);
 
+
+  // =====================================================================
+  // PORTAL DE CLIENTES
+  // =====================================================================
+  const updateClientCatalog = useCallback((next: ClientCatalog) => {
+    setClientCatalog(next);
+  }, []);
+
+  // --- Lado cliente: su copia limpia + sus acciones pendientes ---
+  const clientPendingRef = useRef<ClientAction[]>([]);
+  useEffect(() => { clientPendingRef.current = clientPending; }, [clientPending]);
+
+  useEffect(() => {
+    if (!isClient || !user?.id || !isSupabaseConfigured) return;
+    const uid = user.id;
+    let active = true;
+    const load = async () => {
+      const [view, inbox, ack, catalog] = await Promise.all([
+        loadShared<ClientView>(clientViewKey(uid)),
+        loadShared<ClientAction[]>(clientInboxKey(uid)),
+        loadShared<string[]>(clientAckKey(uid)),
+        loadShared<ClientCatalog>(CLIENT_CATALOG_KEY),
+      ]);
+      if (!active) return;
+      setClientView(view && Array.isArray(view.orders) ? view : { orders: [], brands: [], updatedAt: '' });
+      if (catalog && typeof catalog === 'object') setClientCatalog({ avatars: catalog.avatars || [], styles: catalog.styles || [] });
+      const acked = new Set(Array.isArray(ack) ? ack : []);
+      const stillPending = (Array.isArray(inbox) ? inbox : []).filter(a => !acked.has(a.id));
+      // Mezcla con lo que el cliente hizo en esta sesión y aún no aparece en la bandeja
+      const local = clientPendingRef.current.filter(a => !acked.has(a.id) && !stillPending.some(p => p.id === a.id));
+      const merged = [...stillPending, ...local];
+      setClientPending(merged);
+      if (Array.isArray(inbox) && inbox.length !== merged.length) void saveShared(clientInboxKey(uid), merged);
+    };
+    void load();
+    const unsub = subscribeToTable('platform_kv', (changedKey?: string) => {
+      if (!changedKey || changedKey === clientViewKey(uid) || changedKey === clientAckKey(uid) || changedKey === CLIENT_CATALOG_KEY) void load();
+    });
+    return () => { active = false; unsub(); };
+  }, [isClient, user?.id]);
+
+  const enqueueClientAction = useCallback((action: ClientAction) => {
+    if (!user?.id) return;
+    // Sin Supabase (modo local / pruebas) se aplica directo
+    if (!isSupabaseConfigured) {
+      if (action.type === 'brief') applyOrderPatchRef.current(action.orderId, action.patch);
+      else if (action.type === 'feedback') submitFeedbackRef.current(action.videoId, action.items);
+      else setQcRef.current(action.videoId, 'aprobado_cliente');
+      return;
+    }
+    const next = [...clientPendingRef.current, action];
+    clientPendingRef.current = next;
+    setClientPending(next);
+    void saveShared(clientInboxKey(user.id), next);
+  }, [user?.id]);
+
+  const clientDerived = useMemo<ClientView | null>(() => {
+    if (!isClient) return null;
+    if (!isSupabaseConfigured) return user?.id ? buildClientView(user.id, orders, brands) : null;
+    return applyClientActions(clientView || { orders: [], brands: [], updatedAt: '' }, clientPending);
+  }, [isClient, clientView, clientPending, orders, brands, user?.id]);
+
+  // --- Lado administrador: publica la copia limpia de cada cliente y procesa sus bandejas ---
+  const publishedViewsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (role !== 'admin' || !isSupabaseConfigured) return;
+    const t = setTimeout(() => {
+      const clientIds = Array.from(new Set(orders.map(o => o.clientId).filter(Boolean) as string[]));
+      for (const cid of clientIds) {
+        const view = buildClientView(cid, orders, brands);
+        const sig = JSON.stringify({ o: view.orders, b: view.brands });
+        if (publishedViewsRef.current[cid] === sig) continue;
+        publishedViewsRef.current[cid] = sig;
+        void saveShared(clientViewKey(cid), view);
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [role, orders, brands]);
+
+  const processingInboxRef = useRef<Set<string>>(new Set());
+  const processClientInbox = useCallback(async (clientId: string) => {
+    if (roleRef.current !== 'admin' || processingInboxRef.current.has(clientId)) return;
+    processingInboxRef.current.add(clientId);
+    try {
+      const [inbox, ack] = await Promise.all([
+        loadShared<ClientAction[]>(clientInboxKey(clientId)),
+        loadShared<string[]>(clientAckKey(clientId)),
+      ]);
+      const acked = new Set(Array.isArray(ack) ? ack : []);
+      const todo = (Array.isArray(inbox) ? inbox : []).filter(a => !acked.has(a.id));
+      if (todo.length === 0) return;
+      for (const a of todo) {
+        acked.add(a.id);
+        if (!clientOwnsTarget(clientId, a, ordersRef.current, brandsRef.current)) continue;
+        if (a.type === 'brief') {
+          applyOrderPatchRef.current(a.orderId, a.patch);
+          pushNotification('admin', 'sistema', `El cliente actualizó el brief de "${ordersRef.current.find(o => o.id === a.orderId)?.brand || 'su proyecto'}"`);
+        } else if (a.type === 'feedback') {
+          submitFeedbackRef.current(a.videoId, a.items);
+        } else if (a.type === 'approve') {
+          setQcRef.current(a.videoId, 'aprobado_cliente');
+        }
+      }
+      await saveShared(clientAckKey(clientId), Array.from(acked).slice(-300));
+    } finally {
+      processingInboxRef.current.delete(clientId);
+    }
+  }, [pushNotification]);
+  useEffect(() => { processClientInboxRef.current = processClientInbox; }, [processClientInbox]);
+
+  // Al abrir la plataforma, el admin procesa lo que los clientes hicieron mientras no estaba
+  useEffect(() => {
+    if (role !== 'admin' || !isSupabaseConfigured) return;
+    const t = setTimeout(() => {
+      const clientIds = Array.from(new Set(ordersRef.current.map(o => o.clientId).filter(Boolean) as string[]));
+      clientIds.forEach(id => void processClientInbox(id));
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [role, processClientInbox]);
+
+  const applyOrderPatchRef = useRef<(id: string, patch: Partial<Order>) => void>(() => {});
+  const submitFeedbackRef = useRef<(videoId: string, items: { time: number; text: string }[]) => void>(() => {});
+  const setQcRef = useRef<(videoId: string, status: QcStatus) => void>(() => {});
+  useEffect(() => {
+    applyOrderPatchRef.current = updateOrder;
+    submitFeedbackRef.current = submitClientFeedbackBatch;
+    setQcRef.current = setQc;
+  }, [updateOrder, submitClientFeedbackBatch, setQc]);
+
+  // Acciones del cliente: se encolan (el admin las aplica a los datos reales)
+  const clientSetQc = useCallback((videoId: string, status: QcStatus) => {
+    if (status === 'aprobado_cliente') enqueueClientAction({ id: newClientActionId(), type: 'approve', videoId, at: new Date().toISOString() });
+  }, [enqueueClientAction]);
+  const clientSubmitFeedback = useCallback((videoId: string, items: { time: number; text: string }[]) => {
+    if (items.length > 0) enqueueClientAction({ id: newClientActionId(), type: 'feedback', videoId, items, at: new Date().toISOString() });
+  }, [enqueueClientAction]);
+  const clientUpdateOrder = useCallback((orderId: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>) => {
+    const allowed = {
+      references: patch.references,
+      avatarId: patch.avatarId,
+      avatarName: patch.avatarName,
+      editingStyleId: patch.editingStyleId,
+      editingStyleName: patch.editingStyleName,
+      clientNotes: patch.clientNotes,
+      briefConfirmedAt: patch.briefConfirmedAt,
+    };
+    // Solo campos del brief; nada de precios, equipo ni estados
+    const clean = Object.fromEntries(Object.entries(allowed).filter(([, v]) => v !== undefined)) as Extract<ClientAction, { type: 'brief' }>['patch'];
+    enqueueClientAction({ id: newClientActionId(), type: 'brief', orderId, patch: clean, at: new Date().toISOString() });
+  }, [enqueueClientAction]);
+  const noop = useCallback(() => {}, []);
+
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
@@ -2015,7 +2213,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     appExpenses, addAppExpense, deleteAppExpense,
     payrollPayments, payrollAdjustments, setWorkerPayrollAdjustment, recordPayrollPayment, revertPayrollPayment,
     capacityConfig, updateCapacityConfig,
+    clientCatalog, updateClientCatalog, clientProfiles,
+    clientPendingCount: clientPending.length,
+    clientViewReady: !isClient || !isSupabaseConfigured || clientView !== null,
   };
+
+  // El cliente ve SOLO su copia limpia y sus acciones pasan por la bandeja
+  if (isClient && clientDerived) {
+    store.brands = clientDerived.brands;
+    store.orders = clientDerived.orders;
+    store.workers = [];
+    store.setQc = clientSetQc;
+    store.approveFinal = (videoId: string) => clientSetQc(videoId, 'aprobado_cliente');
+    store.submitClientFeedbackBatch = clientSubmitFeedback;
+    store.updateOrder = clientUpdateOrder;
+    store.enableExtraClientFeedbackRound = noop;
+    store.notifications = [];
+    store.notificationsArchive = [];
+  }
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

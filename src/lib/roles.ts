@@ -10,11 +10,15 @@ export const TEAM_ROLE_SHORT = 'Clipper · Asist.';
 export const TEAM_ROLE_PLURAL = 'Clippers · Asistentes';
 
 export function normalizeRole(role: unknown): Role {
-  return role === 'admin' ? 'admin' : 'clipper';
+  if (role === 'admin') return 'admin';
+  if (role === 'cliente') return 'cliente';
+  return 'clipper';
 }
 
 export function roleLabel(role: unknown): string {
-  return role === 'admin' ? 'Administrador' : TEAM_ROLE_LABEL;
+  if (role === 'admin') return 'Administrador';
+  if (role === 'cliente') return 'Cliente';
+  return TEAM_ROLE_LABEL;
 }
 
 /** ¿Esta persona participa en el video (como clipper o como responsable de la edición)? */

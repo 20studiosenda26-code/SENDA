@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
 
     const { email, password, name, role } = await req.json();
 
-    if (!email || !password || !name || !['clipper', 'editor', 'admin'].includes(role)) {
+    if (!email || !password || !name || !['clipper', 'editor', 'admin', 'cliente'].includes(role)) {
       return new Response(JSON.stringify({ error: 'Datos inválidos' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const cargo = role === 'clipper' ? 'Clipper' : role === 'editor' ? 'Editora' : 'Admin';
+    const cargo = role === 'cliente' ? 'Cliente' : role === 'admin' ? 'Admin' : 'Clipper · Asistente de edición';
 
     const { error: profileError } = await adminClient.from('profiles').insert({
       id: created.user.id,

@@ -28,7 +28,7 @@ function sortedVideos(b: Brand) {
 
 /** Portal del cliente: marcas → videos entregados → revisión con feedback en la línea de tiempo. */
 export function ClientPortal() {
-  const { brands, orders } = useStore();
+  const { brands, orders, role } = useStore();
   const [brandId, setBrandId] = useState<string | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('todos');
@@ -47,7 +47,11 @@ export function ClientPortal() {
       <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-20 text-center">
         <Film size={34} className="text-muted-2 mx-auto mb-3" />
         <p className="font-display text-lg font-semibold">Aún no hay entregas</p>
-        <p className="text-sm text-muted mt-1">Cuando apruebes un video con “Aprobado Senda”, aparecerá aquí para el cliente.</p>
+        <p className="text-sm text-muted mt-1">
+          {role === 'cliente'
+            ? 'Tus videos aparecerán aquí en cuanto el equipo SENDA los entregue.'
+            : 'Cuando apruebes un video con “Aprobado Senda”, aparecerá aquí para el cliente.'}
+        </p>
       </div>
     );
   }
@@ -399,7 +403,7 @@ function VideoReview({
                 markerClass={c => (c.id.startsWith('draft-') ? 'bg-amber' : null)}
               />
               {isDrive && canSend && (
-                <p className="text-[10px] text-muted-2">Video de Google Drive: pausa en el momento exacto y escribe el minuto (ej. 0:42) o haz clic en la barra.</p>
+                <p className="text-[10px] text-muted-2">Este video se muestra con el visor de Google Drive: pausa en el momento exacto y escribe el minuto (ej. 0:42).</p>
               )}
             </div>
           )}
