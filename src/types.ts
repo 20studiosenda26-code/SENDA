@@ -256,6 +256,8 @@ export interface Order {
   invoiceDate?: string | null;
   invoiceFileName?: string | null;
   invoiceFileUrl?: string | null;
+  /** Carpeta de Google Drive de este proyecto/marca: allí van los videos finales */
+  driveFolderUrl?: string | null;
 }
 
 export interface FinanceSettings {

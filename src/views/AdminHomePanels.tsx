@@ -130,7 +130,7 @@ export function AdminHomePanels({
         gross,
         creatorCost,
         netMargin,
-        teamLabel: `${clipperW?.name || "Por asignar"} + ${editorW?.name || "Por asignar"}`,
+        teamLabel: !o.editorId || o.editorId === o.clipperId ? (clipperW?.name || "Por asignar") : `${clipperW?.name || "Por asignar"} + ${editorW?.name || "Por asignar"}`,
         status: o.status,
       };
     });

@@ -20,7 +20,10 @@ import {
 } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
+import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
+import { findOrderForVideo } from '../lib/economics';
+import { DriveFolderField } from '../components/DriveFolderField';
 
 /** Nombre(s) del responsable: uno solo si la misma persona hace clips y edición. */
 function teamNames(v?: Pick<Video, 'clipperName' | 'editorName' | 'clipperId' | 'editorId'> | null): string {
@@ -30,11 +33,6 @@ function teamNames(v?: Pick<Video, 'clipperName' | 'editorName' | 'clipperId' | 
   return `${v.clipperName} + ${v.editorName}`;
 }
 
-function fmtTime(t: number) {
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 function clipStatusLabel(status?: ClipStatus | null) {
   if (status === 'approved') return 'Aceptado';
@@ -322,6 +320,12 @@ function VideoDetail({
   const isClipper = role !== 'admin';
   const isEditor = role !== 'admin';
   const isMainImageApproved = video.mainImageStatus === 'aprobada';
+  // El video final solo se habilita cuando el admin aceptó TODOS los clips generados
+  const allClipsApproved = video.clips.length > 0 && video.clips.every(c => c.status === 'approved');
+  const pendingClipsCount = video.clips.filter(c => c.status !== 'approved').length;
+  // Carpeta de Drive del proyecto (si el admin la vinculó); si no, la carpeta general
+  const { orders: allOrders } = useStore();
+  const projectDriveUrl = findOrderForVideo(video, brandName, allOrders)?.driveFolderUrl || getGoogleDriveFolderUrl();
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
   const latestFinal: Clip | null = video.finalVideos.length > 0 ? video.finalVideos[video.finalVideos.length - 1] : null;
@@ -425,7 +429,7 @@ function VideoDetail({
     setUploadingFinalVideo(true);
     setUploadPct(2);
     try {
-      const url = await uploadSharedFile(f, `finals/${video.id}`, pct => setUploadPct(pct));
+      const url = await uploadSharedFile(f, `finals/${video.id}`, pct => setUploadPct(pct), { driveFolderUrl: projectDriveUrl });
       setFinalFileUrl(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
@@ -977,14 +981,18 @@ function VideoDetail({
                   <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
                 <div className="flex items-center gap-2">
-                  {!isAdmin && (
+                  {!isAdmin && (allClipsApproved ? (
                     <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
                       {latestFinal ? <><RotateCcw size={14} /> Reemplazar</> : <><Plus size={14} /> Subir video final</>}
                     </button>
-                  )}
+                  ) : (
+                    <span className="text-xs text-amber bg-amber-dim border border-amber/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 select-none" title="El administrador debe aceptar todos los clips generados">
+                      <Lock size={12} /> {video.clips.length === 0 ? 'Primero sube los clips' : `Faltan ${pendingClipsCount} clip(s) por aceptar`}
+                    </span>
+                  ))}
                 </div>
               </div>
-              {showFinalForm && !isAdmin && (
+              {showFinalForm && !isAdmin && allClipsApproved && (
                 <div className="mb-4 space-y-3 p-4 bg-surface-3 rounded-lg border border-line animate-fadeIn">
                   {latestFinal && (
                     <p className="text-xs text-muted">Se reemplazará el video final actual. Las correcciones marcadas se conservan para que el administrador las verifique.</p>
@@ -1016,8 +1024,8 @@ function VideoDetail({
                       <span className="text-xs text-mint font-medium flex items-center gap-1.5">
                         <Upload size={13} /> Enlace de Google Drive (Video Final):
                       </span>
-                      {getGoogleDriveFolderUrl() && (
-                        <a href={getGoogleDriveFolderUrl()} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline font-medium shrink-0">
+                      {projectDriveUrl && (
+                        <a href={projectDriveUrl} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline font-medium shrink-0">
                           Abrir carpeta Drive →
                         </a>
                       )}
@@ -1210,11 +1218,11 @@ function VideoDetail({
                 </summary>
                 <div className="mt-2 space-y-2 text-[11px] text-muted">
                   <p>1. Entra a <strong>script.google.com</strong> con la cuenta de Google dueña de la carpeta y crea un "Nuevo proyecto".</p>
-                  <p>2. Pega este código reemplazando <code>ID_DE_TU_CARPETA</code> por el ID de tu carpeta de Drive:</p>
+                  <p>2. Pega este código reemplazando <code>ID_DE_TU_CARPETA</code> por el ID de tu carpeta general. Los videos de cada proyecto irán a la carpeta que vincules en ese proyecto:</p>
                   <pre className="bg-black/60 p-2.5 rounded-lg text-[10.5px] text-mint overflow-x-auto select-all">{
 `function doPost(e) {
   var data = JSON.parse(e.postData.contents);
-  var folder = DriveApp.getFolderById("ID_DE_TU_CARPETA");
+  var folder = DriveApp.getFolderById(data.folderId || "ID_DE_TU_CARPETA");
   var blob = Utilities.newBlob(Utilities.base64Decode(data.base64), data.mimeType, data.fileName);
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -1354,15 +1362,6 @@ function VideoDetail({
   );
 }
 
-function parseTime(input: string): number | null {
-  const t = input.trim();
-  if (!t) return null;
-  if (/^\d+(\.\d+)?$/.test(t)) return Math.max(0, Math.round(Number(t)));
-  const m = t.match(/^(\d{1,3}):([0-5]?\d)$/);
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
-}
-
 /** Botón sutil de descarga directa (sin abrir pestañas) con progreso y confirmación. */
 function DownloadButton({ url, fileName, label, className = '' }: { url?: string | null; fileName?: string | null; label?: string; className?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
@@ -1406,59 +1405,6 @@ function DownloadButton({ url, fileName, label, className = '' }: { url?: string
       )}
       {label && state !== 'loading' && <span>{state === 'done' ? 'Listo' : state === 'error' ? 'Reintentar' : label}</span>}
     </button>
-  );
-}
-
-/** Barra de tiempo del video final: cabezal, marcas de corrección y punto seleccionado. */
-function CorrectionTimeline({
-  duration, currentTime, corrections, pickTime, onPick, onSeek, editable,
-}: {
-  duration: number; currentTime: number; corrections: Correction[]; pickTime: number | null;
-  onPick: (t: number) => void; onSeek: (t: number) => void; editable: boolean;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const safeDur = Math.max(1, duration);
-  const pctOf = (t: number) => `${Math.min(100, Math.max(0, (t / safeDur) * 100))}%`;
-  const timeAt = (clientX: number) => {
-    const el = trackRef.current;
-    if (!el) return 0;
-    const r = el.getBoundingClientRect();
-    return Math.round(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * safeDur);
-  };
-  return (
-    <div className="select-none">
-      <div
-        ref={trackRef}
-        onClick={e => { const t = timeAt(e.clientX); if (editable) onPick(t); onSeek(t); }}
-        className="relative h-9 flex items-center cursor-pointer group"
-        title={editable ? 'Haz clic para marcar el momento exacto de la corrección' : 'Haz clic para saltar a ese momento'}
-      >
-        <div className="w-full h-1.5 bg-surface-3 border border-line rounded-full overflow-hidden">
-          <div className="h-full bg-accent/40 transition-[width] duration-150" style={{ width: pctOf(currentTime) }} />
-        </div>
-        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-accent shadow-[0_0_10px_rgba(53,214,228,0.6)] pointer-events-none" style={{ left: pctOf(currentTime) }} />
-        {corrections.map(c => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={e => { e.stopPropagation(); onSeek(c.time); }}
-            title={`${fmtTime(c.time)} · ${c.text}`}
-            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-6 rounded-full hover:w-1.5 hover:h-7 transition-all ${c.resolved ? 'bg-mint' : 'bg-red-500'}`}
-            style={{ left: pctOf(c.time) }}
-          />
-        ))}
-        {editable && pickTime !== null && (
-          <div className="absolute -top-1 -translate-x-1/2 flex flex-col items-center pointer-events-none animate-fadeIn" style={{ left: pctOf(pickTime) }}>
-            <span className="text-[9px] font-tech font-bold bg-amber text-on-accent rounded px-1 leading-4">{fmtTime(pickTime)}</span>
-            <span className="w-px h-5 bg-amber" />
-          </div>
-        )}
-      </div>
-      <div className="flex justify-between text-[10px] text-muted-2 font-tech">
-        <span>0:00</span>
-        <span>{fmtTime(currentTime)} / {fmtTime(safeDur)}</span>
-      </div>
-    </div>
   );
 }
 
@@ -1768,6 +1714,7 @@ export function TasksBoard() {
 
                 {isOpen && (
                   <div className="p-4 pt-2 border-t border-line bg-surface space-y-3">
+                    {linkedOrder && <DriveFolderField order={linkedOrder} compact />}
                     {videos.map((v, vIndex) => (
                       <button
                         key={v.id}

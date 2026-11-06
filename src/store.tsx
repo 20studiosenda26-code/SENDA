@@ -1174,6 +1174,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Solo existe UN video final por video: si ya hay uno, se reemplaza el archivo (las correcciones se conservan)
   const addFinalVideo = useCallback((videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => {
     const prev = findVideo(videoId);
+    // Regla: no se acepta video final hasta que el admin apruebe todos los clips
+    if (prev && !(prev.clips.length > 0 && prev.clips.every(c => c.status === 'approved'))) return;
     const current = prev?.finalVideos[prev.finalVideos.length - 1];
     updateVideo(videoId, v => {
       const existing = v.finalVideos[v.finalVideos.length - 1];

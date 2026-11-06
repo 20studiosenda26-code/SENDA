@@ -2,15 +2,16 @@ import { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store';
 import { uploadSharedFile } from '../lib/supabaseClient';
 import { buildWorkUnits, spreadLoad } from '../lib/capacity';
+import { ClientPortal } from './ClientPortal';
 import { CardNodeDeco } from '../components/BrandBackground';
 import { fmtMoneyClean } from '../lib/payrollPdf';
-import type { Order, Video } from '../types';
+import type { Order } from '../types';
 import {
   Briefcase, PlusCircle, Calendar, Clock, Layers, DollarSign,
   CheckCircle2, AlertTriangle, Upload, FileText, Loader2,
   Sparkles, Scissors, Film, Eye,
   Users, Cpu, Receipt, Search, ExternalLink, Printer, FolderOpen, Gauge,
-  Play, MessageSquare, Lock, Unlock, Plus, Trash2, Send, ArrowLeft
+  Play, Lock, Trash2,
 } from 'lucide-react';
 
 function todayIso(): string {
@@ -42,11 +43,6 @@ function formatCreatedAt(iso?: string): string {
   });
 }
 
-function fmtTime(t: number) {
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 function buildInvoiceCode(brand: string, dateIso?: string): string {
   const clean = (brand || 'CLI').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'CLI';
@@ -58,21 +54,14 @@ function buildInvoiceCode(brand: string, dateIso?: string): string {
 export function ClientsView() {
   const {
     orders, brands, workers, financeSettings, capacityConfig,
-    getWorkerCapacity, addOrder, updateOrder, deleteOrder, setView, setQc,
-    submitClientFeedbackBatch, enableExtraClientFeedbackRound,
+    getWorkerCapacity, addOrder, updateOrder, deleteOrder, setView,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState<'portal_videos' | 'nuevo_pedido' | 'cartera'>('portal_videos');
   const [selectedClientBrand, setSelectedClientBrand] = useState<string | null>(null);
-  const [selectedPortalBrandId, setSelectedPortalBrandId] = useState<string | null>(null);
-  const [selectedPortalVideoId, setSelectedPortalVideoId] = useState<string | null>(null);
   const [searchClient, setSearchClient] = useState('');
 
   // Borrador de varios puntos de feedback para 1 sola ronda de envío
-  const [draftTime, setDraftTime] = useState<string>('');
-  const [draftText, setDraftText] = useState<string>('');
-  const [draftFeedbackList, setDraftFeedbackList] = useState<{ time: number; text: string }[]>([]);
-  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
 
   const [brandName, setBrandName] = useState('');
   const [videoCount, setVideoCount] = useState<number>(5);
@@ -96,26 +85,11 @@ export function ClientsView() {
 
   const briefInputRef = useRef<HTMLInputElement | null>(null);
   const invoiceInputRef = useRef<HTMLInputElement | null>(null);
-  const portalPlayerRef = useRef<HTMLVideoElement | null>(null);
 
   // Rol único: todo el equipo produce el video completo
   const clippers = workers;
   const editors = workers;
-  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
 
-  const activePortalBrand = useMemo(() => {
-    if (brands.length === 0) return null;
-    if (selectedPortalBrandId) {
-      const found = brands.find(b => b.id === selectedPortalBrandId);
-      if (found) return found;
-    }
-    return brands[0];
-  }, [brands, selectedPortalBrandId]);
-
-  const activePortalVideo: Video | null = useMemo(() => {
-    if (!activePortalBrand || !selectedPortalVideoId) return null;
-    return activePortalBrand.videos.find(v => v.id === selectedPortalVideoId) || null;
-  }, [activePortalBrand, selectedPortalVideoId]);
 
   const capacityPreview = useMemo(() => {
     const safetyFactor = Math.max(0.5, (100 - capacityConfig.safetyMarginPct) / 100);
@@ -500,22 +474,6 @@ export function ClientsView() {
     setView("tareas");
   };
 
-  const handleAddDraftCorrection = () => {
-    if (!draftText.trim()) return;
-    const sec = Math.max(0, parseInt(draftTime, 10) || Math.floor(portalPlayerRef.current?.currentTime || 0));
-    setDraftFeedbackList(prev => [...prev, { time: sec, text: draftText.trim() }]);
-    setDraftText('');
-    setDraftTime('');
-  };
-
-  const handleSendSingleRoundFeedback = (video: Video) => {
-    if (draftFeedbackList.length === 0) return;
-    submitClientFeedbackBatch(video.id, draftFeedbackList);
-    setDraftFeedbackList([]);
-    setFeedbackToast('Ronda de correcciones enviada a Tareas. El límite de 1 tanda de feedback ha quedado cerrado para este video.');
-    setTimeout(() => setFeedbackToast(null), 4500);
-  };
-
   const priorityBadgeStyle = (p?: string) => {
     switch (p) {
       case 'critico':
@@ -590,365 +548,7 @@ export function ClientsView() {
       {/* =========================================================================
           PESTAÑA 1: PORTAL DE CLIENTES (SELECCIONAR MARCA -> VIDEO 1, VIDEO 2... -> 1 RONDA DE FEEDBACK)
          ========================================================================= */}
-      {activeTab === 'portal_videos' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Columna izquierda: Marcas / Pedidos */}
-          <div className="lg:col-span-4 bg-surface-2 border border-line rounded-3xl p-4 space-y-3">
-            <div className="px-2 py-1 flex items-center justify-between border-b border-line/60">
-              <span className="text-xs font-tech uppercase text-accent font-semibold">
-                Pedidos por Marca ({brands.length})
-              </span>
-              <span className="text-[11px] text-muted-2">Selecciona una marca</span>
-            </div>
-
-            <div className="space-y-2">
-              {brands.map(b => {
-                const isSelected = activePortalBrand?.id === b.id;
-                const uploadedToClientCount = b.videos.filter(
-                  v => v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente'
-                ).length;
-                const clientApprovedCount = b.videos.filter(v => v.qc === 'aprobado_cliente').length;
-
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedPortalBrandId(b.id);
-                      setSelectedPortalVideoId(null);
-                      setDraftFeedbackList([]);
-                    }}
-                    className={`w-full text-left p-4 rounded-2xl border transition-all space-y-2 ${
-                      isSelected
-                        ? 'bg-accent-dim/40 border-accent shadow-[0_0_24px_-8px_rgba(53,214,228,0.4)]'
-                        : 'bg-surface-3/70 border-line hover:border-accent/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-display text-base font-bold truncate">{b.name}</p>
-                      <span className="font-tech text-xs px-2.5 py-0.5 rounded-full bg-surface-2 border border-line text-accent">
-                        {b.videos.length} videos
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] font-tech text-muted-2">
-                      <span>Subidos a cliente: <strong className="text-mint">{uploadedToClientCount}/{b.videos.length}</strong></span>
-                      <span>Aprobados: <strong className="text-text">{clientApprovedCount}/{b.videos.length}</strong></span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Columna derecha: Lista de Videos (Video 1, Video 2...) o Interfaz de Revisión de un Video */}
-          <div className="lg:col-span-8 bg-surface-2 border border-line rounded-3xl p-6 space-y-5 relative overflow-hidden">
-            <CardNodeDeco color="var(--accent)" />
-
-            {!activePortalBrand ? (
-              <p className="text-sm text-muted text-center py-12">Selecciona una marca a la izquierda para ver sus videos.</p>
-            ) : !activePortalVideo ? (
-              /* Vista de todos los videos individuales de la marca (Video 1, Video 2, Video 3...) */
-              <div className="space-y-4 relative z-10">
-                <div className="flex items-center justify-between gap-3 flex-wrap border-b border-line pb-4">
-                  <div>
-                    <span className="text-[11px] font-tech uppercase text-accent">Portal de Entregas del Cliente</span>
-                    <h3 className="font-display text-2xl font-bold mt-0.5">
-                      {activePortalBrand.name} · {activePortalBrand.videos.length} Videos
-                    </h3>
-                    <p className="text-xs text-muted mt-0.5">
-                      Cuando apruebas un video con <strong>"Aprobar Senda"</strong> en Tareas, se sube inmediatamente aquí al número de video que corresponde.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {activePortalBrand.videos
-                    .slice()
-                    .sort((a, b) => (a.videoNumber || 0) - (b.videoNumber || 0))
-                    .map((v, idx) => {
-                      const num = v.videoNumber || idx + 1;
-                      const isUploadedForClient = Boolean(
-                        v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente'
-                      );
-                      const roundsUsed = v.clientFeedbackRoundsUsed ?? 0;
-                      const maxRounds = v.clientFeedbackMaxRounds ?? 1;
-
-                      return (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPortalVideoId(v.id);
-                            setDraftFeedbackList([]);
-                          }}
-                          className="text-left p-4 rounded-2xl bg-surface-3/90 hover:bg-surface-3 border border-line hover:border-accent/50 transition-all space-y-3 flex flex-col justify-between"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-display text-base font-bold text-text flex items-center gap-2">
-                              <span className="w-7 h-7 rounded-lg bg-accent-dim text-accent font-tech text-xs flex items-center justify-center">
-                                #{num}
-                              </span>
-                              Video {num}
-                            </span>
-
-                            {v.qc === 'aprobado_cliente' ? (
-                              <span className="text-[10px] font-tech font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                Aprobado por Cliente
-                              </span>
-                            ) : v.qc === 'correcciones' && isUploadedForClient ? (
-                              <span className="text-[10px] font-tech font-bold px-2.5 py-1 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
-                                Feedback enviado a Edición
-                              </span>
-                            ) : isUploadedForClient ? (
-                              <span className="text-[10px] font-tech font-bold px-2.5 py-1 rounded-full bg-mint-dim text-mint border border-mint/30">
-                                Video subido · Pendiente Cliente
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-tech px-2.5 py-1 rounded-full bg-surface-2 text-muted-2 border border-line">
-                                En producción interna ({v.qc.replace(/_/g, ' ')})
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between text-xs text-muted pt-2 border-t border-line/60">
-                            <span className="font-tech text-[11px]">
-                              Feedback: {roundsUsed}/{maxRounds} tanda usada
-                            </span>
-                            <span className="text-accent font-semibold flex items-center gap-1">
-                              Abrir Video {num} <Eye size={13} />
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-            ) : (
-              /* Vista individual dentro de p.ej. "Video 1": Reproductor + 1 Ronda de Feedback + Botón Admin de Habilitar nueva tanda */
-              (() => {
-                const v = activePortalVideo;
-                const isUploadedForClient = Boolean(
-                  v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente'
-                );
-                const finalClip = v.finalVideos[v.finalVideos.length - 1] || v.clips[0] || null;
-                const roundsUsed = v.clientFeedbackRoundsUsed ?? 0;
-                const maxRounds = v.clientFeedbackMaxRounds ?? 1;
-                const canClientSendFeedback = isUploadedForClient && roundsUsed < maxRounds && v.qc !== 'aprobado_cliente';
-
-                return (
-                  <div className="space-y-5 relative z-10">
-                    <div className="flex items-center justify-between gap-3 flex-wrap border-b border-line pb-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedPortalVideoId(null);
-                            setDraftFeedbackList([]);
-                          }}
-                          className="w-9 h-9 rounded-xl bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text"
-                        >
-                          <ArrowLeft size={16} />
-                        </button>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-display text-xl font-bold">
-                              {activePortalBrand.name} · {v.name}
-                            </h3>
-                            {v.qc === 'aprobado_cliente' ? (
-                              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                Aprobado por el Cliente
-                              </span>
-                            ) : isUploadedForClient ? (
-                              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-mint-dim text-mint border border-mint/30">
-                                Video subido · Pendiente de aprobación del cliente
-                              </span>
-                            ) : (
-                              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-dim text-amber border border-amber/30">
-                                Pendiente de "Aprobado Senda" en Tareas
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted mt-0.5">
-                            Tandas de corrección utilizadas por el cliente: <strong className="text-accent font-tech">{roundsUsed} de {maxRounds}</strong>
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Botón exclusivo de Admin para habilitar una nueva tanda de feedback a este cliente */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          enableExtraClientFeedbackRound(v.id);
-                          setFeedbackToast(`Se habilitó 1 nueva tanda de feedback para ${activePortalBrand.name} (${v.name}).`);
-                          setTimeout(() => setFeedbackToast(null), 4000);
-                        }}
-                        className="px-3.5 py-2 rounded-xl bg-surface-3 hover:bg-accent-dim border border-accent/40 text-accent text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                      >
-                        <Unlock size={13} /> Habilitar nueva tanda a este cliente
-                      </button>
-                    </div>
-
-                    {feedbackToast && (
-                      <div className="bg-mint-dim border border-mint/40 text-mint rounded-xl px-4 py-2.5 text-xs font-semibold flex items-center gap-2">
-                        <CheckCircle2 size={15} /> {feedbackToast}
-                      </div>
-                    )}
-
-                    {/* Reproductor del video subido */}
-                    <div className="aspect-video bg-surface-3 border border-line rounded-2xl overflow-hidden flex items-center justify-center">
-                      {!isUploadedForClient ? (
-                        <div className="text-center p-6 space-y-2">
-                          <Clock size={36} className="text-amber mx-auto" />
-                          <p className="text-sm font-semibold">Este video aún no ha sido enviado desde Tareas</p>
-                          <p className="text-xs text-muted max-w-md">
-                            Ve a <strong>Tareas → Proyectos iniciados → {activePortalBrand.name} → {v.name}</strong> y presiona <strong>"Aprobar Senda"</strong> para que el video se suba automáticamente aquí.
-                          </p>
-                        </div>
-                      ) : finalClip?.fileUrl ? (
-                        <video
-                          ref={portalPlayerRef}
-                          src={finalClip.fileUrl}
-                          controls
-                          className="w-full h-full object-contain"
-                        />
-                      ) : (
-                        <div className="text-center p-6 space-y-2">
-                          <Film size={36} className="text-mint mx-auto" />
-                          <p className="text-sm font-semibold">{v.name} subido para revisión del cliente</p>
-                          <p className="text-xs text-muted">Listo para recibir visto bueno o la ronda única de feedback.</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Acciones de Aprobación del Cliente o Ronda Única de Feedback */}
-                    {isUploadedForClient && (
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                        <div className="md:col-span-7 bg-surface-3/90 border border-line rounded-2xl p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold flex items-center gap-1.5">
-                              <MessageSquare size={14} className="text-amber" /> Feedback del Cliente (1 sola tanda por contrato)
-                            </span>
-                            <span className="font-tech text-[11px] text-muted-2">
-                              Ronda {roundsUsed}/{maxRounds}
-                            </span>
-                          </div>
-
-                          {canClientSendFeedback ? (
-                            <div className="space-y-3">
-                              <p className="text-[11px] text-muted leading-relaxed">
-                                El cliente puede anotar <strong>varios puntos de corrección</strong> en esta lista. Una vez presione <strong>"Mandar correcciones"</strong>, se enviarán todas juntas y quedará cerrada la ronda.
-                              </p>
-
-                              <div className="flex gap-2">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={draftTime}
-                                  onChange={e => setDraftTime(e.target.value)}
-                                  placeholder="Seg (ej. 12)"
-                                  className="w-28 bg-surface-2 border border-line rounded-xl px-2.5 py-2 text-xs font-tech outline-none focus:border-accent"
-                                />
-                                <input
-                                  value={draftText}
-                                  onChange={e => setDraftText(e.target.value)}
-                                  placeholder="Escribe una corrección para agregar a la tanda..."
-                                  className="flex-1 bg-surface-2 border border-line rounded-xl px-3 py-2 text-xs outline-none focus:border-accent"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleAddDraftCorrection}
-                                  disabled={!draftText.trim()}
-                                  className="px-3 py-2 rounded-xl bg-surface-2 hover:bg-accent-dim border border-line text-accent text-xs font-semibold flex items-center gap-1 disabled:opacity-40"
-                                >
-                                  <Plus size={14} /> Añadir punto
-                                </button>
-                              </div>
-
-                              {draftFeedbackList.length > 0 && (
-                                <div className="space-y-1.5 bg-surface-2 border border-line rounded-xl p-3">
-                                  <p className="text-[10px] font-tech uppercase text-amber">
-                                    Puntos acumulados para enviar en esta tanda ({draftFeedbackList.length}):
-                                  </p>
-                                  {draftFeedbackList.map((item, i) => (
-                                    <div key={i} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-line/40 last:border-none">
-                                      <span>
-                                        <strong className="text-amber font-tech mr-2">{fmtTime(item.time)}</strong>
-                                        {item.text}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => setDraftFeedbackList(prev => prev.filter((_, idx) => idx !== i))}
-                                        className="text-muted-2 hover:text-red-400"
-                                      >
-                                        <Trash2 size={12} />
-                                      </button>
-                                    </div>
-                                  ))}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSendSingleRoundFeedback(v)}
-                                    className="w-full mt-2 py-2.5 rounded-xl bg-amber text-on-accent font-display text-xs font-bold flex items-center justify-center gap-1.5 hover:opacity-95"
-                                  >
-                                    <Send size={13} /> Mandar correcciones ({draftFeedbackList.length} punto(s) · Consumir tanda)
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="bg-surface-2 border border-line rounded-xl p-3.5 text-xs text-muted flex items-start gap-2.5">
-                              <Lock size={15} className="text-amber shrink-0 mt-0.5" />
-                              <div>
-                                <p className="font-semibold text-text">
-                                  {v.qc === 'aprobado_cliente'
-                                    ? 'Video aprobado definitivamente por el cliente'
-                                    : 'Tanda única de correcciones ya utilizada por el cliente'}
-                                </p>
-                                <p className="text-[11px] text-muted-2 mt-0.5">
-                                  Por contrato solo se permite 1 tanda de feedback por video. Si necesitas autorizar otra ronda excepcional, usa el botón superior <strong>"Habilitar nueva tanda a este cliente"</strong>.
-                                </p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="md:col-span-5 bg-surface-3/90 border border-line rounded-2xl p-4 space-y-3">
-                          <span className="text-xs font-semibold block">Decisión Final del Cliente</span>
-                          <button
-                            type="button"
-                            onClick={() => setQc(v.id, 'aprobado_cliente')}
-                            disabled={v.qc === 'aprobado_cliente'}
-                            className="w-full py-3 rounded-xl bg-mint text-on-accent font-display text-xs font-bold flex items-center justify-center gap-2 hover:opacity-95 disabled:opacity-50"
-                          >
-                            <CheckCircle2 size={16} />
-                            {v.qc === 'aprobado_cliente' ? 'Video Aprobado por Cliente (100%)' : 'Aprobar Video Cliente (Liberar 100%)'}
-                          </button>
-
-                          {v.corrections.length > 0 && (
-                            <div className="pt-2 border-t border-line/60 space-y-1.5">
-                              <span className="text-[10px] font-tech uppercase text-muted-2 block">
-                                Historial de correcciones de {v.name} ({v.corrections.length})
-                              </span>
-                              <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                                {v.corrections.map(c => (
-                                  <div key={c.id} className="text-xs bg-surface-2 rounded-lg px-2.5 py-1.5">
-                                    <span className="text-amber font-tech mr-1.5">{fmtTime(c.time)}</span>
-                                    <span>{c.text}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            )}
-          </div>
-        </div>
-      )}
+      {activeTab === 'portal_videos' && <ClientPortal />}
 
       {/* =========================================================================
           PESTAÑA 2: NUEVO PEDIDO DE CLIENTE (PAGO 100% Y FACTURA OBLIGATORIA)

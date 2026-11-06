@@ -7,6 +7,7 @@ import {
   User, FileDown, Link2, StickyNote, CheckCircle2, Trash2,
 } from "lucide-react";
 import { TasksBoard } from "./TasksView";
+import { DriveFolderField } from "../components/DriveFolderField";
 import { TEAM_ROLE_LABEL, TEAM_ROLE_SHORT } from "../lib/roles";
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
@@ -294,6 +295,8 @@ function ProjectRow({ order, index, isOpen, onToggle }: { order: Order; index: n
               {order.clientNotes || <span className="text-muted-2">El cliente no dejó notas adicionales.</span>}
             </InfoBlock>
           </div>
+
+          <DriveFolderField order={order} />
 
           {order.status !== "finalizado" && (
             <div className="pt-3 border-t border-line/70 space-y-4">

@@ -89,6 +89,13 @@ export function extractGoogleDriveId(url?: string | null): string | null {
   return null;
 }
 
+/** ID de una carpeta de Drive (https://drive.google.com/drive/folders/ID) */
+export function extractDriveFolderId(url?: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  return m ? m[1] : null;
+}
+
 export function isGoogleDriveUrl(url?: string | null): boolean {
   return Boolean(extractGoogleDriveId(url));
 }
@@ -133,7 +140,8 @@ async function uploadViaGoogleDriveBridge(
   file: File,
   folder: string,
   bridgeUrl: string,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  folderId?: string | null
 ): Promise<string> {
   // Leemos en base64 (del 1% al 15%) y enviamos por XHR midiendo cada byte real enviado a Google Drive (del 15% al 98%)
   const base64Data = await new Promise<string>((resolve, reject) => {
@@ -155,6 +163,7 @@ async function uploadViaGoogleDriveBridge(
     fileName: file.name,
     mimeType: file.type || "video/mp4",
     folder,
+    folderId: folderId || undefined,
     base64: base64Data,
   });
 
@@ -201,7 +210,8 @@ async function uploadViaGoogleDriveBridge(
 export async function uploadSharedFile(
   file: File,
   folder: string,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  options?: { driveFolderUrl?: string | null }
 ): Promise<string> {
   const report = (p: number) => {
     if (onProgress) onProgress(Math.max(1, Math.min(100, Math.round(p))));
@@ -252,7 +262,8 @@ export async function uploadSharedFile(
   const bridgeUrl = getGoogleDriveBridgeUrl();
   if (isEditorFinalFolder && bridgeUrl) {
     try {
-      return await uploadViaGoogleDriveBridge(file, folder, bridgeUrl, report);
+      // Va directo a la carpeta de Drive del proyecto (si se vinculó); si no, a la carpeta general del puente
+      return await uploadViaGoogleDriveBridge(file, folder, bridgeUrl, report, extractDriveFolderId(options?.driveFolderUrl));
     } catch (err) {
       console.warn("[SENDA] Falló subida a Google Drive Bridge en video final:", err);
       if (file.size > SMALL_FILE_MAX_BYTES) {
@@ -261,10 +272,8 @@ export async function uploadSharedFile(
     }
   }
 
-  // 3. Si es un Video Final pesado del Editor (> 12 MB) y no hay puente automático, pedir enlace de Google Drive
-  if (isEditorFinalFolder && file.size > SMALL_FILE_MAX_BYTES) {
-    throw new Error("DRIVE_REQUIRED_FOR_LARGE_FILE");
-  }
+  // 3. Sin puente de Drive, el video final sube directo a la plataforma (almacenamiento de Supabase).
+  //    Si el servidor lo rechaza por tamaño, más abajo se pide el enlace de Drive.
 
   // 4. Para clips cortos (<= 10 seg / <= 12 MB) o PDFs de Brief/Factura:
   // Primero intentar Supabase Storage con medición real de bytes XHR
@@ -305,6 +314,9 @@ export async function uploadSharedFile(
   }
 
   // 5. Fallback solo para archivos pequeños (<= 12 MB) con progreso real de lectura
+  if (file.size > SMALL_FILE_MAX_BYTES) {
+    throw new Error("DRIVE_REQUIRED_FOR_LARGE_FILE");
+  }
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onprogress = e => {
