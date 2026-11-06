@@ -38,9 +38,21 @@
   --accent-strong: #0B8C9C;
   --accent-dim: #DEF4F6;
   --on-accent: #FFFFFF;
+  /* Misma familia de color, más profunda para que el texto se lea sobre blanco */
+  --mint: #12A57F;
   --mint-dim: #DCF5EC;
+  --amber: #B7791F;
   --amber-dim: #FFF1D6;
+  --violet: #1597AB;
   --violet-dim: #E4F7FA;
+}
+
+/* Alias heredados: algunas vistas usaban nombres que nunca existieron en la paleta */
+:root,
+[data-theme="light"] {
+  --border-line: var(--line);
+  --surface-1: var(--surface);
+  --surface-4: var(--muted);
 }
 
 * {

@@ -1,14 +1,16 @@
 import { useStore } from '../store';
-import { GraduationCap, Play, CheckCircle2, BookOpen, Award, ArrowLeft, Plus, Trash2, Upload, FolderPlus, X } from 'lucide-react';
+import { GraduationCap, Play, CheckCircle2, BookOpen, Award, ArrowLeft, Plus, Trash2, Upload, FolderPlus, X, Loader2, Link2, AlertCircle } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { uploadSharedFile, isGoogleDriveUrl, getGoogleDrivePreviewUrl } from '../lib/supabaseClient';
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+// Enlaces que se reproducen embebidos (Drive, YouTube, Loom); el resto va en <video>
+function embedUrl(url: string): string | null {
+  if (isGoogleDriveUrl(url)) return getGoogleDrivePreviewUrl(url);
+  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{6,})/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  const loom = url.match(/loom\.com\/share\/([\w-]+)/);
+  if (loom) return `https://www.loom.com/embed/${loom[1]}`;
+  return null;
 }
 
 const COLOR_MAP: Record<string, string> = {
@@ -38,6 +40,10 @@ export function ClassroomView() {
   const [newModuleTitle, setNewModuleTitle] = useState('');
   const [newModuleDesc, setNewModuleDesc] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingLesson, setUploadingLesson] = useState(false);
+  const [lessonPct, setLessonPct] = useState(0);
+  const [lessonLink, setLessonLink] = useState('');
+  const [lessonError, setLessonError] = useState<string | null>(null);
 
   const myCompleted = lessonCompletions[currentWorkerId] || [];
   const totalLessons = classroomModules.reduce((s, m) => s + m.lessons.length, 0);
@@ -45,19 +51,32 @@ export function ClassroomView() {
 
   const selectedModule = classroomModules.find(m => m.id === selectedClassroomModuleId);
 
+  // Las clases se suben al almacenamiento compartido (antes quedaban embebidas solo en este navegador)
   const handleLessonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      const dataUrl = await fileToDataUrl(f);
-      setLessonFileName(f.name);
-      setLessonFileUrl(dataUrl);
+    if (!f) return;
+    setLessonError(null);
+    setLessonFileName(f.name);
+    setUploadingLesson(true);
+    setLessonPct(2);
+    try {
+      const url = await uploadSharedFile(f, `classroom/${selectedClassroomModuleId || 'general'}`, pct => setLessonPct(pct));
+      setLessonFileUrl(url);
+    } catch {
+      setLessonFileName('');
+      setLessonFileUrl('');
+      setLessonError('No se pudo subir el video. Si es pesado, súbelo a Google Drive y pega el enlace.');
+    } finally {
+      setUploadingLesson(false);
+      e.target.value = '';
     }
   };
 
   const submitNewLesson = (moduleId: string) => {
     if (!lessonTitle.trim()) return;
-    addClassroomLesson(moduleId, lessonTitle.trim(), lessonFileUrl || undefined, lessonFileName || undefined);
-    setLessonTitle(''); setLessonFileName(''); setLessonFileUrl(''); setAddingLessonToModule(null);
+    const link = lessonLink.trim();
+    addClassroomLesson(moduleId, lessonTitle.trim(), link || lessonFileUrl || undefined, link ? 'Enlace externo' : lessonFileName || undefined);
+    setLessonTitle(''); setLessonFileName(''); setLessonFileUrl(''); setLessonLink(''); setLessonError(null); setAddingLessonToModule(null);
   };
 
   const submitModuleColor = (color: string) => {
@@ -103,16 +122,37 @@ export function ClassroomView() {
                 placeholder="Título de la clase"
                 className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm text-text placeholder:text-muted-2 outline-none focus:border-accent"
               />
-              <label className="flex items-center gap-2 bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted cursor-pointer hover:border-accent transition-colors">
-                <Upload size={14} />
-                {lessonFileName || 'Subir video de la clase'}
-                <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleLessonFile} />
+              <label className={`block bg-surface-2 border border-line border-dashed rounded-md px-3 py-2 text-sm text-muted transition-colors ${uploadingLesson || lessonLink.trim() ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:border-accent hover:text-accent'}`}>
+                <span className="flex items-center gap-2">
+                  {uploadingLesson ? <Loader2 size={14} className="animate-spin text-accent" /> : lessonFileUrl ? <CheckCircle2 size={14} className="text-mint" /> : <Upload size={14} />}
+                  <span className="truncate flex-1">{lessonFileName || 'Subir video de la clase'}</span>
+                  {uploadingLesson && <span className="font-tech text-xs text-accent">{lessonPct}%</span>}
+                </span>
+                {uploadingLesson && (
+                  <span className="block w-full h-1 bg-surface-3 rounded-full overflow-hidden mt-2">
+                    <span className="block h-full bg-accent transition-all duration-150" style={{ width: `${lessonPct}%` }} />
+                  </span>
+                )}
+                <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleLessonFile} disabled={uploadingLesson || Boolean(lessonLink.trim())} />
               </label>
+              <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-md px-3 focus-within:border-accent transition-colors">
+                <Link2 size={14} className="text-muted-2 shrink-0" />
+                <input
+                  value={lessonLink}
+                  onChange={e => setLessonLink(e.target.value)}
+                  placeholder="…o pega un enlace (Google Drive, YouTube, Loom)"
+                  className="flex-1 bg-transparent py-2 text-sm text-text placeholder:text-muted-2 outline-none"
+                />
+              </div>
+              {lessonError && (
+                <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} /> {lessonError}</p>
+              )}
               <button
                 onClick={() => submitNewLesson(selectedModule.id)}
-                className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
+                disabled={!lessonTitle.trim() || uploadingLesson}
+                className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Guardar clase
+                {uploadingLesson ? `Subiendo video (${lessonPct}%)...` : 'Guardar clase'}
               </button>
             </div>
           )}
@@ -128,12 +168,23 @@ export function ClassroomView() {
                 <div key={lesson.id} className="bg-surface-2 border border-line rounded-xl overflow-hidden">
                   {lesson.videoUrl && (
                     <div className="bg-black aspect-video w-full">
-                      <video
-                        src={lesson.videoUrl}
-                        controls
-                        className="w-full h-full"
-                        onPlay={() => { if (!isAdmin) markLessonComplete(currentWorkerId, lesson.id); }}
-                      />
+                      {embedUrl(lesson.videoUrl) ? (
+                        <iframe
+                          src={embedUrl(lesson.videoUrl) || undefined}
+                          className="w-full h-full border-0"
+                          allow="autoplay; encrypted-media; fullscreen"
+                          allowFullScreen
+                          title={lesson.title}
+                          onLoad={() => { if (!isAdmin) markLessonComplete(currentWorkerId, lesson.id); }}
+                        />
+                      ) : (
+                        <video
+                          src={lesson.videoUrl}
+                          controls
+                          className="w-full h-full"
+                          onPlay={() => { if (!isAdmin) markLessonComplete(currentWorkerId, lesson.id); }}
+                        />
+                      )}
                     </div>
                   )}
                   <div className="p-4 flex items-center justify-between gap-3">

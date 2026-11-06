@@ -1,7 +1,15 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
-import type { Video, Order, AppExpense } from '../types';
+import type { Video, AppExpense, QcStatus } from '../types';
+import { findOrderForVideo, unitEconomics, unpromotedOrders, workerPayrollStatus } from '../lib/economics';
+
+const QC_LABEL: Partial<Record<QcStatus, string>> = {
+  sin_iniciar: 'Sin iniciar',
+  pendiente: 'Pendiente',
+  revision: 'En revisión',
+  correcciones: 'Correcciones',
+};
 import { CardNodeDeco } from '../components/BrandBackground';
 import {
   DollarSign, Clock, CheckCircle2, ShieldCheck,
@@ -61,7 +69,7 @@ export function FinancesView() {
   const {
     brands, orders, workers, financeSettings,
     financeClosings, recordFinanceDayClosing, setSelectedVideo, setView,
-    appExpenses, addAppExpense, deleteAppExpense,
+    appExpenses, addAppExpense, deleteAppExpense, payrollPayments,
   } = useStore();
 
   const [preset, setPreset] = useState<DatePreset>('mes');
@@ -97,28 +105,16 @@ export function FinancesView() {
   }, [preset, dateFrom, dateTo]);
 
   const allRows = useMemo<FinancialProjectRow[]>(() => {
-    const unitPrice = financeSettings.clientPricePerVideo;
-    const defClipper = financeSettings.defaultClipperCost;
-    const defEditor = financeSettings.defaultEditorCost;
-
     const rows: FinancialProjectRow[] = [];
-    const linkedOrderByVideoId = new Map<string, Order>();
-    const linkedOrderByBrand = new Map<string, Order>();
+    const boardVideos = brands.flatMap(b => b.videos);
 
-    for (const o of orders) {
-      if (o.boardVideoId) linkedOrderByVideoId.set(o.boardVideoId, o);
-      linkedOrderByBrand.set(o.brand.trim().toLowerCase(), o);
-    }
-
-    for (const o of orders) {
-      const hasBothAssigned = Boolean(o.clipperId && o.editorId);
-      if (hasBothAssigned || o.promotedToBoard || o.status === 'finalizado') continue;
-
+    // 1. Pedidos aún sin videos en el tablero: cuentan como ingreso diferido (todos sus videos)
+    for (const o of unpromotedOrders(orders, boardVideos)) {
       const count = Math.max(1, o.videoCount || 1);
-      const pricePerVid = o.unitPriceClient ?? unitPrice;
-      const gross = count * pricePerVid;
-      const clipperCost = count * (o.unitClipperPay ?? defClipper);
-      const editorCost = count * (o.unitEditorPay ?? defEditor);
+      const eco = unitEconomics(null, o, financeSettings);
+      const gross = count * eco.price;
+      const clipperCost = count * eco.clipperPay;
+      const editorCost = count * eco.editorPay;
       const totalCreatorCost = clipperCost + editorCost;
       const clipperW = workers.find(w => w.id === o.clipperId);
       const editorW = workers.find(w => w.id === o.editorId);
@@ -146,17 +142,14 @@ export function FinancesView() {
       });
     }
 
+    // 2. Videos del tablero: exactamente 1 video por fila (antes cada video contaba el pedido completo)
     for (const b of brands) {
       for (const v of b.videos) {
-        const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(b.name.trim().toLowerCase());
-        const count = linked ? Math.max(1, linked.videoCount || 1) : 1;
-        const pricePerVid = linked?.unitPriceClient ?? unitPrice;
-        const gross = count * pricePerVid;
-
-        const unitClipperPay = linked?.unitClipperPay ?? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper);
-        const unitEditorPay = linked?.unitEditorPay ?? (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
-        const clipperCost = count * unitClipperPay;
-        const editorCost = count * unitEditorPay;
+        const linked = findOrderForVideo(v, b.name, orders);
+        const eco = unitEconomics(v, linked, financeSettings);
+        const gross = eco.price;
+        const clipperCost = eco.clipperPay;
+        const editorCost = eco.editorPay;
         const totalCreatorCost = clipperCost + editorCost;
 
         let stage: FinancialProjectRow['stage'] = 'no_iniciados';
@@ -169,16 +162,16 @@ export function FinancesView() {
           statusLabel = 'Aprobado Senda';
         } else {
           stage = 'no_iniciados';
-          statusLabel = v.qc.replace(/_/g, ' ');
+          statusLabel = QC_LABEL[v.qc] || v.qc.replace(/_/g, ' ');
         }
 
         rows.push({
           id: v.id,
           source: 'video',
-          name: v.name,
+          name: `${b.name} · ${v.name}`,
           brand: b.name,
           date: v.date || todayIso(),
-          videoCount: count,
+          videoCount: 1,
           clipperId: v.clipperId || null,
           clipperName: v.clipperName || 'Sin asignar',
           editorId: v.editorId || null,
@@ -200,9 +193,23 @@ export function FinancesView() {
     return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, brands, workers, financeSettings]);
 
+  // Nómina conectada: lo que ya se pagó de verdad en Nóminas vs. lo que falta por pagar
+  const payrollLink = useMemo(() => {
+    const paidInPeriod = payrollPayments
+      .filter(p => preset === 'todo' || (p.paidAt.slice(0, 10) >= effectiveRange.from && p.paidAt.slice(0, 10) <= effectiveRange.to))
+      .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const pendingAll = workers.reduce(
+      (s, w) => s + workerPayrollStatus(w, brands, orders, financeSettings, payrollPayments).pendingAmount,
+      0
+    );
+    return { paidInPeriod, pendingAll };
+  }, [payrollPayments, preset, effectiveRange, workers, brands, orders, financeSettings]);
+
   const filteredRows = useMemo(() => {
     if (preset === 'todo') return allRows;
-    return allRows.filter(r => r.date >= effectiveRange.from && r.date <= effectiveRange.to);
+    // Lo que está en curso (en cola / aprobado Senda) es cartera viva: se muestra siempre.
+    // Solo lo ya realizado (Aprobado Cliente) se filtra por el período elegido.
+    return allRows.filter(r => r.stage !== 'aprobado_cliente' || (r.date >= effectiveRange.from && r.date <= effectiveRange.to));
   }, [allRows, preset, effectiveRange]);
 
   const filteredExpenses = useMemo(() => {
@@ -893,6 +900,34 @@ export function FinancesView() {
               )}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Puente con Nóminas: lo devengado vs lo efectivamente pagado */}
+      <div className="bg-surface-2 border border-line rounded-xl p-4 flex items-center gap-4 flex-wrap">
+        <div className="w-9 h-9 rounded-lg bg-accent-dim text-accent flex items-center justify-center shrink-0">
+          <Users size={18} />
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <p className="text-sm font-semibold">Nómina conectada</p>
+          <p className="text-xs text-muted">Se calcula automáticamente con cada video Aprobado Cliente y se descuenta al registrar el pago.</p>
+        </div>
+        <div className="flex items-center gap-5 flex-wrap">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2">Pagado en el período</p>
+            <p className="font-display text-lg font-bold text-mint">{fmtMoney(payrollLink.paidInPeriod)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider font-tech text-muted-2">Por pagar (total)</p>
+            <p className={`font-display text-lg font-bold ${payrollLink.pendingAll > 0 ? 'text-amber' : 'text-muted'}`}>{fmtMoney(payrollLink.pendingAll)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setView('nominas')}
+            className="flex items-center gap-1.5 text-xs font-semibold bg-surface-3 border border-line hover:border-accent/50 hover:text-accent rounded-lg px-3 py-2 transition-colors"
+          >
+            Ir a Nóminas <ArrowUpRight size={14} />
+          </button>
         </div>
       </div>
 

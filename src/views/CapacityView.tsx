@@ -1,7 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import type { Order } from '../types';
 import { CardNodeDeco } from '../components/BrandBackground';
+import { buildWorkUnits, orderComplexity, spreadLoad, workerDayLoad } from '../lib/capacity';
 import {
   Gauge, Scissors, Film, AlertTriangle, CheckCircle2, Clock,
   Sliders, Sparkles, RefreshCw, ShieldAlert, TrendingUp,
@@ -65,33 +66,14 @@ function formatHour(h: number): string {
   return `${String(clamped).padStart(2, '0')}:${mins >= 30 ? '30' : '00'}`;
 }
 
-function isPlaceholderTestOrder(o: Order): boolean {
-  const clean = (o.brand || '').trim().toLowerCase();
-  return (
-    clean === 'nuevo pedido' ||
-    clean === 'nuevo cliente' ||
-    clean.startsWith('nuevo pedido ') ||
-    clean.startsWith('nuevo cliente ')
-  );
-}
-
 export function CapacityView() {
   const {
-    workers, orders, deleteOrder, brands, capacityConfig, updateCapacityConfig,
+    workers, orders, brands, capacityConfig, updateCapacityConfig,
     getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor,
   } = useStore();
 
   const [screen, setScreen] = useState<ActiveScreen>('dashboard');
   const [showConfigModal, setShowConfigModal] = useState(false);
-
-  // Purga automática de cualquier pedido fantasma de prueba
-  useEffect(() => {
-    for (const o of orders) {
-      if (isPlaceholderTestOrder(o)) {
-        deleteOrder(o.id);
-      }
-    }
-  }, [orders, deleteOrder]);
 
   // --- Estado Punto 1 (Cotizador y Tandas: volumen 1..200 y complejidad) ---
   const [evalVideos, setEvalVideos] = useState<number>(30);
@@ -134,21 +116,29 @@ export function CapacityView() {
     const physicalBottleneckDaily = Math.min(physicalClippingDaily, physicalEditingDaily);
     const safeBottleneckDaily = Math.min(safeClippingDaily, safeEditingDaily);
 
-    const activeOrders = orders.filter(o => o.status !== 'finalizado' && !isPlaceholderTestOrder(o));
-    const committedByDate: Record<string, number> = {};
-    for (const o of activeOrders) {
-      const d = o.deliveryDate || todayIso();
-      committedByDate[d] = (committedByDate[d] || 0) + Math.max(1, o.videoCount || 1);
-    }
+    const activeOrders = orders.filter(o => o.status !== 'finalizado');
+    const units = buildWorkUnits(activeOrders, brands);
+    const clipLoadByDate = spreadLoad(units, u => u.clipRemaining);
+    const editLoadByDate = spreadLoad(units, u => u.editRemaining);
 
     const today = todayIso();
-    const inProgressBoardVideos = allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar').length;
-    const committedToday = (committedByDate[today] || 0) + inProgressBoardVideos;
-    const totalActiveCommitted = activeOrders.reduce((s, o) => s + Math.max(1, o.videoCount || 1), 0) + inProgressBoardVideos;
+    // Carga "equivalente" por día = la etapa más exigida (el cuello de botella real de ese día)
+    const committedByDate: Record<string, number> = {};
+    for (const d of new Set([...Object.keys(clipLoadByDate), ...Object.keys(editLoadByDate)])) {
+      const clipPct = (clipLoadByDate[d] || 0) / safeClippingDaily;
+      const editPct = (editLoadByDate[d] || 0) / safeEditingDaily;
+      committedByDate[d] = Math.ceil(Math.max(clipPct, editPct) * safeBottleneckDaily);
+    }
+    const clipToday = Math.ceil(clipLoadByDate[today] || 0);
+    const editToday = Math.ceil(editLoadByDate[today] || 0);
+    const committedToday = committedByDate[today] || 0;
+    const totalActiveCommitted = units.reduce((s, u) => s + Math.max(u.clipRemaining, u.editRemaining), 0);
 
-    const clippingUtilPct = safeClippingDaily > 0 ? Math.round((committedToday / safeClippingDaily) * 100) : 0;
-    const editingUtilPct = safeEditingDaily > 0 ? Math.round((committedToday / safeEditingDaily) * 100) : 0;
-    const overallUtilPct = safeBottleneckDaily > 0 ? Math.round((committedToday / safeBottleneckDaily) * 100) : 0;
+    const clippingUtilPct = safeClippingDaily > 0 ? Math.round((clipToday / safeClippingDaily) * 100) : 0;
+    const editingUtilPct = safeEditingDaily > 0 ? Math.round((editToday / safeEditingDaily) * 100) : 0;
+    const overallUtilPct = Math.max(clippingUtilPct, editingUtilPct);
+    const liveBottleneck: 'Clipping' | 'Edición' =
+      clipToday + editToday === 0 ? bottleneckStage : clippingUtilPct > editingUtilPct ? 'Clipping' : 'Edición';
 
     let alertLevel: AlertLevel = 'normal';
     if (overallUtilPct > 100) alertLevel = 'sobrecapacidad';
@@ -156,7 +146,7 @@ export function CapacityView() {
     else if (overallUtilPct >= 78) alertLevel = 'cerca_limite';
     else if (overallUtilPct >= 58) alertLevel = 'elevada';
 
-    const remainingSafeToday = Math.max(0, safeBottleneckDaily - committedToday);
+    const remainingSafeToday = Math.max(0, Math.min(safeClippingDaily - clipToday, safeEditingDaily - editToday));
 
     const videosWithRework = allVideos.filter(
       v => v.qc === 'correcciones' || v.corrections.length > 0 || v.clips.some(c => c.status === 'rejected')
@@ -171,7 +161,7 @@ export function CapacityView() {
       avgEditorDaily,
       safeClippingDaily,
       safeEditingDaily,
-      bottleneckStage,
+      bottleneckStage: liveBottleneck,
       physicalBottleneckDaily,
       safeBottleneckDaily,
       committedByDate,
@@ -186,8 +176,11 @@ export function CapacityView() {
       videosWithRework,
       effectiveRealCapacity,
       activeOrders,
+      units,
+      clipToday,
+      editToday,
     };
-  }, [clippers, editors, allVideos, orders, capacityConfig.safetyMarginPct, getWorkerCapacity]);
+  }, [clippers, editors, allVideos, brands, orders, capacityConfig.safetyMarginPct, getWorkerCapacity]);
 
   // COTIZADOR Y TANDAS (PUNTO 1)
   const evaluation = useMemo(() => {
@@ -303,40 +296,8 @@ export function CapacityView() {
   const workersWorkloadToday = useMemo(() => {
     return workers.map(w => {
       const cap = getWorkerCapacity(w.id);
-
-      const myOrders = engine.activeOrders.filter(o =>
-        w.role === 'clipper'
-          ? o.clipperId === w.id || o.assignedWorkerIds.includes(w.id)
-          : o.editorId === w.id || o.assignedWorkerIds.includes(w.id)
-      );
-
-      const myActiveBoardVideos = allVideos.filter(v =>
-        (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
-        v.qc !== 'aprobado_cliente' &&
-        v.qc !== 'sin_iniciar'
-      );
-
-      let simpleVideos = 0;
-      let estandarVideos = 0;
-      let altaVideos = 0;
-
-      for (const o of myOrders) {
-        const count = Math.max(1, o.videoCount || 1);
-        const comp = o.complexity || (count >= 12 ? 'alta' : count <= 4 ? 'simple' : 'estandar');
-        if (comp === 'simple') simpleVideos += count;
-        else if (comp === 'alta') altaVideos += count;
-        else estandarVideos += count;
-      }
-
-      for (const v of myActiveBoardVideos) {
-        const alreadyInOrders = myOrders.some(o => o.boardVideoId === v.id);
-        if (alreadyInOrders) continue;
-        if (v.corrections.length > 0 || v.durationSeconds > 60) altaVideos += 1;
-        else if (v.durationSeconds > 0 && v.durationSeconds <= 20) simpleVideos += 1;
-        else estandarVideos += 1;
-      }
-
-      const totalVideosToday = simpleVideos + estandarVideos + altaVideos;
+      const load = workerDayLoad(w, engine.units);
+      const totalVideosToday = load.todayLoad;
       const freeCapacity = Math.max(0, cap - totalVideosToday);
       const utilPct = Math.min(100, Math.round((totalVideosToday / Math.max(1, cap)) * 100));
 
@@ -344,18 +305,16 @@ export function CapacityView() {
         worker: w,
         capacity: cap,
         totalVideosToday,
+        pendingTotal: load.pendingTotal,
         freeCapacity,
         utilPct,
-        simpleVideos,
-        estandarVideos,
-        altaVideos,
-        activeBrands: Array.from(new Set([
-          ...myOrders.map(o => o.brand),
-          ...myActiveBoardVideos.map(v => v.name),
-        ])),
+        simpleVideos: load.simple,
+        estandarVideos: load.estandar,
+        altaVideos: load.alta,
+        activeBrands: load.brands,
       };
     });
-  }, [workers, engine.activeOrders, allVideos, getWorkerCapacity]);
+  }, [workers, engine.units, getWorkerCapacity]);
 
   // COLA DE PEDIDOS CON ALERTA ACTIVA + HORA MÁXIMA DE REASIGNACIÓN
   const protocolAlertOrders = useMemo(() => {
@@ -367,15 +326,18 @@ export function CapacityView() {
     );
 
     return engine.activeOrders
+      .filter(o => engine.units.some(u => u.orderId === o.id))
       .map(o => {
+        const unit = engine.units.find(u => u.orderId === o.id);
         const deliveryTimeStr = o.deliveryTime || '18:00';
         const targetTs = o.deliveryDate
           ? new Date(`${o.deliveryDate}T${deliveryTimeStr}`).getTime()
           : now + 24 * 3600 * 1000;
         const hoursLeft = (targetTs - now) / (1000 * 3600);
-        const count = Math.max(1, o.videoCount || 1);
+        // Solo lo que falta por producir de este pedido
+        const count = Math.max(1, unit ? Math.max(unit.clipRemaining, unit.editRemaining) : o.videoCount || 1);
         const complexity: 'simple' | 'estandar' | 'alta' =
-          o.complexity || (count >= 12 ? 'alta' : count <= 4 ? 'simple' : 'estandar');
+          orderComplexity(o);
 
         const complexityFactor = complexity === 'alta' ? 1.35 : complexity === 'simple' ? 0.8 : 1.0;
 
@@ -433,7 +395,7 @@ export function CapacityView() {
         const rank = { critico: 0, urgente: 1, prioritario: 2, normal: 3 };
         return rank[a.level] - rank[b.level] || a.hoursUntilMaxReassign - b.hoursUntilMaxReassign;
       });
-  }, [engine.activeOrders, engine.avgClipperDaily, engine.avgEditorDaily, capacityConfig, workers]);
+  }, [engine.activeOrders, engine.units, engine.avgClipperDaily, engine.avgEditorDaily, capacityConfig, workers]);
 
   const handleAssignFromProtocol = async (order: Order) => {
     const chosenClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';

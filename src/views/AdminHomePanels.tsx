@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../store';
+import { needsClipping, needsEditing, unpromotedOrders as unpromotedOrdersOf } from '../lib/economics';
 import type { Order, OrderStatus, Video, Worker } from '../types';
 import {
   DollarSign, Users, X, ClipboardCheck, Clock3, ChevronRight, Film, Scissors, Eye, Trash2
@@ -166,9 +167,9 @@ export function AdminHomePanels({
       const goals = getWorkerGoals(w.id, w.role);
 
       // Videos reales en Tareas del trabajador que aún no han sido finalizados por el cliente
+      // Solo lo que aún depende de este creador en su etapa (clipping o edición)
       const myActiveVideos = allVideos.filter(v =>
-        (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
-        v.qc !== 'aprobado_cliente'
+        w.role === 'clipper' ? v.clipperId === w.id && needsClipping(v) : v.editorId === w.id && needsEditing(v)
       );
 
       let activeVideosLoad = 0;
@@ -187,13 +188,9 @@ export function AdminHomePanels({
       }
 
       // Solo sumar órdenes donde ya fue preasignado este rol pero aún no se ha promovido a brands
-      const unpromotedOrders = orders.filter(o => {
-        if (o.status === 'finalizado' || o.status === 'aprobado_cliente') return false;
-        const isMine = w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id;
-        if (!isMine) return false;
-        if (coveredOrderIds.has(o.id)) return false;
-        return true;
-      });
+      const unpromotedOrders = unpromotedOrdersOf(orders, allVideos).filter(o =>
+        (w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id) && !coveredOrderIds.has(o.id)
+      );
 
       for (const o of unpromotedOrders) {
         const count = Math.max(1, o.videoCount || 1);

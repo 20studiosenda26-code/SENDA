@@ -18,6 +18,7 @@ import { CapacityView } from './views/CapacityView';
 import { AdminView } from './views/AdminView';
 import { LoginView } from './views/LoginView';
 import { UserManagement } from './views/UserManagement';
+import { SettingsPanel } from './views/SettingsPanel';
 import MorphOrb from './components/ui/ai-thiking-orb-and-input';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -30,6 +31,11 @@ function Shell() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Cada sección abre arriba (antes conservaba el scroll de la vista anterior)
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [view]);
 
   useEffect(() => {
     if (user?.role === 'admin' && view === 'perfil') {
@@ -93,6 +99,7 @@ function Shell() {
           <div className="p-6 max-w-6xl mx-auto space-y-5">
             <UserManagement />
             <AdminView />
+            <SettingsPanel />
           </div>
         );
       default: return <HomeView />;

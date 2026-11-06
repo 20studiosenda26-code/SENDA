@@ -39,6 +39,14 @@ function clipStatusClasses(status?: ClipStatus | null) {
   return 'bg-amber-dim text-amber';
 }
 
+function uploadErrorText(err: unknown, f: File): string {
+  const msg = err instanceof Error ? err.message : '';
+  if (msg === 'DRIVE_REQUIRED_FOR_LARGE_FILE') {
+    return `"${f.name}" pesa ${(f.size / (1024 * 1024)).toFixed(1)} MB. Súbelo a Google Drive y pega el enlace, o pide al Admin activar el Puente de Drive en Ajustes.`;
+  }
+  return `No se pudo subir "${f.name}". Revisa tu conexión e inténtalo de nuevo.`;
+}
+
 function isImageFile(name?: string | null) {
   if (!name) return false;
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
@@ -61,7 +69,7 @@ const BOARD_QC_CLASSES: Record<QcStatus, string> = {
   correcciones: 'bg-red-500/10 text-red-400',
   aprobado: 'bg-mint-dim text-mint',
   aprobado_senda: 'bg-mint-dim text-mint border border-mint/30',
-  aprobado_cliente: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+  aprobado_cliente: 'bg-mint/15 text-mint border border-mint/30',
 };
 
 function getProcessBadgeLabel(v: Video): string {
@@ -207,12 +215,12 @@ export function TasksView() {
       </div>
 
       {myProjectsWithVideos.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center border border-dashed border-[var(--border-line)] rounded-2xl bg-[var(--surface-2)] shadow-sm">
-          <div className="w-16 h-16 rounded-full bg-[var(--surface-3)] flex items-center justify-center mb-4 shadow-[0_0_15px_rgba(53,214,228,0.1)]">
-            <Folders className="w-8 h-8 text-[var(--accent)]" />
+        <div className="flex flex-col items-center justify-center py-24 text-center border border-dashed border-line rounded-2xl bg-surface-2 shadow-sm">
+          <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mb-4 shadow-[0_0_15px_rgba(53,214,228,0.1)]">
+            <Folders className="w-8 h-8 text-accent" />
           </div>
-          <h3 className="text-lg font-display font-semibold text-white mb-2">Todo al día</h3>
-          <p className="text-sm text-[var(--surface-4)] max-w-sm leading-relaxed">
+          <h3 className="text-lg font-display font-semibold text-text mb-2">Todo al día</h3>
+          <p className="text-sm text-muted max-w-sm leading-relaxed">
             No tienes tareas pendientes. Cuando el equipo de administración te asigne un nuevo proyecto, aparecerá aquí inmediatamente.
           </p>
         </div>
@@ -342,8 +350,10 @@ function VideoDetail({
   const [corrText, setCorrText] = useState('');
   const [mainImageComment, setMainImageComment] = useState('');
   const [showMainImagePreview, setShowMainImagePreview] = useState(false);
-  const [previewOpenId, setPreviewOpenId] = useState<string | null>(null);
-  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  // Lo que se reproduce en el visor grande de la izquierda (clip o video final)
+  const [playing, setPlaying] = useState<{ kind: 'clip' | 'final'; id: string } | null>(null);
+  const setActiveClipId = (id: string | null) => setPlaying(id ? { kind: 'clip', id } : null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [confirmAcceptAll, setConfirmAcceptAll] = useState(false);
@@ -369,17 +379,24 @@ function VideoDetail({
   const isMainImageApproved = video.mainImageStatus === 'aprobada';
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
-  const activeClip: Clip | null =
-    video.clips.find(c => c.id === activeClipId) ||
-    (video.clips.length === 1 ? video.clips[0] : null);
+  const latestFinal: Clip | null = video.finalVideos.length > 0 ? video.finalVideos[video.finalVideos.length - 1] : null;
+  const activeFinal: Clip | null =
+    playing?.kind === 'final'
+      ? video.finalVideos.find(f => f.id === playing.id) || null
+      : !playing && (isEditor || isAdmin) && latestFinal?.fileUrl ? latestFinal : null;
+  const activeClip: Clip | null = activeFinal
+    ? null
+    : playing?.kind === 'clip'
+    ? video.clips.find(c => c.id === playing.id) || null
+    : video.clips.length === 1 ? video.clips[0] : null;
+  const activeMedia: Clip | null = activeFinal || activeClip;
   const [resolvedClipUrl, setResolvedClipUrl] = useState<string | null>(null);
   const [loadingClipMedia, setLoadingClipMedia] = useState(false);
   const [resolvedMainImgUrl, setResolvedMainImgUrl] = useState<string | null>(null);
-  const [resolvedFinalUrls, setResolvedFinalUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
-    const raw = activeClip?.fileUrl || video.finalVideos[0]?.fileUrl || null;
+    const raw = activeMedia?.fileUrl || null;
     if (!raw) {
       setResolvedClipUrl(null);
       setLoadingClipMedia(false);
@@ -393,7 +410,7 @@ function VideoDetail({
       }
     });
     return () => { cancelled = true; };
-  }, [activeClip?.id, activeClip?.fileUrl, video.finalVideos]);
+  }, [activeMedia?.id, activeMedia?.fileUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -402,25 +419,10 @@ function VideoDetail({
       return;
     }
     resolveMediaUrl(video.mainImageFileUrl).then(url => {
-      if (!cancelled) setResolvedMainImgUrl(url || video.mainImageFileUrl);
+      if (!cancelled) setResolvedMainImgUrl(url || video.mainImageFileUrl || null);
     });
     return () => { cancelled = true; };
   }, [video.mainImageFileUrl]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const nextMap: Record<string, string> = {};
-      for (const fv of video.finalVideos) {
-        if (fv.fileUrl) {
-          const r = await resolveMediaUrl(fv.fileUrl);
-          if (r) nextMap[fv.id] = r;
-        }
-      }
-      if (!cancelled) setResolvedFinalUrls(nextMap);
-    })();
-    return () => { cancelled = true; };
-  }, [video.finalVideos]);
 
   useEffect(() => {
     setShowRejectBox(false);
@@ -434,8 +436,13 @@ function VideoDetail({
     setUploadingNewClip(true);
     setUploadPct(2);
     try {
+      setActionError(null);
       const url = await uploadSharedFile(f, `clips/${video.id}`, pct => setUploadPct(pct));
       setClipFileUrl(url);
+    } catch (err) {
+      setClipFileName('');
+      setClipFileUrl('');
+      setActionError(uploadErrorText(err, f));
     } finally {
       setTimeout(() => {
         setUploadingNewClip(false);
@@ -450,10 +457,14 @@ function VideoDetail({
     setUploadingClipId(clipId);
     setUploadPct(2);
     try {
+      setActionError(null);
       const url = await uploadSharedFile(f, `clips/${video.id}`, pct => setUploadPct(pct));
-      onUploadClipFile(video.id, clipId, f.name, url);
+      onReplaceClip(video.id, clipId, f.name, url);
       setActiveClipId(clipId);
+    } catch (err) {
+      setActionError(uploadErrorText(err, f));
     } finally {
+      e.target.value = '';
       setTimeout(() => {
         setUploadingClipId(null);
         setUploadPct(0);
@@ -493,9 +504,13 @@ function VideoDetail({
     setUploadingBrief(true);
     setUploadPct(2);
     try {
+      setActionError(null);
       const url = await uploadSharedFile(f, `briefs/${video.id}`, pct => setUploadPct(pct));
       onUploadBrief(video.id, f.name, url);
+    } catch (err) {
+      setActionError(uploadErrorText(err, f));
     } finally {
+      e.target.value = '';
       setTimeout(() => {
         setUploadingBrief(false);
         setUploadPct(0);
@@ -509,9 +524,13 @@ function VideoDetail({
     setUploadingMainImage(true);
     setUploadPct(2);
     try {
+      setActionError(null);
       const url = await uploadSharedFile(f, `main-images/${video.id}`, pct => setUploadPct(pct));
       onUploadMainImage(video.id, f.name, url);
+    } catch (err) {
+      setActionError(uploadErrorText(err, f));
     } finally {
+      e.target.value = '';
       setTimeout(() => {
         setUploadingMainImage(false);
         setUploadPct(0);
@@ -523,7 +542,7 @@ function VideoDetail({
     <div className="p-6 max-w-5xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="w-9 h-9 rounded-lg bg-[var(--surface-2)] border border-[var(--border-line)] flex items-center justify-center text-gray-400 hover:text-white hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 transition-all duration-300">
+          <button onClick={onClose} className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent hover:bg-accent/10 transition-all duration-300">
             <X size={18} />
           </button>
           <div>
@@ -540,11 +559,11 @@ function VideoDetail({
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {(isAdmin || isEditor) && (
-            <div className="flex items-center gap-2.5 bg-[var(--surface-2)] border border-emerald-500/40 rounded-lg px-3.5 py-2 hover:border-emerald-400 transition-colors">
-              <VideoIcon size={16} className="text-emerald-400 shrink-0" />
+            <div className="flex items-center gap-2.5 bg-surface-2 border border-mint/40 rounded-lg px-3.5 py-2 hover:border-mint transition-colors">
+              <VideoIcon size={16} className="text-mint shrink-0" />
               <div className="text-xs min-w-[115px]">
-                <p className="font-medium text-white">Google Drive (Editor)</p>
-                <p className="text-gray-400 truncate max-w-[150px]">
+                <p className="font-medium text-text">Google Drive (Editor)</p>
+                <p className="text-muted truncate max-w-[150px]">
                   {getGoogleDriveBridgeUrl()
                     ? "Puente automático activo"
                     : getGoogleDriveFolderUrl()
@@ -557,7 +576,7 @@ function VideoDetail({
                   href={getGoogleDriveFolderUrl()}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1.5 font-medium transition-all flex items-center gap-1 shrink-0"
+                  className="text-xs bg-mint/20 hover:bg-mint/30 border border-mint/40 text-mint rounded-md px-2.5 py-1.5 font-medium transition-all flex items-center gap-1 shrink-0"
                 >
                   <Upload size={12} /> Abrir Drive
                 </a>
@@ -570,25 +589,25 @@ function VideoDetail({
                     setFolderUrlDraft(getGoogleDriveFolderUrl());
                     setShowDriveConfigModal(true);
                   }}
-                  className="text-xs bg-[var(--accent)] text-[#0F2E33] rounded-md px-2.5 py-1.5 font-bold hover:opacity-90 transition-all flex items-center gap-1 shrink-0"
+                  className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-bold hover:opacity-90 transition-all flex items-center gap-1 shrink-0"
                 >
                   <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Configurar Drive" : "Conectar Drive"}
                 </button>
               )}
             </div>
           )}
-          <div className="flex items-center gap-2 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3 py-2 hover:border-gray-500 transition-colors">
-            <FileText size={16} className="text-[var(--accent)] shrink-0" />
+          <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2 hover:border-muted-2 transition-colors">
+            <FileText size={16} className="text-accent shrink-0" />
             <div className="text-xs">
-              <p className="font-medium text-white">Brief / Trabajo asignado</p>
-              <p className="text-gray-400 truncate max-w-[160px]">{video.briefFileName || 'Sin archivo'}</p>
+              <p className="font-medium text-text">Brief / Trabajo asignado</p>
+              <p className="text-muted truncate max-w-[160px]">{video.briefFileName || 'Sin archivo'}</p>
             </div>
             {isAdmin && (
               <>
                 <input ref={briefInputRef} type="file" className="hidden" onChange={handleBriefFile} />
                 <button
                   onClick={() => briefInputRef.current?.click()}
-                  className="text-xs bg-[var(--accent)] text-[#0F2E33] rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1"
+                  className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1"
                 >
                   {uploadingBrief ? <><Loader2 size={12} className="animate-spin" /> {uploadPct}%</> : <><Upload size={12} /> {video.briefFileName ? "Reemplazar" : "Subir"}</>}
                 </button>
@@ -598,18 +617,18 @@ function VideoDetail({
               href={video.briefFileUrl || undefined}
               download={video.briefFileName || undefined}
               className={`text-xs rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1 transition-all duration-300 ${
-                video.briefFileUrl ? 'bg-[var(--surface-3)] text-white hover:bg-[var(--accent)]/20 hover:text-[var(--accent)]' : 'bg-surface-3 text-muted-2 pointer-events-none'
+                video.briefFileUrl ? 'bg-surface-3 text-text hover:bg-accent/20 hover:text-accent' : 'bg-surface-3 text-muted-2 pointer-events-none'
               }`}
             >
               <Download size={12} /> Descargar
             </a>
           </div>
           {(isClipper || isAdmin) && (
-            <div className="flex items-center gap-3 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-lg px-3.5 py-2 hover:border-gray-500 transition-colors">
-              <ImageIcon size={16} className="text-violet-400 shrink-0" />
+            <div className="flex items-center gap-3 bg-surface-2 border border-line rounded-lg px-3.5 py-2 hover:border-muted-2 transition-colors">
+              <ImageIcon size={16} className="text-violet shrink-0" />
               <div className="text-xs min-w-[110px]">
-                <p className="font-medium text-white">Imagen principal</p>
-                <p className="text-gray-400 truncate max-w-[150px]">{video.mainImageFileName || "Sin imagen"}</p>
+                <p className="font-medium text-text">Imagen principal</p>
+                <p className="text-muted truncate max-w-[150px]">{video.mainImageFileName || "Sin imagen"}</p>
                 {video.mainImageStatus && (
                   <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded font-medium ${
                     video.mainImageStatus === "aprobada" ? "bg-mint-dim text-mint" :
@@ -626,7 +645,7 @@ function VideoDetail({
                   type="button"
                   onClick={() => setShowMainImagePreview(true)}
                   title="Abrir vista previa para revisar imagen"
-                  className="w-8 h-8 rounded-lg bg-[var(--surface-3)] hover:bg-[var(--accent)]/20 border border-[var(--border-line)] hover:border-[var(--accent)] text-[var(--accent)] flex items-center justify-center transition-all shrink-0"
+                  className="w-8 h-8 rounded-lg bg-surface-3 hover:bg-accent/20 border border-line hover:border-accent text-accent flex items-center justify-center transition-all shrink-0"
                 >
                   <Eye size={15} />
                 </button>
@@ -638,7 +657,7 @@ function VideoDetail({
                   <button
                     onClick={() => mainImageInputRef.current?.click()}
                     disabled={uploadingMainImage}
-                    className="text-xs bg-violet-500 text-white rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1.5 shrink-0 disabled:opacity-70"
+                    className="text-xs bg-violet text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(127,217,232,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1.5 shrink-0 disabled:opacity-70"
                   >
                     {uploadingMainImage ? (
                       <>
@@ -658,63 +677,76 @@ function VideoDetail({
         </div>
       </div>
 
+      {actionError && (
+        <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-xs animate-fadeIn">
+          <AlertCircle size={15} className="shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-red-400/80 hover:text-red-400" title="Cerrar">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Columna izquierda: Reproductor Vertical Grande + Chulito, X y Comentario */}
-        <div className="lg:col-span-6 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5 space-y-4">
-          <div className="w-full min-h-[520px] max-h-[640px] bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl flex items-center justify-center overflow-hidden mx-auto">
+        <div className="lg:col-span-6 bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+          {activeMedia && (
+            <div className="flex items-center justify-between gap-2 -mb-1">
+              <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full ${activeFinal ? 'bg-mint-dim text-mint' : 'bg-accent-dim text-accent'}`}>
+                {activeFinal ? <VideoIcon size={12} /> : <Play size={12} />}
+                {activeFinal ? 'Video final' : `Clip ${activeMedia.name}`}
+              </span>
+              <span className="text-[11px] text-muted-2 truncate max-w-[60%]">{activeMedia.fileName || ''}</span>
+            </div>
+          )}
+          <div className="relative w-full min-h-[520px] max-h-[640px] bg-surface-3 border border-line rounded-xl flex items-center justify-center overflow-hidden mx-auto">
             {loadingClipMedia ? (
               <div className="text-center p-6 space-y-2">
-                <Loader2 size={32} className="text-[var(--accent)] animate-spin mx-auto" />
-                <p className="text-xs text-gray-300">Cargando archivo de video en alta calidad...</p>
+                <Loader2 size={32} className="text-accent animate-spin mx-auto" />
+                <p className="text-xs text-muted">Cargando archivo en alta calidad...</p>
               </div>
-            ) : activeClip?.fileUrl && resolvedClipUrl ? (
-              isImageFile(activeClip.fileName) ? (
-                <img src={resolvedClipUrl} alt={activeClip.name} className="w-full h-[560px] object-contain" />
+            ) : activeMedia?.fileUrl && resolvedClipUrl ? (
+              isGoogleDriveUrl(resolvedClipUrl) ? (
+                <iframe
+                  key={`gdrive-${activeMedia.id}-${resolvedClipUrl}`}
+                  src={getGoogleDrivePreviewUrl(resolvedClipUrl) || resolvedClipUrl}
+                  className="w-full h-[560px] border-0 rounded-lg bg-black animate-fadeIn"
+                  allow="autoplay; encrypted-media; fullscreen"
+                  allowFullScreen
+                  title={activeMedia.name}
+                />
+              ) : isImageFile(activeMedia.fileName) ? (
+                <img src={resolvedClipUrl} alt={activeMedia.name} className="w-full h-[560px] object-contain animate-fadeIn" />
               ) : (
                 <video
-                  key={`${activeClip.id}-${resolvedClipUrl}`}
+                  key={`${activeMedia.id}-${resolvedClipUrl}`}
                   ref={playerRef}
                   src={resolvedClipUrl}
                   controls
-                  autoPlay
+                  autoPlay={Boolean(playing)}
                   playsInline
-                  className="w-full h-[560px] object-contain"
-                />
-              )
-            ) : video.finalVideos[0]?.fileUrl && resolvedClipUrl ? (
-              isGoogleDriveUrl(resolvedClipUrl) ? (
-                <iframe
-                  key={`gdrive-final-${resolvedClipUrl}`}
-                  src={getGoogleDrivePreviewUrl(resolvedClipUrl) || resolvedClipUrl}
-                  className="w-full h-[560px] border-0 rounded-lg bg-black"
-                  allow="autoplay; encrypted-media; fullscreen"
-                  allowFullScreen
-                  title={video.finalVideos[0].name}
-                />
-              ) : (
-                <video
-                  key={resolvedClipUrl}
-                  src={resolvedClipUrl}
-                  controls
-                  playsInline
-                  className="w-full h-[560px] object-contain"
+                  className="w-full h-[560px] object-contain bg-black animate-fadeIn"
                 />
               )
             ) : (
               <div className="text-center p-6">
-                <Film size={42} className="text-gray-600 mx-auto mb-2" />
-                <p className="text-sm text-gray-400">
-                  {video.clips.length > 0 ? "Selecciona un clip para reproducirlo en formato vertical" : `Vista previa de ${video.name}`}
+                <div className="w-14 h-14 rounded-2xl bg-surface-2 border border-line flex items-center justify-center mx-auto mb-3">
+                  <Film size={26} className="text-muted-2" />
+                </div>
+                <p className="text-sm text-muted">
+                  {video.clips.length > 0 || video.finalVideos.length > 0
+                    ? 'Selecciona un clip o un video final para verlo aquí'
+                    : `Vista previa de ${video.name}`}
                 </p>
-                {video.duration && <p className="text-xs text-gray-500 mt-1">{video.duration}</p>}
+                <p className="text-xs text-muted-2 mt-1">Formato vertical · reproducción en alta calidad</p>
               </div>
             )}
           </div>
 
           {activeClip && (
-            <div className="space-y-3 pt-2 border-t border-[var(--border-line)]">
+            <div className="space-y-3 pt-2 border-t border-line">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-white truncate">Clip activo: {activeClip.name}</p>
+                <p className="text-sm font-medium text-text truncate">Clip activo: {activeClip.name}</p>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${clipStatusClasses(activeClip.status)}`}>
                   {clipStatusLabel(activeClip.status)}
                 </span>
@@ -739,8 +771,8 @@ function VideoDetail({
                       title="Aceptar clip"
                       className={`w-10 h-10 rounded-lg border flex items-center justify-center hover:-translate-y-0.5 transition-all duration-200 shrink-0 ${
                         activeClip.status === "approved"
-                          ? "bg-[#6FE7C8] text-[#0F2E33] border-[#6FE7C8] shadow-[0_0_15px_rgba(111,231,200,0.3)]"
-                          : "bg-[#6FE7C8]/10 text-[#6FE7C8] border-[#6FE7C8]/30 hover:bg-[#6FE7C8]/20"
+                          ? "bg-mint text-on-accent border-mint shadow-[0_0_15px_rgba(111,231,200,0.3)]"
+                          : "bg-mint/10 text-mint border-mint/30 hover:bg-mint/20"
                       }`}
                     >
                       <Check size={18} />
@@ -769,7 +801,7 @@ function VideoDetail({
                       value={rejectReason}
                       onChange={e => setRejectReason(e.target.value)}
                       placeholder="Escribe un comentario sobre este clip..."
-                      className="flex-1 bg-[var(--surface-3)] border border-[var(--border-line)] rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors"
+                      className="flex-1 bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
                     />
                   </div>
                   {showRejectBox && !rejectReason.trim() && (
@@ -785,10 +817,10 @@ function VideoDetail({
 
         {/* Columna derecha: Clips generados y Video final (sin cuadro de Correcciones) */}
         <div className="lg:col-span-6 space-y-4">
-          <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
+          <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-display text-base font-semibold text-white flex items-center gap-2">
-                <Film size={16} className="text-[var(--accent)]" /> {isEditor ? `Clips enviados (${video.name})` : `Clips generados (${video.name})`}
+              <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
+                <Film size={16} className="text-accent" /> {isEditor ? `Clips enviados (${video.name})` : `Clips generados (${video.name})`}
               </h3>
               {isClipper && (
                 isMainImageApproved ? (
@@ -803,7 +835,7 @@ function VideoDetail({
                       }
                       return nextOpen;
                     });
-                  }} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
+                  }} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
                     <Plus size={14} /> Agregar
                   </button>
                 ) : (
@@ -820,15 +852,15 @@ function VideoDetail({
             </div>
 
             {confirmAcceptAll && (
-              <div className="mb-4 p-4 bg-[var(--surface-3)] border border-[var(--border-line)] rounded-lg">
-                <p className="text-sm text-white mb-3">¿Aceptar todos los clips de {video.name}?</p>
+              <div className="mb-4 p-4 bg-surface-3 border border-line rounded-lg">
+                <p className="text-sm text-text mb-3">¿Aceptar todos los clips de {video.name}?</p>
                 <div className="flex gap-2">
-                  <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-[var(--surface-2)] border border-[var(--border-line)] text-gray-400 rounded-md py-2 text-xs font-medium hover:text-white transition-colors">
+                  <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-surface-2 border border-line text-muted rounded-md py-2 text-xs font-medium hover:text-text transition-colors">
                     Cancelar
                   </button>
                   <button
                     onClick={() => { onAcceptAllClips(video.id); setConfirmAcceptAll(false); }}
-                    className="flex-1 bg-mint text-[#0F2E33] rounded-md py-2 text-xs font-bold hover:shadow-[0_0_15px_rgba(111,231,200,0.4)] transition-all"
+                    className="flex-1 bg-mint text-on-accent rounded-md py-2 text-xs font-bold hover:shadow-[0_0_15px_rgba(111,231,200,0.4)] transition-all"
                   >
                     Aceptar todos
                   </button>
@@ -837,12 +869,12 @@ function VideoDetail({
             )}
 
             {showClipForm && isMainImageApproved && (
-              <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
+              <div className="mb-4 space-y-3 p-4 bg-surface-3 rounded-lg border border-line">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-300">Número de clip (solo números)</span>
+                    <span className="text-xs font-medium text-muted">Número de clip (solo números)</span>
                     {clipName && (
-                      <span className="text-xs font-tech font-bold text-[var(--accent)]">
+                      <span className="text-xs font-tech font-bold text-accent">
                         Seleccionado: #{clipName}
                       </span>
                     )}
@@ -859,10 +891,10 @@ function VideoDetail({
                           onClick={() => setClipName(numStr)}
                           className={`py-2 rounded-md font-tech text-xs font-bold border transition-all ${
                             isSelected
-                              ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_12px_rgba(53,214,228,0.4)]"
+                              ? "bg-accent text-on-accent border-accent shadow-[0_0_12px_rgba(53,214,228,0.4)]"
                               : alreadyUsed
-                              ? "bg-[var(--surface-2)] text-gray-500 border-[var(--border-line)] opacity-60 hover:opacity-100"
-                              : "bg-[var(--surface-1)] text-white border-[var(--border-line)] hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+                              ? "bg-surface-2 text-muted-2 border-line opacity-60 hover:opacity-100"
+                              : "bg-surface text-text border-line hover:border-accent/60 hover:text-accent"
                           }`}
                         >
                           {num}
@@ -877,26 +909,26 @@ function VideoDetail({
                     value={clipName}
                     onChange={e => setClipName(e.target.value.replace(/\D/g, ""))}
                     placeholder="O escribe el número (ej. 1, 2, 11...)"
-                    className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm font-tech font-bold text-[var(--accent)] outline-none focus:border-[var(--accent)] transition-colors"
+                    className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm font-tech font-bold text-accent outline-none focus:border-accent transition-colors"
                   />
                 </div>
-                <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                <label className="block bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors space-y-2">
+                <input value={clipNote} onChange={e => setClipNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
+                <label className="block bg-surface border border-line border-dashed rounded-md px-3 py-3 text-sm text-muted cursor-pointer hover:border-accent hover:text-accent transition-colors space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 truncate">
-                      {uploadingNewClip ? <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" /> : <Upload size={16} className="shrink-0" />}
+                      {uploadingNewClip ? <Loader2 size={16} className="animate-spin text-accent shrink-0" /> : <Upload size={16} className="shrink-0" />}
                       <span className="truncate">{clipFileName || "Subir archivo de clip"}</span>
                     </span>
                     {uploadingNewClip && (
-                      <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">
+                      <span className="text-xs font-tech font-bold text-accent shrink-0">
                         {uploadPct}%
                       </span>
                     )}
                   </div>
                   {uploadingNewClip && (
-                    <div className="w-full h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-surface-3 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full"
+                        className="h-full bg-accent transition-all duration-150 rounded-full"
                         style={{ width: `${uploadPct}%` }}
                       />
                     </div>
@@ -911,7 +943,7 @@ function VideoDetail({
                     }
                   }}
                   disabled={uploadingNewClip || !clipName}
-                  className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
+                  className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                 >
                   {uploadingNewClip ? `Subiendo clip (${uploadPct}%)...` : "Guardar clip"}
                 </button>
@@ -919,12 +951,12 @@ function VideoDetail({
             )}
 
             {video.clips.length === 0 ? (
-              <div className="text-center py-8 px-4 text-gray-400 border border-dashed border-[var(--border-line)] rounded-lg space-y-1.5">
+              <div className="text-center py-8 px-4 text-muted border border-dashed border-line rounded-lg space-y-1.5">
                 {!isMainImageApproved && isClipper ? (
                   <>
                     <Lock size={20} className="text-amber mx-auto mb-1" />
-                    <p className="text-sm font-medium text-white">Subida de clips bloqueada por Control de Calidad</p>
-                    <p className="text-xs text-gray-400 max-w-md mx-auto">
+                    <p className="text-sm font-medium text-text">Subida de clips bloqueada por Control de Calidad</p>
+                    <p className="text-xs text-muted max-w-md mx-auto">
                       {!video.mainImageFileName
                         ? "Primero debes subir la Imagen principal en la barra superior para que el Administrador la revise."
                         : video.mainImageStatus === "rechazada"
@@ -933,7 +965,7 @@ function VideoDetail({
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-gray-500">Sin clips {isEditor ? "enviados" : "generados"}</p>
+                  <p className="text-sm text-muted-2">Sin clips {isEditor ? "enviados" : "generados"}</p>
                 )}
               </div>
             ) : (
@@ -943,24 +975,24 @@ function VideoDetail({
                     key={c.id}
                     onClick={() => c.fileUrl && setActiveClipId(c.id)}
                     className={`p-3 rounded-lg border transition-all duration-300 ${c.fileUrl ? "cursor-pointer" : ""} ${
-                      activeClip?.id === c.id ? "bg-[var(--accent)]/10 border-[var(--accent)]/50 shadow-sm" : "bg-[var(--surface-3)] border-transparent hover:border-gray-600"
+                      activeClip?.id === c.id ? "bg-accent/10 border-accent/50 shadow-sm" : "bg-surface-3 border-transparent hover:border-muted-2"
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <Play size={16} className={`mt-0.5 shrink-0 ${activeClip?.id === c.id ? "text-[var(--accent)]" : "text-gray-500"}`} />
+                      <Play size={16} className={`mt-0.5 shrink-0 ${activeClip?.id === c.id ? "text-accent" : "text-muted-2"}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <p className="text-sm font-medium text-white">{c.name}</p>
+                          <p className="text-sm font-medium text-text">{c.name}</p>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full ${clipStatusClasses(c.status)}`}>
                             {clipStatusLabel(c.status)}
                           </span>
                         </div>
-                        {c.note && <p className="text-xs text-gray-400 mb-1">{c.note}</p>}
+                        {c.note && <p className="text-xs text-muted mb-1">{c.note}</p>}
                         {(c.rejectionReason || c.adminNote) && (
                           <p className="text-xs text-amber mb-1">Comentario: {c.rejectionReason || c.adminNote}</p>
                         )}
                         {c.fileName && (
-                          <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(c.fileUrl, c.fileName); }} className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline text-left"><Download size={11} /> {c.fileName}</button>
+                          <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(c.fileUrl, c.fileName); }} className="text-xs text-accent flex items-center gap-1 hover:underline text-left"><Download size={11} /> {c.fileName}</button>
                         )}
                       </div>
                       {isClipper && (
@@ -974,12 +1006,12 @@ function VideoDetail({
                           <button
                             onClick={() => replaceInputRefs.current[c.id]?.click()}
                             disabled={uploadingClipId === c.id}
-                            className="text-[11px] text-gray-400 hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--surface-1)] border border-[var(--border-line)] transition-colors"
+                            className="text-[11px] text-muted hover:text-accent hover:bg-accent/10 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-surface border border-line transition-colors"
                           >
                             {uploadingClipId === c.id ? (
                               <>
-                                <Loader2 size={12} className="animate-spin text-[var(--accent)]" />
-                                <span className="font-tech font-bold text-[var(--accent)]">{uploadPct}%</span>
+                                <Loader2 size={12} className="animate-spin text-accent" />
+                                <span className="font-tech font-bold text-accent">{uploadPct}%</span>
                               </>
                             ) : (
                               <>
@@ -1003,7 +1035,7 @@ function VideoDetail({
                 className={`w-full mt-4 rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 ${
                   video.sentByClipper
                     ? "bg-mint-dim text-mint cursor-default"
-                    : "bg-[var(--accent)] text-[#0F2E33] hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-1"
+                    : "bg-accent text-on-accent hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-1"
                 }`}
               >
                 {video.sentByClipper ? <><CheckCircle2 size={16} /> Clips enviados</> : <><Send size={16} /> Enviar clips de {video.name}</>}
@@ -1012,9 +1044,9 @@ function VideoDetail({
           </div>
 
           {(isEditor || isAdmin) && (
-            <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
+            <div className="bg-surface-2 border border-line rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display text-base font-semibold text-white flex items-center gap-2">
+                <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
                   <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
                 </h3>
                 <div className="flex items-center gap-2">
@@ -1026,50 +1058,50 @@ function VideoDetail({
                         setFolderUrlDraft(getGoogleDriveFolderUrl());
                         setShowDriveConfigModal(true);
                       }}
-                      className="text-xs bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded-md px-2.5 py-1 font-medium flex items-center gap-1 transition-colors"
+                      className="text-xs bg-mint/15 hover:bg-mint/25 border border-mint/40 text-mint rounded-md px-2.5 py-1 font-medium flex items-center gap-1 transition-colors"
                     >
                       <Upload size={12} /> {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? "Drive Conectado" : "Conectar Drive"}
                     </button>
                   )}
                   {(isEditor || isAdmin) && (
-                    <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-[var(--accent)] hover:text-white flex items-center gap-1 transition-colors">
+                    <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
                       <Plus size={14} /> Agregar en Drive
                     </button>
                   )}
                 </div>
               </div>
               {showFinalForm && (isEditor || isAdmin) && (
-                <div className="mb-4 space-y-3 p-4 bg-[var(--surface-3)] rounded-lg border border-[var(--border-line)]">
-                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final (ej. Video 1 Final)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
-                  <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-[var(--surface-1)] border border-[var(--border-line)] rounded-md px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)] transition-colors" />
+                <div className="mb-4 space-y-3 p-4 bg-surface-3 rounded-lg border border-line">
+                  <input value={finalName} onChange={e => setFinalName(e.target.value)} placeholder="Nombre del video final (ej. Video 1 Final)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
+                  <input value={finalNote} onChange={e => setFinalNote(e.target.value)} placeholder="Nota (Opcional)" className="w-full bg-surface border border-line rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent transition-colors" />
 
-                  <label className="block bg-[var(--surface-1)] border border-[var(--border-line)] border-dashed rounded-md px-3 py-3 text-sm text-gray-400 cursor-pointer hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors space-y-2">
+                  <label className="block bg-surface border border-line border-dashed rounded-md px-3 py-3 text-sm text-muted cursor-pointer hover:border-accent hover:text-accent transition-colors space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2 truncate">
-                        {uploadingFinalVideo ? <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" /> : <Upload size={16} className="shrink-0" />}
+                        {uploadingFinalVideo ? <Loader2 size={16} className="animate-spin text-accent shrink-0" /> : <Upload size={16} className="shrink-0" />}
                         <span className="truncate">
                           {finalFileName || (getGoogleDriveBridgeUrl() ? "Subir archivo (se enviará directo a Google Drive)" : "Seleccionar archivo de video final")}
                         </span>
                       </span>
                       {uploadingFinalVideo && (
-                        <span className="text-xs font-tech font-bold text-[var(--accent)] shrink-0">{uploadPct}%</span>
+                        <span className="text-xs font-tech font-bold text-accent shrink-0">{uploadPct}%</span>
                       )}
                     </div>
                     {uploadingFinalVideo && (
-                      <div className="w-full h-1.5 bg-[var(--surface-3)] rounded-full overflow-hidden">
-                        <div className="h-full bg-[var(--accent)] transition-all duration-150 rounded-full" style={{ width: `${uploadPct}%` }} />
+                      <div className="w-full h-1.5 bg-surface-3 rounded-full overflow-hidden">
+                        <div className="h-full bg-accent transition-all duration-150 rounded-full" style={{ width: `${uploadPct}%` }} />
                       </div>
                     )}
                     <input type="file" accept="video/*" className="hidden" onChange={handleFinalFile} disabled={uploadingFinalVideo} />
                   </label>
 
-                  <div className="bg-[var(--surface-1)] border border-emerald-500/30 rounded-md p-3 space-y-2">
+                  <div className="bg-surface border border-mint/30 rounded-md p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-emerald-300 font-medium flex items-center gap-1.5">
+                      <span className="text-xs text-mint font-medium flex items-center gap-1.5">
                         <Upload size={13} /> Enlace de Google Drive (Video Final):
                       </span>
                       {getGoogleDriveFolderUrl() && (
-                        <a href={getGoogleDriveFolderUrl()} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline font-medium shrink-0">
+                        <a href={getGoogleDriveFolderUrl()} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline font-medium shrink-0">
                           Abrir carpeta Drive →
                         </a>
                       )}
@@ -1086,7 +1118,7 @@ function VideoDetail({
                         }
                       }}
                       placeholder="Pega aquí el link de Google Drive del video final..."
-                      className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded px-3 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-emerald-400"
+                      className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-mint"
                     />
                   </div>
 
@@ -1106,55 +1138,64 @@ function VideoDetail({
                       }
                     }}
                     disabled={uploadingFinalVideo || (!finalFileUrl && !finalDriveLinkInput.trim())}
-                    className="w-full bg-[var(--accent)] text-[#0F2E33] rounded-md py-2.5 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
+                    className="w-full bg-accent text-on-accent rounded-md py-2.5 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                   >
                     {uploadingFinalVideo ? `Subiendo a Google Drive (${uploadPct}%)...` : "Guardar video final"}
                   </button>
                 </div>
               )}
               {video.finalVideos.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 border border-dashed border-[var(--border-line)] rounded-lg">
+                <div className="text-center py-6 text-muted-2 border border-dashed border-line rounded-lg">
                   <p className="text-sm">Sin video final</p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {video.finalVideos.map(fv => (
-                    <div key={fv.id} className="p-3 bg-[var(--surface-3)] border border-[var(--border-line)] rounded-lg">
-                      <div className="flex items-start gap-3">
-                        <CheckCircle2 size={16} className="text-mint mt-0.5 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-white">{fv.name}</p>
-                          {fv.note && <p className="text-xs text-gray-400 mb-1">{fv.note}</p>}
-                          {fv.fileName && (
-                            <button type="button" onClick={() => void downloadMediaFile(fv.fileUrl, fv.fileName)} className="text-xs text-[var(--accent)] flex items-center gap-1 hover:underline text-left"><Download size={11} /> {fv.fileName}</button>
+                  {video.finalVideos.map((fv, idx) => {
+                    const isPlayingThis = activeFinal?.id === fv.id;
+                    const isLatest = idx === video.finalVideos.length - 1;
+                    return (
+                      <div
+                        key={fv.id}
+                        onClick={() => fv.fileUrl && setPlaying({ kind: 'final', id: fv.id })}
+                        className={`p-3 rounded-lg border transition-all duration-200 ${fv.fileUrl ? 'cursor-pointer' : ''} ${
+                          isPlayingThis ? 'bg-mint/10 border-mint/50' : 'bg-surface-3 border-transparent hover:border-line'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <CheckCircle2 size={16} className="text-mint mt-0.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-medium text-text">{fv.name}</p>
+                              {video.finalVideos.length > 1 && (
+                                <span className={`text-[10px] font-tech px-1.5 py-0.5 rounded ${isLatest ? 'bg-mint-dim text-mint' : 'bg-surface-2 text-muted-2'}`}>
+                                  {isLatest ? 'Última versión' : `v${idx + 1}`}
+                                </span>
+                              )}
+                            </div>
+                            {fv.note && <p className="text-xs text-muted mb-1">{fv.note}</p>}
+                            {fv.fileName && (
+                              <button type="button" onClick={e => { e.stopPropagation(); void downloadMediaFile(fv.fileUrl, fv.fileName); }} className="text-xs text-accent flex items-center gap-1 hover:underline text-left"><Download size={11} /> {fv.fileName}</button>
+                            )}
+                          </div>
+                          {fv.fileUrl && (
+                            isPlayingThis ? (
+                              <span className="text-[11px] text-mint flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-mint-dim border border-mint/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En el visor
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setPlaying({ kind: 'final', id: fv.id }); }}
+                                className="text-[11px] text-muted hover:text-accent flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-surface border border-line hover:border-accent/50 transition-colors"
+                              >
+                                <Eye size={12} /> Ver
+                              </button>
+                            )
                           )}
                         </div>
-                        {fv.fileUrl && (
-                          <button
-                            onClick={() => setPreviewOpenId(id => (id === fv.id ? null : fv.id))}
-                            className="text-[11px] text-gray-400 hover:text-[var(--accent)] flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md bg-[var(--surface-1)] border border-[var(--border-line)] transition-colors"
-                          >
-                            <Eye size={12} /> {previewOpenId === fv.id ? "Ocultar" : "Ver"}
-                          </button>
-                        )}
                       </div>
-                      {previewOpenId === fv.id && fv.fileUrl && (
-                        <div className="mt-3 rounded-lg overflow-hidden bg-black border border-[var(--border-line)]">
-                          {isGoogleDriveUrl(fv.fileUrl) ? (
-                            <iframe
-                              src={getGoogleDrivePreviewUrl(fv.fileUrl) || fv.fileUrl || ""}
-                              className="w-full h-[480px] border-0"
-                              allow="autoplay; encrypted-media; fullscreen"
-                              allowFullScreen
-                              title={fv.name}
-                            />
-                          ) : (
-                            <video src={resolvedFinalUrls[fv.id] || fv.fileUrl} controls playsInline className="w-full max-h-[480px] object-contain" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1163,11 +1204,11 @@ function VideoDetail({
       </div>
 
       {/* Última sección abajo: Estado de QC (sin botones de Aprobar Senda ni Aprobar Cliente) */}
-      <div className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl p-5">
+      <div className="bg-surface-2 border border-line rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-medium text-white">Estado de QC ({video.name})</p>
+          <p className="text-sm font-medium text-text">Estado de QC ({video.name})</p>
           {!isAdmin && (
-            <span className="text-[10px] text-gray-500 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
+            <span className="text-[10px] text-muted-2 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1178,8 +1219,8 @@ function VideoDetail({
                 onClick={() => onSetQc(video.id, q)}
                 className={`text-xs font-medium px-3.5 py-2 rounded-md border transition-all duration-300 hover:-translate-y-0.5 ${
                   video.qc === q
-                    ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.3)]"
-                    : "bg-[var(--surface-3)] text-gray-400 border-[var(--border-line)] hover:text-white hover:border-gray-500"
+                    ? "bg-accent text-on-accent border-accent shadow-[0_0_10px_rgba(53,214,228,0.3)]"
+                    : "bg-surface-3 text-muted border-line hover:text-text hover:border-muted-2"
                 }`}
               >
                 {qcStatusLabel(q, video)}
@@ -1189,8 +1230,8 @@ function VideoDetail({
                 key={q}
                 className={`text-xs font-medium px-3.5 py-2 rounded-md border cursor-default select-none ${
                   video.qc === q
-                    ? "bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_10px_rgba(53,214,228,0.2)]"
-                    : "bg-[var(--surface-3)] text-gray-500 border-[var(--border-line)] opacity-60"
+                    ? "bg-accent text-on-accent border-accent shadow-[0_0_10px_rgba(53,214,228,0.2)]"
+                    : "bg-surface-3 text-muted-2 border-line opacity-60"
                 }`}
               >
                 {qcStatusLabel(q, video)}
@@ -1208,17 +1249,17 @@ function VideoDetail({
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-surface-2 border border-line rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto"
           >
-            <div className="flex items-center justify-between border-b border-[var(--border-line)] pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h3 className="font-display text-base font-bold text-white">Conectar Google Drive (Videos Finales de Editores)</h3>
-                <p className="text-xs text-gray-400">Exclusivo para cuando el rol Editor sube el Video Final, sin llenar ni cobrar extra en Supabase.</p>
+                <h3 className="font-display text-base font-bold text-text">Conectar Google Drive (Videos Finales de Editores)</h3>
+                <p className="text-xs text-muted">Exclusivo para cuando el rol Editor sube el Video Final, sin llenar ni cobrar extra en Supabase.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowDriveConfigModal(false)}
-                className="w-8 h-8 rounded-lg bg-[var(--surface-3)] border border-[var(--border-line)] flex items-center justify-center text-gray-400 hover:text-white"
+                className="w-8 h-8 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text"
               >
                 <X size={16} />
               </button>
@@ -1226,37 +1267,37 @@ function VideoDetail({
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-white mb-1">
+                <label className="block text-xs font-semibold text-text mb-1">
                   1. Enlace de tu Carpeta Compartida de Google Drive para Editores
                 </label>
                 <input
                   value={folderUrlDraft}
                   onChange={e => setFolderUrlDraft(e.target.value)}
                   placeholder="https://drive.google.com/drive/folders/..."
-                  className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)]"
+                  className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-white mb-1">
+                <label className="block text-xs font-semibold text-text mb-1">
                   2. URL del Puente de Subida Directa a Drive (Google Apps Script Web App)
                 </label>
                 <input
                   value={bridgeUrlDraft}
                   onChange={e => setBridgeUrlDraft(e.target.value)}
                   placeholder="https://script.google.com/macros/s/.../exec"
-                  className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)]"
+                  className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent"
                 />
               </div>
 
-              <details className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl p-3 text-xs text-gray-300">
-                <summary className="cursor-pointer font-semibold text-[var(--accent)]">
+              <details className="bg-surface-3 border border-line rounded-xl p-3 text-xs text-muted">
+                <summary className="cursor-pointer font-semibold text-accent">
                   ¿Cómo obtener la URL del Puente automático en 1 minuto? (Clic para ver código)
                 </summary>
-                <div className="mt-2 space-y-2 text-[11px] text-gray-400">
+                <div className="mt-2 space-y-2 text-[11px] text-muted">
                   <p>1. Entra a <strong>script.google.com</strong> con la cuenta de Google dueña de la carpeta y crea un "Nuevo proyecto".</p>
                   <p>2. Pega este código reemplazando <code>ID_DE_TU_CARPETA</code> por el ID de tu carpeta de Drive:</p>
-                  <pre className="bg-black/60 p-2.5 rounded-lg text-[10.5px] text-emerald-300 overflow-x-auto select-all">{
+                  <pre className="bg-black/60 p-2.5 rounded-lg text-[10.5px] text-mint overflow-x-auto select-all">{
 `function doPost(e) {
   var data = JSON.parse(e.postData.contents);
   var folder = DriveApp.getFolderById("ID_DE_TU_CARPETA");
@@ -1272,11 +1313,11 @@ function VideoDetail({
               </details>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border-line)]">
+            <div className="flex justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => setShowDriveConfigModal(false)}
-                className="px-4 py-2 rounded-xl bg-[var(--surface-3)] text-xs text-gray-300 hover:text-white"
+                className="px-4 py-2 rounded-xl bg-surface-3 text-xs text-muted hover:text-text"
               >
                 Cancelar
               </button>
@@ -1287,7 +1328,7 @@ function VideoDetail({
                   setGoogleDriveBridgeUrl(bridgeUrlDraft);
                   setShowDriveConfigModal(false);
                 }}
-                className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[#0F2E33] text-xs font-display font-bold hover:opacity-95"
+                className="px-4 py-2 rounded-xl bg-accent text-on-accent text-xs font-display font-bold hover:opacity-95"
               >
                 Guardar Conexión Drive
               </button>
@@ -1303,16 +1344,16 @@ function VideoDetail({
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl"
+            className="bg-surface-2 border border-line rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl"
           >
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--border-line)] pb-3">
+            <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
               <div className="flex items-center gap-2.5 min-w-0">
-                <ImageIcon size={18} className="text-violet-400 shrink-0" />
+                <ImageIcon size={18} className="text-violet shrink-0" />
                 <div className="min-w-0">
-                  <h3 className="font-display text-base font-bold text-white truncate">
+                  <h3 className="font-display text-base font-bold text-text truncate">
                     Imagen principal · {brandName ? `${brandName} · ${video.name}` : video.name}
                   </h3>
-                  <p className="text-xs text-gray-400 truncate">{video.mainImageFileName}</p>
+                  <p className="text-xs text-muted truncate">{video.mainImageFileName}</p>
                 </div>
                 {video.mainImageStatus && (
                   <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${
@@ -1333,13 +1374,13 @@ function VideoDetail({
               <button
                 type="button"
                 onClick={() => setShowMainImagePreview(false)}
-                className="w-8 h-8 rounded-lg bg-[var(--surface-3)] border border-[var(--border-line)] flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+                className="w-8 h-8 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-text transition-colors"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl overflow-hidden flex items-center justify-center max-h-[60vh] min-h-[260px]">
+            <div className="bg-surface-3 border border-line rounded-xl overflow-hidden flex items-center justify-center max-h-[60vh] min-h-[260px]">
               {video.mainImageFileUrl ? (
                 <img
                   src={resolvedMainImgUrl || video.mainImageFileUrl}
@@ -1347,24 +1388,24 @@ function VideoDetail({
                   className="max-h-[60vh] w-auto object-contain"
                 />
               ) : (
-                <p className="text-sm text-gray-400 py-12">Vista previa no disponible para este archivo.</p>
+                <p className="text-sm text-muted py-12">Vista previa no disponible para este archivo.</p>
               )}
             </div>
 
             {video.mainImageComment && (
-              <div className="bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2.5 text-xs text-gray-300">
-                <span className="text-gray-400">Comentario registrado: </span>
+              <div className="bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-xs text-muted">
+                <span className="text-muted">Comentario registrado: </span>
                 <strong className="text-amber">{video.mainImageComment}</strong>
               </div>
             )}
 
             {isAdmin && (
-              <div className="space-y-3 pt-1 border-t border-[var(--border-line)]">
+              <div className="space-y-3 pt-1 border-t border-line">
                 <input
                   value={mainImageComment}
                   onChange={e => setMainImageComment(e.target.value)}
                   placeholder="Comentarios sobre la imagen principal (opcional)..."
-                  className="w-full bg-[var(--surface-3)] border border-[var(--border-line)] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 outline-none focus:border-[var(--accent)] transition-colors"
+                  className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
                 />
                 <div className="flex items-center gap-2.5">
                   <button
@@ -1374,7 +1415,7 @@ function VideoDetail({
                       setMainImageComment("");
                       setShowMainImagePreview(false);
                     }}
-                    className="flex-1 py-2.5 rounded-xl bg-mint text-[#0F2E33] text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
+                    className="flex-1 py-2.5 rounded-xl bg-mint text-on-accent text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
                   >
                     <ThumbsUp size={14} /> Aprobar
                   </button>
@@ -1433,8 +1474,8 @@ export function TasksBoard() {
             onClick={() => setFilter(f)}
             className={`text-xs font-medium px-4 py-2 rounded-full border transition-all duration-300 ${
               filter === f 
-                ? 'bg-[var(--accent)] text-[#0F2E33] border-[var(--accent)] shadow-[0_0_15px_rgba(53,214,228,0.3)]' 
-                : 'bg-[var(--surface-2)] text-gray-400 border-[var(--border-line)] hover:border-gray-500 hover:text-white'
+                ? 'bg-accent text-on-accent border-accent shadow-[0_0_15px_rgba(53,214,228,0.3)]' 
+                : 'bg-surface-2 text-muted border-line hover:border-muted-2 hover:text-text'
             }`}
           >
             {f === 'todos' ? 'Todos' : BOARD_QC_LABEL[f]}
@@ -1443,35 +1484,35 @@ export function TasksBoard() {
       </div>
 
       {brandGroups.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-[var(--border-line)] rounded-2xl bg-[var(--surface-2)]">
-          <div className="w-16 h-16 rounded-full bg-[var(--surface-3)] flex items-center justify-center mb-4">
-            <Film className="w-8 h-8 text-gray-500" />
+        <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-line rounded-2xl bg-surface-2">
+          <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mb-4">
+            <Film className="w-8 h-8 text-muted-2" />
           </div>
-          <p className="text-lg font-display font-medium text-white mb-1">Sin resultados</p>
-          <p className="text-sm text-gray-400">No hay videos con este filtro o estado de QC seleccionado.</p>
+          <p className="text-lg font-display font-medium text-text mb-1">Sin resultados</p>
+          <p className="text-sm text-muted">No hay videos con este filtro o estado de QC seleccionado.</p>
         </div>
       ) : (
         <div className="space-y-4">
           {brandGroups.map(({ brand, videos, totalVideos, linkedOrder }, idx) => {
             const isOpen = expandedBrandId === brand.id || expandedBrandId === null;
             return (
-              <div key={brand.id} className="bg-[var(--surface-2)] border border-[var(--border-line)] rounded-2xl overflow-hidden shadow-sm">
+              <div key={brand.id} className="bg-surface-2 border border-line rounded-2xl overflow-hidden shadow-sm">
                 <button
                   type="button"
                   onClick={() => setExpandedBrandId(prev => (prev === brand.id ? '__closed__' : brand.id))}
-                  className="w-full flex items-center justify-between gap-4 p-5 hover:bg-[var(--surface-3)]/60 transition-colors text-left"
+                  className="w-full flex items-center justify-between gap-4 p-5 hover:bg-surface-3/60 transition-colors text-left"
                 >
                   <div className="flex items-center gap-4 min-w-0">
-                    <span className="w-8 h-8 rounded-xl bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30 flex items-center justify-center text-sm font-bold font-tech shrink-0">
+                    <span className="w-8 h-8 rounded-xl bg-accent/10 text-accent border border-accent/30 flex items-center justify-center text-sm font-bold font-tech shrink-0">
                       {idx + 1}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-lg font-display font-bold text-white truncate mb-0.5">
-                        {brand.name} · <span className="text-[var(--accent)] font-tech text-sm">{totalVideos} videos</span>
+                      <p className="text-lg font-display font-bold text-text truncate mb-0.5">
+                        {brand.name} · <span className="text-accent font-tech text-sm">{totalVideos} videos</span>
                       </p>
-                      <p className="text-xs text-gray-400 truncate flex gap-2">
-                        <span>Equipo: <strong className="text-gray-300">{videos[0]?.clipperName} + {videos[0]?.editorName}</strong></span>
-                        {linkedOrder?.deliveryDate ? <span className="text-gray-500">| Entrega: {linkedOrder.deliveryDate}</span> : ''}
+                      <p className="text-xs text-muted truncate flex gap-2">
+                        <span>Equipo: <strong className="text-muted">{videos[0]?.clipperName} + {videos[0]?.editorName}</strong></span>
+                        {linkedOrder?.deliveryDate ? <span className="text-muted-2">| Entrega: {linkedOrder.deliveryDate}</span> : ''}
                       </p>
                     </div>
                   </div>
@@ -1492,7 +1533,7 @@ export function TasksBoard() {
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteBrandId(null)}
-                          className="px-2 py-0.5 rounded-lg bg-[var(--surface-3)] text-gray-300 text-xs hover:text-white"
+                          className="px-2 py-0.5 rounded-lg bg-surface-3 text-muted text-xs hover:text-text"
                         >
                           Cancelar
                         </button>
@@ -1502,37 +1543,37 @@ export function TasksBoard() {
                         type="button"
                         onClick={() => setConfirmDeleteBrandId(brand.id)}
                         title="Eliminar proyecto iniciado"
-                        className="p-2 rounded-xl text-gray-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all"
+                        className="p-2 rounded-xl text-muted hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all"
                       >
                         <Trash2 size={16} />
                       </button>
                     )}
-                    <ChevronDown size={20} className={`text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180 text-[var(--accent)]' : ''}`} />
+                    <ChevronDown size={20} className={`text-muted transition-transform duration-300 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
                   </div>
                 </button>
 
                 {isOpen && (
-                  <div className="p-4 pt-2 border-t border-[var(--border-line)] bg-[var(--surface-1)] space-y-3">
+                  <div className="p-4 pt-2 border-t border-line bg-surface space-y-3">
                     {videos.map((v, vIndex) => (
                       <button
                         key={v.id}
                         type="button"
                         onClick={() => setSelectedVideo(v)}
-                        className="w-full flex items-center justify-between gap-4 p-4 bg-[var(--surface-2)] border border-[var(--border-line)] rounded-xl hover:border-[var(--accent)]/50 hover:bg-[var(--surface-3)] transition-all duration-300 text-left group"
+                        className="w-full flex items-center justify-between gap-4 p-4 bg-surface-2 border border-line rounded-xl hover:border-accent/50 hover:bg-surface-3 transition-all duration-300 text-left group"
                       >
                         <div className="flex items-center gap-4 min-w-0">
-                          <span className="w-8 h-8 rounded-lg bg-[var(--surface-1)] border border-[var(--border-line)] font-tech text-xs font-bold text-[var(--accent)] flex items-center justify-center shrink-0 group-hover:bg-[var(--accent)]/10 transition-colors">
+                          <span className="w-8 h-8 rounded-lg bg-surface border border-line font-tech text-xs font-bold text-accent flex items-center justify-center shrink-0 group-hover:bg-accent/10 transition-colors">
                             #{v.videoNumber || vIndex + 1}
                           </span>
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-white truncate mb-0.5">
-                              Video {v.videoNumber || vIndex + 1} <span className="text-gray-500 font-normal ml-1">· {brand.name}</span>
+                            <p className="text-sm font-bold text-text truncate mb-0.5">
+                              Video {v.videoNumber || vIndex + 1} <span className="text-muted-2 font-normal ml-1">· {brand.name}</span>
                             </p>
-                            <p className="text-[11px] text-gray-400 truncate flex gap-2">
+                            <p className="text-[11px] text-muted truncate flex gap-2">
                               <span>Clips: {v.clips.length}</span>
-                              <span className="text-gray-600">|</span>
+                              <span className="text-muted-2">|</span>
                               <span>Finales: {v.finalVideos.length}</span>
-                              <span className="text-gray-600">|</span>
+                              <span className="text-muted-2">|</span>
                               <span>Feedback: {v.corrections.length}</span>
                             </p>
                           </div>
@@ -1542,7 +1583,7 @@ export function TasksBoard() {
                           <span className={`text-xs font-semibold px-3 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>
                             {getProcessBadgeLabel(v)}
                           </span>
-                          <ChevronRight size={18} className="text-gray-500 group-hover:text-[var(--accent)] transition-colors" />
+                          <ChevronRight size={18} className="text-muted-2 group-hover:text-accent transition-colors" />
                         </div>
                       </button>
                     ))}

@@ -10,11 +10,7 @@ export const CALENDAR_EVENTS: CalendarEvent[] = [];
 export const CLASSROOM_MODULES: ClassroomModule[] = [];
 
 export const CONFIG: Config = {
-  tiers: {
-    1: { name: 'Nivel 1', payout: 25 },
-    2: { name: 'Nivel 2', payout: 35 },
-    3: { name: 'Nivel 3', payout: 50 },
-  },
+  tiers: [],
   goals: {
     clipper: { daily: 10, monthly: 200 },
     editor: { daily: 10, monthly: 200 },

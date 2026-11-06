@@ -3,6 +3,7 @@ import type { Brand, Worker, WorkerCustomGoals, NotificationItem, NotificationCa
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
+import { workerWorkload } from './lib/economics';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -93,7 +94,8 @@ type SharedKey =
   | 'brands' | 'notifications' | 'orders' | 'calendarEvents'
   | 'workerGoals' | 'workerPointsOverride' | 'financeSettings'
   | 'financeClosings' | 'appExpenses' | 'payrollPayments'
-  | 'payrollAdjustments' | 'capacityProtocolConfig' | 'workerCapacities';
+  | 'payrollAdjustments' | 'capacityProtocolConfig' | 'workerCapacities'
+  | 'classroomModules' | 'lessonCompletions';
 
 function loadState<T>(key: string, fallback: T): T {
   try {
@@ -257,7 +259,14 @@ export function useStore() {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const role: Role = user?.role || 'clipper';
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'theme');
+      return saved === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
   const [view, setView] = useState<ViewKey>('home');
   const [brands, setBrands] = useState<Brand[]>(() => loadState('brands', INITIAL_BRANDS));
   const [workers, setWorkers] = useState<Worker[]>(() => loadState('workers', INITIAL_WORKERS));
@@ -339,8 +348,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { persistShared('calendarEvents', calendarEvents); }, [calendarEvents, persistShared]);
   useEffect(() => { persistShared('notifications', notifications); }, [notifications, persistShared]);
   useEffect(() => { saveState('emailLog', emailLog); }, [emailLog]);
-  useEffect(() => { saveState('classroomModules', classroomModules); }, [classroomModules]);
-  useEffect(() => { saveState('lessonCompletions', lessonCompletions); }, [lessonCompletions]);
+  useEffect(() => { persistShared('classroomModules', classroomModules); }, [classroomModules, persistShared]);
+  useEffect(() => { persistShared('lessonCompletions', lessonCompletions); }, [lessonCompletions, persistShared]);
+  useEffect(() => { try { localStorage.setItem(STORAGE_PREFIX + 'theme', theme); } catch { /* sin almacenamiento */ } }, [theme]);
 
   const refreshOnlineHeartbeats = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -405,6 +415,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
       const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
       if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
+      const remoteClassroom = await loadShared<ClassroomModule[]>('classroomModules');
+      if (active && Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
+      else if (active && remoteClassroom === null) {
+        // Primera vez: subir los módulos que existían solo en este navegador para que todo el equipo los vea
+        const localModules = loadState<ClassroomModule[]>('classroomModules', []);
+        if (localModules.length > 0) void saveShared('classroomModules', localModules);
+      }
+      const remoteCompletions = await loadShared<Record<string, string[]>>('lessonCompletions');
+      if (active && remoteCompletions && typeof remoteCompletions === 'object') setLessonCompletions(remoteCompletions);
       const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
       if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
         setHeartbeatMap(remoteHeartbeats);
@@ -488,6 +507,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const remoteCapConfig = await loadShared<CapacityProtocolConfig>("capacityProtocolConfig");
             if (remoteCapConfig && typeof remoteCapConfig === "object") setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
           }
+          if (shouldLoad("classroomModules")) {
+            const remoteClassroom = await loadShared<ClassroomModule[]>("classroomModules");
+            if (Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
+          }
+          if (shouldLoad("lessonCompletions")) {
+            const remoteCompletions = await loadShared<Record<string, string[]>>("lessonCompletions");
+            if (remoteCompletions && typeof remoteCompletions === "object") setLessonCompletions(remoteCompletions);
+          }
           if (shouldLoad("workerCapacities")) {
             const remoteWorkerCaps = await loadShared<Record<string, number>>("workerCapacities");
             if (remoteWorkerCaps && typeof remoteWorkerCaps === "object") setWorkerCapacities(remoteWorkerCaps);
@@ -536,6 +563,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const currentUserId = user.id;
+    const sb = supabase;
 
     const sendHeartbeat = async (isAlive: boolean) => {
       if (role === 'admin') return;
@@ -554,12 +582,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setHeartbeatMap(cleaned);
         setNowTick(now);
         await saveShared('online_heartbeats', cleaned);
-        await supabase.from('profiles').update({ online: isAlive }).eq('id', currentUserId);
+        await sb.from('profiles').update({ online: isAlive }).eq('id', currentUserId);
       } catch {
       }
     };
 
-    const channel = supabase.channel('senda_online_presence', {
+    const channel = sb.channel('senda_online_presence', {
       config: {
         presence: { key: currentUserId },
       },
@@ -631,7 +659,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         void channel.untrack();
         void sendHeartbeat(false);
       }
-      void supabase.removeChannel(channel);
+      void sb.removeChannel(channel);
     };
   }, [user?.id, role, refreshOnlineHeartbeats]);
 
@@ -1564,22 +1592,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const getWorkerWorkload = useCallback((workerId: string): number => {
     const w = workersRef.current.find(x => x.id === workerId);
-    const activeVideos = brands.flatMap(b => b.videos).filter(v => {
-      const isMine = w ? (w.role === "clipper" ? v.clipperId === workerId : v.editorId === workerId) : (v.clipperId === workerId || v.editorId === workerId);
-      return isMine && v.qc !== "aprobado_cliente";
-    });
-    const coveredOrderIds = new Set(activeVideos.map(v => v.orderId).filter(Boolean));
-    const unpromotedOrdersLoad = orders
-      .filter(o => {
-        if (o.status === "finalizado" || o.status === "aprobado_cliente") return false;
-        const isMine = w ? (w.role === "clipper" ? o.clipperId === workerId : o.editorId === workerId) : (o.clipperId === workerId || o.editorId === workerId);
-        if (!isMine) return false;
-        if (coveredOrderIds.has(o.id)) return false;
-        return true;
-      })
-      .reduce((sum, o) => sum + Math.max(1, o.videoCount || 1), 0);
-
-    return activeVideos.length + unpromotedOrdersLoad;
+    const allVids = brands.flatMap(b => b.videos);
+    if (w) return workerWorkload(w, allVids, orders);
+    return workerWorkload({ id: workerId, role: 'clipper' }, allVids, orders) + workerWorkload({ id: workerId, role: 'editor' }, allVids, orders);
   }, [brands, orders]);
 
   const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
@@ -1645,7 +1660,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           editorQc: "pendiente",
           duration: null,
           durationSeconds: 45,
-          tierSnapshot: CONFIG.tiers[1],
+          tierSnapshot: null,
           date: order.deliveryDate || new Date().toISOString().slice(0, 10),
           clips: [],
           finalVideos: [],
@@ -1896,7 +1911,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateCapacityConfig = useCallback((patch: Partial<CapacityProtocolConfig>) => {
     setCapacityConfig(prev => {
-      const next: CapacityProtocolConfig = { ...prev, ...patch };
+      const merged: CapacityProtocolConfig = { ...prev, ...patch };
+      const clampInt = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(Number(n) || 0)));
+      const start = clampInt(merged.workdayStartHour, 0, 22);
+      const next: CapacityProtocolConfig = {
+        ...merged,
+        safetyMarginPct: clampInt(merged.safetyMarginPct, 0, 50),
+        defaultClipperDailyVideos: clampInt(merged.defaultClipperDailyVideos, 1, 200),
+        defaultEditorDailyVideos: clampInt(merged.defaultEditorDailyVideos, 1, 200),
+        workdayStartHour: start,
+        workdayEndHour: clampInt(merged.workdayEndHour, start + 1, 24),
+        urgentThresholdHours: clampInt(merged.urgentThresholdHours, 1, 72),
+        maxNoResponseMinutes: clampInt(merged.maxNoResponseMinutes, 5, 600),
+        maxStalledHours: clampInt(merged.maxStalledHours, 1, 72),
+      };
       saveState('capacityProtocolConfig', next);
       if (isSupabaseConfigured) {
         markLocalWrite();

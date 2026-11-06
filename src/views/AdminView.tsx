@@ -8,7 +8,7 @@ import {
 import { workerLoadColor, workerLoadBorder, WorkerLoad } from './AdminHomePanels';
 
 export function AdminView() {
-  const { workers, registeredUsersCount, brands, orders, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals, getWorkerCapacity } = useStore();
+  const { workers, registeredUsersCount, brands, orders, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals, getWorkerCapacity, getWorkerWorkload } = useStore();
   const [teamTab, setTeamTab] = useState<'clipper' | 'editor'>('clipper');
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [ptsTodayInput, setPtsTodayInput] = useState<string>('');
@@ -34,23 +34,8 @@ export function AdminView() {
     for (const w of workers) {
       const cap = getWorkerCapacity(w.id);
       
-      const myActiveVideos = allVideos.filter(v =>
-        (w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id) &&
-        v.qc !== 'aprobado_cliente' &&
-        v.qc !== 'sin_iniciar'
-      );
-      
-      let activeLoad = myActiveVideos.length;
-
-      const extraOrders = orders.filter(o =>
-        o.status !== 'finalizado' &&
-        (w.role === 'clipper' ? o.clipperId === w.id : o.editorId === w.id) &&
-        !myActiveVideos.some(v => v.id === o.boardVideoId || v.name.trim().toLowerCase() === o.brand.trim().toLowerCase())
-      );
-
-      for (const o of extraOrders) {
-        activeLoad += Math.max(1, o.videoCount || 1);
-      }
+      // Misma fórmula que Tareas, Inicio y Capacidad (sin duplicar pedido + videos)
+      const activeLoad = getWorkerWorkload(w.id);
 
       let status: WorkerLoad = 'sin_trabajo';
       if (activeLoad === 0) status = 'sin_trabajo';
@@ -60,7 +45,7 @@ export function AdminView() {
       map.set(w.id, { activeLoad, capacity: cap, status });
     }
     return map;
-  }, [workers, allVideos, orders, getWorkerCapacity]);
+  }, [workers, getWorkerCapacity, getWorkerWorkload]);
 
   const startEditingWorker = (w: Worker) => {
     const goals = getWorkerGoals(w.id, w.role);

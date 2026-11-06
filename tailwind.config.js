@@ -1,28 +1,38 @@
+// Colores de marca como variables CSS con soporte de opacidad (bg-accent/10, border-mint/40, ...).
+// Sin esto Tailwind no genera las variantes con "/" y los bordes caían al gris por defecto.
+const token = name => ({ opacityValue }) =>
+  opacityValue === undefined || opacityValue === '1'
+    ? `var(--${name})`
+    : `color-mix(in srgb, var(--${name}) calc(${opacityValue} * 100%), transparent)`;
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: ['class', '[data-theme="dark"]'],
   theme: {
     extend: {
+      borderColor: {
+        DEFAULT: 'var(--line)',
+      },
       colors: {
-        ink: 'var(--ink)',
-        surface: 'var(--surface)',
-        'surface-2': 'var(--surface-2)',
-        'surface-3': 'var(--surface-3)',
-        line: 'var(--line)',
-        text: 'var(--text)',
-        muted: 'var(--muted)',
-        'muted-2': 'var(--muted-2)',
-        accent: 'var(--accent)',
-        'accent-strong': 'var(--accent-strong)',
-        'accent-dim': 'var(--accent-dim)',
-        'on-accent': 'var(--on-accent)',
-        mint: 'var(--mint)',
-        'mint-dim': 'var(--mint-dim)',
-        amber: 'var(--amber)',
-        'amber-dim': 'var(--amber-dim)',
-        violet: 'var(--violet)',
-        'violet-dim': 'var(--violet-dim)',
+        ink: token('ink'),
+        surface: token('surface'),
+        'surface-2': token('surface-2'),
+        'surface-3': token('surface-3'),
+        line: token('line'),
+        text: token('text'),
+        muted: token('muted'),
+        'muted-2': token('muted-2'),
+        accent: token('accent'),
+        'accent-strong': token('accent-strong'),
+        'accent-dim': token('accent-dim'),
+        'on-accent': token('on-accent'),
+        mint: token('mint'),
+        'mint-dim': token('mint-dim'),
+        amber: token('amber'),
+        'amber-dim': token('amber-dim'),
+        violet: token('violet'),
+        'violet-dim': token('violet-dim'),
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

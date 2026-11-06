@@ -8,6 +8,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   parseBankInfo, serializeBankInfo, openWorkerPayrollReportPdf, fmtMoneyClean,
 } from '../lib/payrollPdf';
+import { workerEarnedItems } from '../lib/economics';
 import type { PayrollReportItem, Order } from '../types';
 
 export function ProfileView() {
@@ -50,36 +51,11 @@ export function ProfileView() {
 
   const completed = useMemo(() => myVideos.filter(v => v.qc === 'aprobado_cliente'), [myVideos]);
 
-  // Informe automático de todos los pedidos finalizados (Aprobado Cliente) desde la página del propio Clipper/Editor
+  // Informe automático de todos los videos finalizados (Aprobado Cliente): misma fuente que Nóminas y Finanzas
   const myReportItems = useMemo<PayrollReportItem[]>(() => {
     if (!worker) return [];
-    const defClipper = financeSettings.defaultClipperCost;
-    const defEditor = financeSettings.defaultEditorCost;
-
-    const linkedOrderByVideoId = new Map<string, Order>();
-    const linkedOrderByBrand = new Map<string, Order>();
-    for (const o of orders) {
-      if (o.boardVideoId) linkedOrderByVideoId.set(o.boardVideoId, o);
-      linkedOrderByBrand.set(o.brand.trim().toLowerCase(), o);
-    }
-
-    return completed.map(v => {
-      const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(v.brandName.trim().toLowerCase());
-      const videosCount = linked ? Math.max(1, linked.videoCount || 1) : 1;
-      const unitPay = worker.role === 'clipper'
-        ? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper)
-        : (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
-      return {
-        videoId: v.id,
-        projectName: v.name,
-        brandName: v.brandName,
-        date: v.date,
-        videosCount,
-        unitPay,
-        subtotal: videosCount * unitPay,
-      };
-    });
-  }, [worker, completed, orders, financeSettings]);
+    return workerEarnedItems(worker, brands, orders, financeSettings);
+  }, [worker, brands, orders, financeSettings]);
 
   const myPayments = useMemo(
     () => payrollPayments.filter(p => p.workerId === currentWorkerId),

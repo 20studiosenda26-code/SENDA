@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
-import type { Worker, Order, PayrollReportItem } from '../types';
+import type { Worker, PayrollReportItem } from '../types';
+import { workerPayrollStatus } from '../lib/economics';
 import { fmtMoneyClean, parseBankInfo, openWorkerPayrollReportPdf } from '../lib/payrollPdf';
 import {
   Wallet, Scissors, Film, Upload, CheckCircle2, Landmark,
@@ -55,63 +56,25 @@ export function PayrollView() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cycle = useMemo(() => getWeekendCycle(weekOffset), [weekOffset]);
 
-  // Cálculo 100% automático basado en todos los pedidos finalizados (Aprobado Cliente) de cada Clipper / Editor
+  // Cálculo 100% automático: cada video Aprobado Cliente suma 1 vez; lo ya pagado en
+  // cualquier ciclo no vuelve a aparecer (antes reaparecía cada semana y contaba el pedido entero por video).
   const workerPayrollRows = useMemo(() => {
-    const defClipper = financeSettings.defaultClipperCost;
-    const defEditor = financeSettings.defaultEditorCost;
-
-    const linkedOrderByVideoId = new Map<string, Order>();
-    const linkedOrderByBrand = new Map<string, Order>();
-    for (const o of orders) {
-      if (o.boardVideoId) linkedOrderByVideoId.set(o.boardVideoId, o);
-      linkedOrderByBrand.set(o.brand.trim().toLowerCase(), o);
-    }
-
-    const allVideos = brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name })));
-
     return workers.map(w => {
-      const reportItems: PayrollReportItem[] = [];
-      let totalFromApprovedClient = 0;
-
-      for (const v of allVideos) {
-        const isMine = w.role === 'clipper' ? v.clipperId === w.id : v.editorId === w.id;
-        if (!isMine) continue;
-
-        // Únicamente pedidos finalizados completamente (Aprobado Cliente)
-        if (v.qc !== 'aprobado_cliente' && !v.paid100) continue;
-
-        const linked = linkedOrderByVideoId.get(v.id) || linkedOrderByBrand.get(v.brandName.trim().toLowerCase());
-        const videosCount = linked ? Math.max(1, linked.videoCount || 1) : 1;
-        const unitPay = w.role === 'clipper'
-          ? (v.tierSnapshot ? v.tierSnapshot.clipperPay : defClipper)
-          : (v.tierSnapshot ? v.tierSnapshot.editorPay : defEditor);
-
-        const subtotal = videosCount * unitPay;
-        totalFromApprovedClient += subtotal;
-
-        reportItems.push({
-          videoId: v.id,
-          projectName: v.name,
-          brandName: v.brandName,
-          date: v.date,
-          videosCount,
-          unitPay,
-          subtotal,
-        });
-      }
-
+      const status = workerPayrollStatus(w, brands, orders, financeSettings, payrollPayments);
       const paymentsThisCycle = payrollPayments.filter(
         p => p.workerId === w.id && p.weekKey === cycle.weekKey
       );
-      const paidAmount = paymentsThisCycle.reduce((s, p) => s + p.amount, 0);
+      const paidAmount = paymentsThisCycle.reduce((s, p) => s + (Number(p.amount) || 0), 0);
       const latestPayment = paymentsThisCycle[0] || null;
-
-      const pendingAmount = Math.max(0, totalFromApprovedClient - paidAmount);
+      const pendingAmount = status.pendingAmount;
       const isPaid = paymentsThisCycle.length > 0 && pendingAmount === 0;
+      const reportItems: PayrollReportItem[] = pendingAmount > 0
+        ? status.pendingItems
+        : latestPayment?.reportItems || [];
 
       return {
         worker: w,
-        totalFromApprovedClient,
+        totalFromApprovedClient: status.totalEarned,
         paidAmount,
         pendingAmount,
         isPaid,
@@ -434,9 +397,11 @@ export function PayrollView() {
                         <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${
                           selectedRow.isPaid
                             ? 'bg-mint-dim text-mint border border-mint/30'
-                            : 'bg-amber-dim text-amber border border-amber/30'
+                            : selectedRow.pendingAmount > 0
+                            ? 'bg-amber-dim text-amber border border-amber/30'
+                            : 'bg-surface-3 text-muted border border-line'
                         }`}>
-                          {selectedRow.isPaid ? 'Liquidado' : 'Pendiente de transferencia'}
+                          {selectedRow.isPaid ? 'Liquidado' : selectedRow.pendingAmount > 0 ? 'Pendiente de transferencia' : 'Al día'}
                         </span>
                       </div>
                       <p className="text-xs text-muted font-tech mt-0.5">
@@ -566,7 +531,7 @@ export function PayrollView() {
 
                   {selectedRow.reportItems.length === 0 ? (
                     <p className="text-xs text-muted text-center py-4">
-                      Este creador aún no tiene pedidos en estado Aprobado Cliente.
+                      No hay videos Aprobado Cliente pendientes de pago para este creador.
                     </p>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-line bg-surface-2">
