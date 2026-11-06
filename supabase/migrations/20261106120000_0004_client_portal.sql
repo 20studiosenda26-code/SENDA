@@ -11,6 +11,7 @@ Un usuario con rol `cliente` NO puede leer los datos internos de la plataforma
      `client_view_<id>`, `client_inbox_<id>`, `client_ack_<id>`;
      solo escribe `client_inbox_<id>` (sus acciones: brief, feedback, aprobación).
 3. `notifications_log`: el cliente solo ve las notificaciones dirigidas a él.
+5. `profiles`: un trigger impide que un usuario se cambie su propio rol.
 4. `contracts`: los usuarios que antes eran "editor" ven también los contratos
    del rol único Clipper · Asistente de edición.
 */
@@ -97,3 +98,28 @@ USING (
     AND role IN ('clipper', 'editor')
   )
 );
+
+-- ------------------------------------------------------------
+-- profiles: nadie puede cambiarse su propio rol (solo un admin
+-- o la función create-user con service role)
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.protect_profile_role()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.role IS DISTINCT FROM OLD.role
+     AND auth.uid() IS NOT NULL
+     AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Solo un administrador puede cambiar roles';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS protect_profile_role ON public.profiles;
+CREATE TRIGGER protect_profile_role
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.protect_profile_role();
