@@ -228,7 +228,7 @@ function AdminContracts() {
                   <p className="text-sm text-muted mt-0.5">{c.fileName}</p>
                   <div className="flex gap-2 mt-1.5 text-xs">
                     <span className={`px-2 py-0.5 rounded ${c.role === 'clipper' ? 'bg-accent-dim text-accent' : 'bg-mint-dim text-mint'}`}>
-                      {c.role === 'clipper' ? 'Equipo' : 'Equipo (antes Editor)'}
+                      Equipo
                     </span>
                     <span className="text-muted-2">{c.workerId ? `Para ${workerName(c.workerId)}` : 'Plantilla general'}</span>
                   </div>

@@ -1,10 +1,9 @@
 import type { PayrollReportItem, Worker } from '../types';
+import { fmtMoney } from './economics';
 
-const CURRENCY_SIGN = String.fromCharCode(36);
-
+/** Dinero con centavos cuando hacen falta ($2,50): mismo formato en toda la plataforma. */
 export function fmtMoneyClean(n: number): string {
-  const clean = Math.round(Number(n) || 0);
-  return CURRENCY_SIGN + clean.toLocaleString('es-CO');
+  return fmtMoney(n);
 }
 
 export interface StructuredBankInfo {
@@ -55,7 +54,7 @@ export function serializeBankInfo(info: StructuredBankInfo): string {
   return `${info.bankName.trim()} | ${info.accountNumber.trim()} | ${info.accountHolder.trim()} | ${info.accountType.trim()}`;
 }
 
-/** Abre el Informe PDF Oficial de Liquidación Individual (basado en todos los pedidos finalizados Aprobado Cliente del creador) */
+/** Abre el Informe PDF Oficial de Liquidación Individual (tramos de pago: 50% Aprobado Senda + 50% Aprobado Cliente) */
 export function openWorkerPayrollReportPdf(params: {
   worker: Worker;
   weekendLabel: string;
@@ -79,7 +78,7 @@ export function openWorkerPayrollReportPdf(params: {
       <td><strong>${item.projectName}</strong></td>
       <td>${item.brandName}</td>
       <td>${item.date}</td>
-      <td style="text-align:center;">${item.videosCount}</td>
+      <td style="text-align:center;">${item.stage ? '50%' : '100%'}</td>
       <td style="text-align:right;">${fmtMoneyClean(item.unitPay)}</td>
       <td style="text-align:right;font-weight:700;color:#0d9488;">${fmtMoneyClean(item.subtotal)}</td>
     </tr>
@@ -140,13 +139,13 @@ export function openWorkerPayrollReportPdf(params: {
 
       <div class="summary-banner">
         <div>
-          <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Total Liquidado (Pedidos Aprobados Cliente)</div>
-          <div style="font-size:12px;color:#cbd5e1;margin-top:3px;">${items.length} pedido(s) finalizado(s) · ${totalVideos} video(s) entregados${receiptFileName ? ` · Comprobante: ${receiptFileName}` : ''}</div>
+          <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Total liquidado</div>
+          <div style="font-size:12px;color:#cbd5e1;margin-top:3px;">${items.length} pago(s) · ${totalVideos} tramo(s) de video (50% Aprobado Senda + 50% Aprobado Cliente)${receiptFileName ? ` · Comprobante: ${receiptFileName}` : ''}</div>
         </div>
         <div class="summary-val">${fmtMoneyClean(totalAmount)}</div>
       </div>
 
-      <h2>Detalle de Pedidos Finalizados (Aprobado Cliente)</h2>
+      <h2>Detalle de pagos por video</h2>
       <table>
         <thead>
           <tr>
@@ -154,13 +153,13 @@ export function openWorkerPayrollReportPdf(params: {
             <th>Proyecto</th>
             <th>Marca</th>
             <th>Fecha</th>
-            <th style="text-align:center;">Videos</th>
-            <th style="text-align:right;">Tarifa / Video</th>
+            <th style="text-align:center;">Tramo</th>
+            <th style="text-align:right;">Valor</th>
             <th style="text-align:right;">Subtotal</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || '<tr><td colspan="7" style="text-align:center;">Sin pedidos con estado Aprobado Cliente en este corte</td></tr>'}
+          ${rowsHtml || '<tr><td colspan="7" style="text-align:center;">Sin pagos en este corte</td></tr>'}
         </tbody>
       </table>
 

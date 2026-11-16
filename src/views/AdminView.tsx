@@ -1,74 +1,38 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useStore } from '../store';
-import type { Worker } from '../types';
-import {
-  Users, Video, Flame, CheckCircle2, Clock, Wifi,
-  Scissors, Film, SlidersHorizontal, Check, X, RotateCcw,
-} from 'lucide-react';
-import { workerLoadColor, workerLoadBorder, WorkerLoad } from './AdminHomePanels';
+import { Users, Video, CheckCircle2, Clock, Wifi, Wallet } from 'lucide-react';
+import { workerLoadColor, workerLoadBorder, type WorkerLoad } from './AdminHomePanels';
+import { fmtMoney, workerEarningsSummary, type WorkerEarningsSummary } from '../lib/economics';
 import { TEAM_ROLE_PLURAL, TEAM_ROLE_SHORT } from '../lib/roles';
 
 export function AdminView() {
-  const { workers, registeredUsersCount, brands, orders, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals, getWorkerCapacity, getWorkerWorkload } = useStore();
-  const [teamTab, setTeamTab] = useState<'clipper'>('clipper');
-  const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
-  const [ptsTodayInput, setPtsTodayInput] = useState<string>('');
-  const [ptsMonthInput, setPtsMonthInput] = useState<string>('');
-  const [goalDailyInput, setGoalDailyInput] = useState<string>('');
-  const [goalMonthlyInput, setGoalMonthlyInput] = useState<string>('');
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [savedToastId, setSavedToastId] = useState<string | null>(null);
+  const { workers, registeredUsersCount, brands, orders, financeSettings, payrollPayments, getWorkerCapacity, getWorkerWorkload, setView } = useStore();
 
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
   const completed = useMemo(() => allVideos.filter(v => v.qc === 'aprobado_cliente'), [allVideos]);
   const inProgress = useMemo(() => allVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar'), [allVideos]);
   const onlineWorkers = useMemo(() => workers.filter(w => w.online), [workers]);
 
-  const clippers = useMemo(() => workers.filter(w => w.role === 'clipper'), [workers]);
-  const visibleWorkers = clippers;
-
-  // CORRECCIÓN MATEMÁTICA INTEGRADA: Reutilizar lógica de conteo de asignaciones exactas
+  // Misma fórmula de carga que Tareas, Inicio y Capacidad (sin duplicar pedido + videos)
   const workerWorkloads = useMemo(() => {
     const map = new Map<string, { activeLoad: number; capacity: number; status: WorkerLoad }>();
-    
     for (const w of workers) {
       const cap = getWorkerCapacity(w.id);
-      
-      // Misma fórmula que Tareas, Inicio y Capacidad (sin duplicar pedido + videos)
       const activeLoad = getWorkerWorkload(w.id);
-
-      let status: WorkerLoad = 'sin_trabajo';
-      if (activeLoad === 0) status = 'sin_trabajo';
-      else if (activeLoad >= cap) status = 'lleno';
-      else status = 'meta';
-
+      const status: WorkerLoad = activeLoad === 0 ? 'sin_trabajo' : activeLoad >= cap ? 'lleno' : 'meta';
       map.set(w.id, { activeLoad, capacity: cap, status });
     }
     return map;
   }, [workers, getWorkerCapacity, getWorkerWorkload]);
 
-  const startEditingWorker = (w: Worker) => {
-    const goals = getWorkerGoals(w.id, w.role);
-    setEditingWorkerId(w.id);
-    setPtsTodayInput(String(w.pointsToday));
-    setPtsMonthInput(String(w.pointsMonth));
-    setGoalDailyInput(String(goals.daily));
-    setGoalMonthlyInput(String(goals.monthly));
-  };
+  // Ganancias con la regla de pago por video (50% Aprobado Senda + 50% Aprobado Cliente)
+  const earningsById = useMemo(() => {
+    const map = new Map<string, WorkerEarningsSummary>();
+    for (const w of workers) map.set(w.id, workerEarningsSummary(w, brands, orders, financeSettings, payrollPayments));
+    return map;
+  }, [workers, brands, orders, financeSettings, payrollPayments]);
 
-  const handleSaveWorker = async (w: Worker) => {
-    setSavingId(w.id);
-    await updateWorkerPointsAndGoals(w.id, {
-      pointsToday: Math.max(0, parseInt(ptsTodayInput, 10) || 0),
-      pointsMonth: Math.max(0, parseInt(ptsMonthInput, 10) || 0),
-      goalDaily: Math.max(1, parseInt(goalDailyInput, 10) || 1),
-      goalMonthly: Math.max(1, parseInt(goalMonthlyInput, 10) || 1),
-    });
-    setSavingId(null);
-    setEditingWorkerId(null);
-    setSavedToastId(w.id);
-    setTimeout(() => setSavedToastId(prev => (prev === w.id ? null : prev)), 2500);
-  };
+  const teamPending = Array.from(earningsById.values()).reduce((s, e) => s + e.pending, 0);
 
   return (
     <div className="space-y-5">
@@ -95,9 +59,7 @@ export function AdminView() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-44 overflow-y-auto pr-1">
             {onlineWorkers.map(w => {
-              const workload = workerWorkloads.get(w.id);
-              const isFilled = workload?.status === 'lleno';
-              
+              const isFilled = workerWorkloads.get(w.id)?.status === 'lleno';
               return (
                 <div
                   key={w.id}
@@ -125,28 +87,23 @@ export function AdminView() {
       <div className="bg-surface-2 border border-line rounded-xl p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="font-display text-lg font-semibold">Equipo y Metas de Puntos</h3>
+            <h3 className="font-display text-lg font-semibold">Equipo y ganancias</h3>
             <p className="text-xs text-muted mt-0.5">
-              Gestiona los puntos de hoy/mes, la meta individual y el cierre de día de cada Clipper · Asistente de edición.
+              {fmtMoney(financeSettings.payPerVideo)} por video: 50% al Aprobado Senda + 50% al Aprobado Cliente. Se calcula solo con cada aprobación.
             </p>
           </div>
-
-          <div className="flex items-center gap-1.5 bg-surface-3 border border-line rounded-xl p-1">
-            <button
-              type="button"
-              onClick={() => { setTeamTab('clipper'); setEditingWorkerId(null); }}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                teamTab === 'clipper' ? 'bg-accent text-on-accent shadow-sm' : 'text-muted hover:text-text'
-              }`}
-            >
-              <Scissors size={13} /> {TEAM_ROLE_PLURAL} ({clippers.length})
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setView('nominas')}
+            className="inline-flex items-center gap-2 bg-accent text-on-accent rounded-lg px-3.5 py-2 text-xs font-semibold hover:bg-accent-strong transition-colors"
+          >
+            <Wallet size={14} /> Ir a Nóminas · {fmtMoney(teamPending)} por pagar
+          </button>
         </div>
 
-        {visibleWorkers.length === 0 ? (
+        {workers.length === 0 ? (
           <p className="text-sm text-muted text-center py-6">
-            No hay miembros del equipo registrados todavía.
+            No hay miembros del equipo ({TEAM_ROLE_PLURAL.toLowerCase()}) registrados todavía.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -155,27 +112,20 @@ export function AdminView() {
                 <tr className="text-left text-muted text-xs border-b border-line">
                   <th className="py-2.5 pr-4 font-medium">Nombre</th>
                   <th className="py-2.5 pr-4 font-medium">Estado</th>
-                  <th className="py-2.5 pr-4 font-medium">Carga (Proyectos)</th>
-                  <th className="py-2.5 pr-4 font-medium">Puntos hoy / Meta</th>
-                  <th className="py-2.5 pr-4 font-medium">Puntos mes / Meta</th>
-                  <th className="py-2.5 pr-4 font-medium">Racha</th>
-                  <th className="py-2.5 font-medium text-right">Acciones</th>
+                  <th className="py-2.5 pr-4 font-medium">Carga</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Ganado este mes</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Por cobrar</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Esperando cliente</th>
+                  <th className="py-2.5 font-medium text-right">Aprobados (cliente)</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleWorkers.map(w => {
-                  const goals = getWorkerGoals(w.id, w.role);
-                  const isEditing = editingWorkerId === w.id;
-                  const pctDay = Math.min(100, Math.round((w.pointsToday / Math.max(goals.daily, 1)) * 100));
-                  const pctMonth = Math.min(100, Math.round((w.pointsMonth / Math.max(goals.monthly, 1)) * 100));
-                  
+                {workers.map(w => {
                   const workload = workerWorkloads.get(w.id);
-                  const activeLoad = workload?.activeLoad || 0;
-                  const capacity = workload?.capacity || 10;
                   const wStatus = workload?.status || 'sin_trabajo';
-
+                  const e = earningsById.get(w.id);
                   return (
-                    <tr key={w.id} className="border-b border-line/50 hover:bg-surface-3/60 transition-colors align-top">
+                    <tr key={w.id} className="border-b border-line/50 hover:bg-surface-3/60 transition-colors">
                       <td className="py-3 pr-4">
                         <p className="font-medium">{w.name}</p>
                         <p className="text-[11px] text-muted-2">{w.cargo}</p>
@@ -186,107 +136,18 @@ export function AdminView() {
                           {w.online ? 'En línea' : 'No en línea'}
                         </span>
                       </td>
-
                       <td className="py-3 pr-4">
                         <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full border bg-surface-3 ${workerLoadBorder(wStatus)}`}>
                           <span className={`w-2 h-2 rounded-full ${workerLoadColor(wStatus)}`} />
-                          <span className="font-tech text-xs font-semibold">{activeLoad}/{capacity}</span>
+                          <span className="font-tech text-xs font-semibold">{workload?.activeLoad || 0}/{workload?.capacity || 0}</span>
                         </div>
                       </td>
-
-                      <td className="py-3 pr-4">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
-                            <div>
-                              <span className="text-[10px] text-muted-2 block">Hoy</span>
-                              <input type="number" min={0} value={ptsTodayInput} onChange={e => setPtsTodayInput(e.target.value)} className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none" />
-                            </div>
-                            <span className="text-muted-2 mt-3">/</span>
-                            <div>
-                              <span className="text-[10px] text-accent block">Meta día</span>
-                              <input type="number" min={1} value={goalDailyInput} onChange={e => setGoalDailyInput(e.target.value)} className="w-14 bg-surface-2 border border-accent rounded-md px-2 py-1 text-xs font-tech outline-none" />
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="flex items-baseline gap-1 font-tech text-xs">
-                              <span className="font-semibold text-sm text-text">{w.pointsToday}</span>
-                              <span className="text-muted-2">/ {goals.daily} pts</span>
-                            </div>
-                            <div className="w-24 h-1.5 bg-surface-3 rounded-full overflow-hidden mt-1">
-                              <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pctDay}%` }} />
-                            </div>
-                          </div>
-                        )}
+                      <td className="py-3 pr-4 text-right font-tech font-semibold text-mint">{fmtMoney(e?.earnedMonth || 0)}</td>
+                      <td className={`py-3 pr-4 text-right font-tech font-semibold ${(e?.pending || 0) > 0 ? 'text-amber' : 'text-muted-2'}`}>{fmtMoney(e?.pending || 0)}</td>
+                      <td className="py-3 pr-4 text-right font-tech text-xs text-muted">
+                        {fmtMoney(e?.waitingClientAmount || 0)} <span className="text-muted-2">· {e?.waitingClientVideos || 0} vid</span>
                       </td>
-
-                      <td className="py-3 pr-4">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
-                            <div>
-                              <span className="text-[10px] text-muted-2 block">Mes</span>
-                              <input type="number" min={0} value={ptsMonthInput} onChange={e => setPtsMonthInput(e.target.value)} className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none" />
-                            </div>
-                            <span className="text-muted-2 mt-3">/</span>
-                            <div>
-                              <span className="text-[10px] text-mint block">Meta mes</span>
-                              <input type="number" min={1} value={goalMonthlyInput} onChange={e => setGoalMonthlyInput(e.target.value)} className="w-16 bg-surface-2 border border-mint rounded-md px-2 py-1 text-xs font-tech outline-none" />
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="flex items-baseline gap-1 font-tech text-xs">
-                              <span className="font-semibold text-sm text-text">{w.pointsMonth}</span>
-                              <span className="text-muted-2">/ {goals.monthly} pts</span>
-                            </div>
-                            <div className="w-24 h-1.5 bg-surface-3 rounded-full overflow-hidden mt-1">
-                              <div className="h-full bg-mint rounded-full transition-all" style={{ width: `${pctMonth}%` }} />
-                            </div>
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 pr-4">
-                        <span className="inline-flex items-center gap-1 text-amber font-tech text-xs">
-                          <Flame size={14} /> {w.streak}
-                        </span>
-                        <div className="mt-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleDayClosed(w.id)}
-                            title={w.dayClosedToday ? 'Día cerrado (clic para reabrir)' : 'Día abierto (clic para cerrar día)'}
-                            className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
-                              w.dayClosedToday ? 'bg-mint-dim text-mint border-mint/30 hover:bg-mint/20' : 'bg-surface-3 text-muted border-line hover:text-text hover:border-accent/40'
-                            }`}
-                          >
-                            {w.dayClosedToday ? <><CheckCircle2 size={11} /> Cerrado</> : <><Clock size={11} /> Cerrar día</>}
-                          </button>
-                        </div>
-                      </td>
-
-                      <td className="py-3 text-right">
-                        {isEditing ? (
-                          <div className="inline-flex items-center gap-1.5">
-                            <button type="button" disabled={savingId === w.id} onClick={() => void handleSaveWorker(w)} className="inline-flex items-center gap-1 bg-accent text-on-accent rounded-md px-2.5 py-1 text-xs font-semibold hover:bg-accent-strong transition-colors disabled:opacity-50">
-                              <Check size={13} /> Guardar
-                            </button>
-                            <button type="button" onClick={() => setEditingWorkerId(null)} className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface-3 border border-line text-muted hover:text-text" title="Cancelar">
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="inline-flex items-center gap-2 justify-end">
-                            {savedToastId === w.id && (
-                              <span className="text-[11px] text-mint flex items-center gap-1">
-                                <Check size={12} /> Actualizado
-                              </span>
-                            )}
-                            <button type="button" onClick={() => startEditingWorker(w)} className="inline-flex items-center gap-1.5 text-xs font-medium bg-surface-3 hover:bg-accent-dim text-muted hover:text-accent border border-line hover:border-accent/40 rounded-lg px-2.5 py-1.5 transition-colors">
-                              <SlidersHorizontal size={12} /> Editar
-                            </button>
-                          </div>
-                        )}
-                      </td>
+                      <td className="py-3 text-right font-tech text-xs">{e?.clientApprovedVideos || 0}</td>
                     </tr>
                   );
                 })}

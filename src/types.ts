@@ -80,6 +80,10 @@ export interface Video {
   publishedToClient?: boolean;
   clientFeedbackRoundsUsed?: number;
   clientFeedbackMaxRounds?: number;
+  /** Cuándo SENDA lo aprobó (libera el primer 50% del pago) */
+  sendaApprovedAt?: string | null;
+  /** Cuándo el cliente lo aprobó (libera el segundo 50% del pago) */
+  clientApprovedAt?: string | null;
 }
 
 export interface Brand {
@@ -246,7 +250,11 @@ export interface Order {
   promotedToBoard?: boolean;
   boardVideoId?: string | null;
   unitPriceClient?: number;
+  /** Pago total por video a la persona responsable (regla: $5 = 50% Senda + 50% Cliente) */
+  creatorPayPerVideo?: number;
+  /** @deprecated modelo anterior (clips + edición); ya no se usa en los cálculos */
   unitClipperPay?: number;
+  /** @deprecated modelo anterior (clips + edición); ya no se usa en los cálculos */
   unitEditorPay?: number;
   clipsPerVideo?: number;
   priority?: 'normal' | 'prioritario' | 'urgente' | 'critico';
@@ -308,7 +316,11 @@ export interface ClientView {
 
 export interface FinanceSettings {
   clientPricePerVideo: number;
+  /** Pago total al equipo por video entregado (por defecto $5: 50% Aprobado Senda + 50% Aprobado Cliente) */
+  payPerVideo: number;
+  /** @deprecated igual a payPerVideo; se conserva por compatibilidad con datos guardados */
   defaultClipperCost: number;
+  /** @deprecated siempre 0 (ya no existe el rol de editor) */
   defaultEditorCost: number;
 }
 
@@ -334,6 +346,8 @@ export interface FinanceDayClosing {
 
 export interface PayrollReportItem {
   videoId: string;
+  /** Tramo del pago: 50% al Aprobado Senda o 50% al Aprobado Cliente (sin valor = pago antiguo del video completo) */
+  stage?: 'senda' | 'cliente';
   projectName: string;
   brandName: string;
   date: string;

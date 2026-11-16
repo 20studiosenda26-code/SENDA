@@ -5,6 +5,8 @@ import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { ClientPortal } from './ClientPortal';
 import { CardNodeDeco } from '../components/BrandBackground';
 import { fmtMoneyClean } from '../lib/payrollPdf';
+import { takeNavIntent } from '../lib/navIntent';
+import { unitEconomics } from '../lib/economics';
 import type { Order } from '../types';
 import {
   Briefcase, PlusCircle, Calendar, Clock, Layers, DollarSign,
@@ -57,7 +59,10 @@ export function ClientsView() {
     getWorkerCapacity, addOrder, updateOrder, deleteOrder, setView,
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'portal_videos' | 'nuevo_pedido' | 'cartera'>('portal_videos');
+  const [activeTab, setActiveTab] = useState<'portal_videos' | 'nuevo_pedido' | 'cartera'>(() => {
+    const intent = takeNavIntent('clientes');
+    return intent === 'nuevo_pedido' || intent === 'cartera' ? intent : 'portal_videos';
+  });
   const [selectedClientBrand, setSelectedClientBrand] = useState<string | null>(null);
   const [searchClient, setSearchClient] = useState('');
 
@@ -70,8 +75,8 @@ export function ClientsView() {
   const [complexity, setComplexity] = useState<'simple' | 'estandar' | 'alta'>('estandar');
 
   const [unitPriceClient, setUnitPriceClient] = useState<number>(() => financeSettings.clientPricePerVideo || 25);
-  const [unitClipperPay, setUnitClipperPay] = useState<number>(() => financeSettings.defaultClipperCost || 3);
-  const [unitEditorPay, setUnitEditorPay] = useState<number>(() => financeSettings.defaultEditorCost || 4);
+  // Regla de pago: $X por video a la persona responsable (50% Aprobado Senda + 50% Aprobado Cliente)
+  const [creatorPay, setCreatorPay] = useState<number>(() => financeSettings.payPerVideo ?? 5);
 
   const [clientNotes, setClientNotes] = useState('');
   const [briefFile, setBriefFile] = useState<{ name: string; url: string } | null>(null);
@@ -208,21 +213,17 @@ export function ClientsView() {
   const financialPreview = useMemo(() => {
     const count = Math.max(1, videoCount || 1);
     const grossTotal = count * Math.max(0, unitPriceClient);
-    const clipperTotal = count * Math.max(0, unitClipperPay);
-    const editorTotal = count * Math.max(0, unitEditorPay);
-    const payrollTotal = clipperTotal + editorTotal;
+    const payrollTotal = count * Math.max(0, creatorPay);
     const netMargin = grossTotal - payrollTotal;
     const marginPct = grossTotal > 0 ? Math.round((netMargin / grossTotal) * 100) : 0;
 
     return {
       grossTotal,
-      clipperTotal,
-      editorTotal,
       payrollTotal,
       netMargin,
       marginPct,
     };
-  }, [videoCount, unitPriceClient, unitClipperPay, unitEditorPay]);
+  }, [videoCount, unitPriceClient, creatorPay]);
 
   const clientDirectory = useMemo(() => {
     const map = new Map<string, {
@@ -257,12 +258,9 @@ export function ClientsView() {
       };
 
       const count = Math.max(1, o.videoCount || 1);
-      const uPrice = o.unitPriceClient ?? financeSettings.clientPricePerVideo;
-      const uClip = o.unitClipperPay ?? financeSettings.defaultClipperCost;
-      const uEdit = o.unitEditorPay ?? financeSettings.defaultEditorCost;
-
-      const gross = count * uPrice;
-      const cost = count * (uClip + uEdit);
+      const eco = unitEconomics(null, o, financeSettings);
+      const gross = count * eco.price;
+      const cost = count * eco.creatorPay;
 
       existing.totalOrders += 1;
       existing.totalVideosOrdered += count;
@@ -452,8 +450,7 @@ export function ClientsView() {
       clipperId: null,
       editorId: null,
       unitPriceClient,
-      unitClipperPay,
-      unitEditorPay,
+      creatorPayPerVideo: creatorPay,
       complexity,
       priority: capacityPreview.autoPriority,
       paymentStatus: "completado",
@@ -614,29 +611,26 @@ export function ClientsView() {
 
                 <label className="block">
                   <span className="text-[11px] text-muted-2 block mb-1 flex items-center gap-1">
-                    <Scissors size={10} className="text-accent" /> Pago Clipper / vid
+                    <Scissors size={10} className="text-accent" /> Pago al equipo / vid
                   </span>
                   <input
                     type="number"
                     min={0}
-                    value={unitClipperPay}
-                    onChange={e => setUnitClipperPay(Math.max(0, Number(e.target.value) || 0))}
+                    step={0.5}
+                    value={creatorPay}
+                    onChange={e => setCreatorPay(Math.max(0, Number(e.target.value) || 0))}
                     className="w-full bg-surface-2 border border-line rounded-lg px-3 py-1.5 text-sm font-tech text-accent outline-none focus:border-accent"
                   />
                 </label>
 
-                <label className="block">
+                <div className="block">
                   <span className="text-[11px] text-muted-2 block mb-1 flex items-center gap-1">
-                    <Film size={10} className="text-mint" /> Pago Editor / vid
+                    <Film size={10} className="text-mint" /> Se paga en 2 tramos
                   </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={unitEditorPay}
-                    onChange={e => setUnitEditorPay(Math.max(0, Number(e.target.value) || 0))}
-                    className="w-full bg-surface-2 border border-line rounded-lg px-3 py-1.5 text-sm font-tech text-mint outline-none focus:border-mint"
-                  />
-                </label>
+                  <p className="w-full bg-surface-2/60 border border-dashed border-line rounded-lg px-3 py-1.5 text-[11px] font-tech text-muted leading-snug">
+                    {fmtMoneyClean(creatorPay / 2)} Aprobado Senda + {fmtMoneyClean(creatorPay / 2)} Aprobado Cliente
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -789,12 +783,12 @@ export function ClientsView() {
                 </div>
 
                 <div className="bg-surface-3/90 border border-line rounded-2xl p-3.5">
-                  <span className="text-[10px] font-tech uppercase text-accent block">Nómina (C+E)</span>
+                  <span className="text-[10px] font-tech uppercase text-accent block">Nómina del equipo</span>
                   <p className="font-display text-xl font-bold font-tech text-accent mt-1">
                     {fmtMoneyClean(financialPreview.payrollTotal)}
                   </p>
                   <span className="text-[10px] text-muted-2 font-tech">
-                    C:{fmtMoneyClean(financialPreview.clipperTotal)} E:{fmtMoneyClean(financialPreview.editorTotal)}
+                    {fmtMoneyClean(creatorPay)} por video · 50% + 50%
                   </span>
                 </div>
 
@@ -972,11 +966,10 @@ export function ClientsView() {
                   <div className="space-y-4 relative z-10">
                     {activeClient.ordersList.map((ord, idx) => {
                       const count = Math.max(1, ord.videoCount || 1);
-                      const uPrice = ord.unitPriceClient ?? financeSettings.clientPricePerVideo;
-                      const uClip = ord.unitClipperPay ?? financeSettings.defaultClipperCost;
-                      const uEdit = ord.unitEditorPay ?? financeSettings.defaultEditorCost;
+                      const ordEco = unitEconomics(null, ord, financeSettings);
+                      const uPrice = ordEco.price;
                       const orderTotal = count * uPrice;
-                      const orderNet = orderTotal - count * (uClip + uEdit);
+                      const orderNet = orderTotal - count * ordEco.creatorPay;
                       const invCode = ord.invoiceNumber || buildInvoiceCode(ord.brand, ord.deliveryDate);
 
                       return (

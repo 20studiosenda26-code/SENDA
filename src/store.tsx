@@ -3,7 +3,7 @@ import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, Notifica
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
-import { workerWorkload } from './lib/economics';
+import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView } from './types';
@@ -13,11 +13,8 @@ export interface AdminProfile { id: string; name: string; }
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const HEARTBEAT_TTL_MS = 35 * 1000;
 
-const DEFAULT_FINANCE_SETTINGS: FinanceSettings = {
-  clientPricePerVideo: 25,
-  defaultClipperCost: 3,
-  defaultEditorCost: 4,
-};
+// Regla de pago: $5 por video (50% al Aprobado Senda + 50% al Aprobado Cliente)
+const DEFAULT_FINANCE_SETTINGS: FinanceSettings = normalizeFinanceSettings(null);
 
 const DEFAULT_CAPACITY_CONFIG: CapacityProtocolConfig = {
   safetyMarginPct: 15,
@@ -315,7 +312,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
   const [workerCapacities, setWorkerCapacities] = useState<Record<string, number>>(() => loadState('workerCapacities', {} as Record<string, number>));
-  const [financeSettings, setFinanceSettings] = useState<FinanceSettings>(() => loadState('financeSettings', DEFAULT_FINANCE_SETTINGS));
+  const [financeSettings, setFinanceSettings] = useState<FinanceSettings>(() => normalizeFinanceSettings(loadState<Partial<FinanceSettings>>('financeSettings', DEFAULT_FINANCE_SETTINGS)));
   const [financeClosings, setFinanceClosings] = useState<FinanceDayClosing[]>(() => loadState('financeClosings', [] as FinanceDayClosing[]));
   const [appExpenses, setAppExpenses] = useState<AppExpense[]>(() => loadState('appExpenses', [] as AppExpense[]));
   const [payrollPayments, setPayrollPayments] = useState<PayrollPayment[]>(() => loadState('payrollPayments', [] as PayrollPayment[]));
@@ -432,7 +429,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
       if (active && remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
       const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
-      if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+      if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings(normalizeFinanceSettings(remoteFinSettings));
       const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
       if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
       const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
@@ -531,7 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           if (shouldLoad("financeSettings")) {
             const remoteFinSettings = await loadShared<FinanceSettings>("financeSettings");
-            if (remoteFinSettings && typeof remoteFinSettings === "object") setFinanceSettings({ ...DEFAULT_FINANCE_SETTINGS, ...remoteFinSettings });
+            if (remoteFinSettings && typeof remoteFinSettings === "object") setFinanceSettings(normalizeFinanceSettings(remoteFinSettings));
           }
           if (shouldLoad("financeClosings")) {
             const remoteFinClosings = await loadShared<FinanceDayClosing[]>("financeClosings");
@@ -868,6 +865,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const brandsRef = useRef<Brand[]>(brands);
   useEffect(() => { brandsRef.current = brands; }, [brands]);
   const ordersRef = useRef<Order[]>(orders);
+  const financeSettingsRef = useRef<FinanceSettings>(financeSettings);
+  useEffect(() => { financeSettingsRef.current = financeSettings; }, [financeSettings]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   const findVideo = useCallback((videoId: string): Video | null => {
     return brandsRef.current.flatMap(b => b.videos).find(v => v.id === videoId) || null;
@@ -950,9 +949,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wasPaid100 = prevVideo ? prevVideo.paid100 : false;
     const todayStr = new Date().toISOString().slice(0, 10);
 
+    const nowIso = new Date().toISOString();
     updateVideo(videoId, v => ({
       ...v,
       qc: status,
+      sendaApprovedAt: (status === 'aprobado_senda' || status === 'aprobado_cliente') ? (v.sendaApprovedAt || nowIso) : v.sendaApprovedAt,
+      clientApprovedAt: status === 'aprobado_cliente' ? (v.clientApprovedAt || nowIso) : v.clientApprovedAt,
       editorQc: status === 'aprobado_cliente' ? 'aprobado_cliente' : status === 'aprobado_senda' ? 'aprobado_senda' : v.editorQc,
       date: status === 'aprobado_cliente' ? todayStr : v.date,
       finalUploaded: status === 'aprobado_cliente' || status === 'aprobado_senda' ? true : v.finalUploaded,
@@ -995,13 +997,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : `${brandPrefix}${prevVideo.name}: estado de QC cambiado a ${label}`
       );
 
-      if (status === 'aprobado_senda' && !wasPaid50) {
-        pushNotification('clipper', 'pago_50', `Se liberó el 50% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Senda)`, prevVideo.clipperId);
-        pushNotification('editor', 'pago_50', `Se liberó el 50% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Senda)`, prevVideo.editorId);
+      // Regla de pago: 50% al Aprobado Senda + 50% al Aprobado Cliente (solo a la persona responsable)
+      const payee = prevVideo.clipperId || prevVideo.editorId;
+      const half = unitEconomics(prevVideo, findOrderForVideo(prevVideo, parentBrand?.name || '', ordersRef.current), financeSettingsRef.current).creatorPay * PAY_SPLIT;
+      if ((status === 'aprobado_senda' || status === 'aprobado_cliente') && !wasPaid50) {
+        pushNotification('clipper', 'pago_50', `Ganaste ${fmtMoney(half)} (50%) por "${brandPrefix}${prevVideo.name}" · Aprobado Senda`, payee);
       }
       if (status === 'aprobado_cliente' && !wasPaid100) {
-        pushNotification('clipper', 'pago_100', `Se liberó el 100% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Cliente)`, prevVideo.clipperId);
-        pushNotification('editor', 'pago_100', `Se liberó el 100% de pago de "${brandPrefix}${prevVideo.name}" (Aprobado Cliente)`, prevVideo.editorId);
+        pushNotification('clipper', 'pago_100', `Ganaste ${fmtMoney(half)} (el otro 50%) por "${brandPrefix}${prevVideo.name}" · Aprobado Cliente`, payee);
       }
     }
   }, [updateVideo, findVideo, pushNotification]);
@@ -1908,11 +1911,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
     setFinanceSettings(prev => {
-      const next: FinanceSettings = {
+      const pay = patch.payPerVideo ?? patch.defaultClipperCost;
+      const next: FinanceSettings = normalizeFinanceSettings({
         clientPricePerVideo: patch.clientPricePerVideo !== undefined ? Math.max(1, Number(patch.clientPricePerVideo) || 1) : prev.clientPricePerVideo,
-        defaultClipperCost: patch.defaultClipperCost !== undefined ? Math.max(0, Number(patch.defaultClipperCost) || 0) : prev.defaultClipperCost,
-        defaultEditorCost: patch.defaultEditorCost !== undefined ? Math.max(0, Number(patch.defaultEditorCost) || 0) : prev.defaultEditorCost,
-      };
+        payPerVideo: pay !== undefined ? Math.max(0, Number(pay) || 0) : prev.payPerVideo,
+      });
       saveState('financeSettings', next);
       if (isSupabaseConfigured) {
         markLocalWrite();
