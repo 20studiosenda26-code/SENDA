@@ -13,7 +13,9 @@ export function setNavIntent(view: ViewKey, target: string): void {
 /** Devuelve el destino pendiente para esta vista (y lo consume), o null. */
 export function takeNavIntent(view: ViewKey): string | null {
   if (!pending || pending.view !== view) return null;
-  const target = pending.target;
-  pending = null;
-  return target;
+  const current = pending;
+  // Se borra en el siguiente ciclo y no al instante: React (en modo estricto) puede
+  // montar la vista dos veces seguidas y la segunda también debe recibir el destino.
+  setTimeout(() => { if (pending === current) pending = null; }, 0);
+  return current.target;
 }
