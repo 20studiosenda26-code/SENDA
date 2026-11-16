@@ -2,7 +2,7 @@ import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import type { Video, AppExpense, QcStatus } from '../types';
-import { findOrderForVideo, fmtMoney as fmtMoneyShared, unitEconomics, unpromotedOrders, workerPayrollStatus } from '../lib/economics';
+import { addDaysIso, todayIso as todayLocalIso, findOrderForVideo, fmtMoney as fmtMoneyShared, unitEconomics, unpromotedOrders, workerPayrollStatus } from '../lib/economics';
 
 const QC_LABEL: Partial<Record<QcStatus, string>> = {
   sin_iniciar: 'Sin iniciar',
@@ -12,10 +12,12 @@ const QC_LABEL: Partial<Record<QcStatus, string>> = {
 };
 import { CardNodeDeco } from '../components/BrandBackground';
 import {
-  DollarSign, Clock, CheckCircle2, ShieldCheck,
+  Clock, CheckCircle2, ShieldCheck,
   Calendar, FileDown, Users, Scissors,
-  ArrowUpRight, Sparkles, Layers, Eye, History, Cpu, Plus, Trash2, ChevronDown,
+  ArrowUpRight, Sparkles, Layers, Eye, History, Cpu, Plus, Trash2, ChevronDown, Inbox, Receipt, Wallet,
 } from 'lucide-react';
+import { GlowCard } from '../components/ui/spotlight-card';
+import NumberTicker, { CountTicker } from '../components/ui/number-ticker';
 
 type DatePreset = 'hoy' | 'quincena' | 'mes' | 'todo' | 'rango';
 type ReportTab = 'no_iniciados' | 'aprobado_senda' | 'aprobado_cliente';
@@ -46,14 +48,14 @@ interface FinancialProjectRow {
 // Formato único de dinero (centavos cuando hacen falta: $2,50)
 const fmtMoney = fmtMoneyShared;
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+// Texto seguro dentro del PDF (nombres o notas con < > & no rompen el informe)
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Fechas en hora local (antes en UTC: de noche ya contaba como "mañana")
+const todayIso = todayLocalIso;
 
 function subtractDaysIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return addDaysIso(todayLocalIso(), -days);
 }
 
 function firstDayOfMonthIso(): string {
@@ -65,8 +67,9 @@ export function FinancesView() {
   const {
     brands, orders, workers, financeSettings,
     financeClosings, recordFinanceDayClosing, setSelectedVideo, setView,
-    appExpenses, addAppExpense, deleteAppExpense, payrollPayments,
+    appExpenses, addAppExpense, deleteAppExpense, payrollPayments, updateOrder,
   } = useStore();
+  const [justPaid, setJustPaid] = useState<string | null>(null);
 
   const [preset, setPreset] = useState<DatePreset>('mes');
   const [dateFrom, setDateFrom] = useState<string>(() => firstDayOfMonthIso());
@@ -78,6 +81,7 @@ export function FinancesView() {
   const [expAmount, setExpAmount] = useState('');
   const [expCategory, setExpCategory] = useState<AppExpense['category']>('creditos_ia');
   const [expDate, setExpDate] = useState<string>(() => todayIso());
+  const [confirmExpId, setConfirmExpId] = useState<string | null>(null);
 
   const effectiveRange = useMemo(() => {
     const today = todayIso();
@@ -166,9 +170,10 @@ export function FinancesView() {
           source: 'video',
           name: `${b.name} · ${v.name}`,
           brand: b.name,
-          date: v.date || todayIso(),
+          // Fecha real de la etapa: cuándo lo aprobó el cliente o SENDA (antes usaba la fecha de entrega)
+          date: ((stage === 'aprobado_cliente' ? v.clientApprovedAt : stage === 'aprobado_senda' ? v.sendaApprovedAt : null) || v.date || todayIso()).slice(0, 10),
           videoCount: 1,
-          clipperId: v.clipperId || null,
+          clipperId: v.clipperId || v.editorId || null,
           clipperName: v.clipperName || 'Sin asignar',
           editorId: v.editorId || null,
           editorName: v.editorName || 'Sin asignar',
@@ -268,7 +273,7 @@ export function FinancesView() {
 
   const workerPayoutBreakdown = useMemo(() => {
     return workers.map(w => {
-      const asClipper = filteredRows.filter(r => r.clipperId === w.id && (r.stage === 'aprobado_senda' || r.stage === 'aprobado_cliente'));
+      const asClipper = filteredRows.filter(r => (r.clipperId || r.editorId) === w.id && (r.stage === 'aprobado_senda' || r.stage === 'aprobado_cliente'));
       // Rol único: no hay pagos separados de edición
       const asEditor: typeof asClipper = [];
 
@@ -298,7 +303,7 @@ export function FinancesView() {
     if (!expLabel.trim() || !amountNum || amountNum <= 0) return;
     addAppExpense({
       label: expLabel.trim(),
-      amount: Math.round(amountNum),
+      amount: Math.round(amountNum * 100) / 100,
       category: expCategory,
       date: expDate || todayIso(),
     });
@@ -325,9 +330,9 @@ export function FinancesView() {
     const projectRowsHtml = filteredRows.map((r, i) => `
       <tr>
         <td>${i + 1}</td>
-        <td><strong>${r.name}</strong><br/><span style="color:#64748b;font-size:11px;">${r.brand} · ${r.videoCount} video(s)</span></td>
+        <td><strong>${esc(r.name)}</strong><br/><span style="color:#64748b;font-size:11px;">${esc(r.brand)} · ${r.videoCount} video(s)</span></td>
         <td>${r.date}</td>
-        <td>${r.clipperName}</td>
+        <td>${esc(r.clipperName)}</td>
         <td>${r.statusLabel}</td>
         <td style="text-align:right;">${fmtMoney(r.grossAmount)}</td>
         <td style="text-align:right;">${fmtMoney(r.creatorCostTotal)}</td>
@@ -337,10 +342,10 @@ export function FinancesView() {
 
     const payrollRowsHtml = workerPayoutBreakdown.map(item => `
       <tr>
-        <td><strong>${item.worker.name}</strong></td>
+        <td><strong>${esc(item.worker.name)}</strong></td>
         <td>Clipper · Asistente</td>
-        <td>${item.worker.email || 'Sin correo'}<br/><span style="color:#64748b;font-size:11px;">${item.worker.phone || ''}</span></td>
-        <td>${item.worker.bankInfo || 'Pendiente en Perfil'}</td>
+        <td>${esc(item.worker.email || 'Sin correo')}<br/><span style="color:#64748b;font-size:11px;">${esc(item.worker.phone || '')}</span></td>
+        <td>${esc(item.worker.bankInfo || 'Pendiente en Perfil')}</td>
         <td style="text-align:center;">${item.totalAssignedProjects}</td>
         <td style="text-align:right;">${fmtMoney(item.earned50)}</td>
         <td style="text-align:right;">${fmtMoney(item.earned100)}</td>
@@ -350,7 +355,7 @@ export function FinancesView() {
 
     const expensesHtml = filteredExpenses.map(ex => `
       <tr>
-        <td><strong>${ex.label}</strong></td>
+        <td><strong>${esc(ex.label)}</strong></td>
         <td>${ex.category === 'creditos_ia' ? 'Créditos IA' : ex.category === 'suscripcion' ? 'Suscripción App' : 'Material'}</td>
         <td>${ex.date}</td>
         <td style="text-align:right;font-weight:700;">${fmtMoney(ex.amount)}</td>
@@ -497,29 +502,78 @@ export function FinancesView() {
       ? rowsAprobadoSenda
       : rowsAprobadoCliente;
 
-  return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-mint-dim border border-mint/30 text-mint flex items-center justify-center shadow-[0_0_20px_-4px_rgba(111,231,200,0.35)]">
-            <DollarSign size={22} />
-          </div>
-          <div>
-            <h2 className="font-display text-2xl sm:text-3xl font-bold">Finanzas</h2>
-            <p className="text-xs text-muted">Flujo en vivo · Nómina automática y material de trabajo</p>
-          </div>
-        </div>
+  // Lo que hay que hacer ahora en Finanzas
+  const unpaidOrders = orders.filter(o => o.paymentStatus === 'incompleto');
+  const unpaidAmount = unpaidOrders.reduce((sum, o) => sum + Math.max(1, o.videoCount || 1) * unitEconomics(null, o, financeSettings).price, 0);
+  const waitingClientVideos = allRows.filter(r => r.stage === 'aprobado_senda').length;
+  const markPaid = (o: typeof orders[number]) => {
+    updateOrder(o.id, { paymentStatus: 'completado' });
+    setJustPaid(o.brand);
+    setTimeout(() => setJustPaid(null), 4000);
+  };
 
+  return (
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+          </p>
+          <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Finanzas</h2>
+          <p className="text-sm text-muted mt-1">Ingresos, nómina del equipo ($5 por video: 50% Senda + 50% Cliente) y gastos de apps.</p>
+        </div>
         <button
           type="button"
           onClick={handleCloseDayAndDownloadPdf}
-          className="flex items-center gap-2 bg-mint text-on-accent rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold hover:opacity-95 transition-all shadow-[0_8px_24px_-6px_rgba(111,231,200,0.45)]"
+          className="flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-semibold hover:bg-accent-strong transition-all hover:-translate-y-0.5 shadow-[0_0_20px_-6px_rgba(53,214,228,0.6)]"
         >
-          <FileDown size={16} /> Cerrar día y Descargar PDF
+          <FileDown size={16} /> Cerrar día y descargar PDF
         </button>
       </div>
 
-      <div className="bg-surface-2 border border-line rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+      {/* Requiere tu atención */}
+      <GlowCard contentClassName="p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+            <Inbox size={18} className="text-accent shrink-0" /> Requiere tu atención
+          </h3>
+          {justPaid && <span className="text-xs text-mint flex items-center gap-1 animate-fadeIn"><CheckCircle2 size={14} /> Pago de {justPaid} confirmado</span>}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="lg:col-span-2 bg-surface-3 border border-line rounded-lg p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-sm font-medium flex items-center gap-1.5"><Receipt size={15} className="text-amber" /> Por cobrar a clientes</p>
+              <span className={`font-tech text-sm font-bold ${unpaidOrders.length ? 'text-amber' : 'text-muted-2'}`}><NumberTicker value={unpaidAmount} /></span>
+            </div>
+            {unpaidOrders.length === 0 ? (
+              <p className="text-xs text-muted-2 py-3 text-center">Todos los pedidos están pagados.</p>
+            ) : (
+              <ul className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {unpaidOrders.map(o => (
+                  <li key={o.id} className="flex items-center justify-between gap-2 bg-surface-2 border border-line rounded-md px-2.5 py-1.5">
+                    <span className="text-xs truncate">{o.brand} <span className="text-muted-2">· {o.videoCount} video(s) · {fmtMoney(Math.max(1, o.videoCount || 1) * unitEconomics(null, o, financeSettings).price)}</span></span>
+                    <button type="button" onClick={() => markPaid(o)} className="text-[11px] font-semibold text-mint border border-mint/40 rounded-md px-2 py-0.5 hover:bg-mint/10 shrink-0">Marcar pagado</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="grid grid-rows-2 gap-3">
+            <button type="button" onClick={() => setView('nominas')} className="text-left bg-surface-3 border border-line rounded-lg p-3 hover:border-accent/40 transition-colors">
+              <p className="text-[11px] text-muted flex items-center gap-1.5"><Wallet size={13} className="text-accent" /> Nómina por pagar</p>
+              <p className="font-display text-xl font-bold text-accent mt-0.5"><NumberTicker value={payrollLink.pendingAll} /></p>
+              <p className="text-[10px] text-muted-2">Ir a Nóminas →</p>
+            </button>
+            <div className="bg-surface-3 border border-line rounded-lg p-3">
+              <p className="text-[11px] text-muted flex items-center gap-1.5"><Clock size={13} className="text-violet" /> Videos esperando al cliente</p>
+              <p className="font-display text-xl font-bold mt-0.5"><CountTicker value={waitingClientVideos} /></p>
+              <p className="text-[10px] text-muted-2">Al aprobar se libera el otro 50% de nómina</p>
+            </div>
+          </div>
+        </div>
+      </GlowCard>
+
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-muted flex items-center gap-1.5 mr-1">
             <Calendar size={14} className="text-accent" /> Período:
@@ -570,7 +624,7 @@ export function FinancesView() {
       </div>
 
       {/* HERO: Ingreso Neto Realizado */}
-      <div className="relative bg-surface-2 border border-mint/40 rounded-2xl p-6 sm:p-7 overflow-hidden shadow-[0_0_50px_-14px_rgba(111,231,200,0.32)]">
+      <div className="relative bg-surface-2 border border-mint/40 rounded-xl p-6 sm:p-7 overflow-hidden shadow-[0_0_50px_-14px_rgba(111,231,200,0.32)]">
         <div
           className="absolute -left-16 -top-16 w-80 h-80 rounded-full pointer-events-none blur-3xl opacity-30 animate-pulse"
           style={{ background: 'radial-gradient(circle, var(--mint), transparent 70%)' }}
@@ -695,7 +749,7 @@ export function FinancesView() {
             </div>
           </div>
 
-          <div className="lg:col-span-5 bg-surface/85 backdrop-blur-md border border-line rounded-xl p-4 space-y-3 relative overflow-hidden">
+          <div className="glow-card lg:col-span-5 bg-surface/85 backdrop-blur-md border border-line rounded-xl p-4 space-y-3 relative overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-text flex items-center gap-1.5">
                 <Users size={14} className="text-accent" /> Nómina Creadores
@@ -873,14 +927,21 @@ export function FinancesView() {
                         <p className="text-[10px] text-muted-2 font-tech">{exp.date}</p>
                       </div>
                       <span className="font-tech text-amber font-semibold shrink-0">-{fmtMoney(exp.amount)}</span>
-                      <button
-                        type="button"
-                        onClick={() => deleteAppExpense(exp.id)}
-                        className="text-muted-2 hover:text-red-400 transition-colors shrink-0"
-                        title="Eliminar"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      {confirmExpId === exp.id ? (
+                        <span className="flex items-center gap-1 shrink-0">
+                          <button type="button" onClick={() => { deleteAppExpense(exp.id); setConfirmExpId(null); }} className="text-[10px] font-bold text-white bg-red-500 rounded px-1.5 py-0.5">Borrar</button>
+                          <button type="button" onClick={() => setConfirmExpId(null)} className="text-[10px] text-muted px-1">No</button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmExpId(exp.id)}
+                          className="text-muted-2 hover:text-red-400 transition-colors shrink-0"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -891,7 +952,7 @@ export function FinancesView() {
       </div>
 
       {/* Puente con Nóminas: lo devengado vs lo efectivamente pagado */}
-      <div className="bg-surface-2 border border-line rounded-xl p-4 flex items-center gap-4 flex-wrap">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 flex items-center gap-4 flex-wrap">
         <div className="w-9 h-9 rounded-lg bg-accent-dim text-accent flex items-center justify-center shrink-0">
           <Users size={18} />
         </div>
@@ -919,7 +980,7 @@ export function FinancesView() {
       </div>
 
       {/* Informe Financiero Detallado */}
-      <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap border-b border-line pb-3.5">
           <h3 className="font-display text-base sm:text-lg font-semibold flex items-center gap-2">
             <Layers size={18} className="text-accent" /> Informe Financiero Detallado
@@ -1033,7 +1094,7 @@ export function FinancesView() {
       </div>
 
       {financeClosings.length > 0 && (
-        <div className="bg-surface-2 border border-line rounded-xl p-4 space-y-2.5">
+        <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 space-y-2.5">
           <h3 className="font-display text-sm font-semibold flex items-center gap-2 text-muted">
             <History size={15} className="text-mint" /> Últimos cierres descargados en PDF
           </h3>

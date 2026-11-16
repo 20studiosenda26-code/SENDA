@@ -12,7 +12,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ⏳ |
 | 7 | Contratos | Admin · Clipper | `ContractsView.tsx` | ⏳ |
 | 8 | Perfil | Clipper | `ProfileView.tsx` | 🔶 (ganancias hechas; falta diseño) |
-| 9 | Finanzas | Admin | `FinancesView.tsx` | 🔶 (regla $5 hecha; falta diseño) |
+| 9 | Finanzas | Admin | `FinancesView.tsx` | ✅ diseño + arreglos (fechas locales, fecha real de aprobación, pagos por persona, centavos, PDF seguro, por cobrar) |
 | 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | 🔶 (tramos 50/50 hechos; falta diseño) |
 | 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ⏳ |
 | 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ⏳ |
