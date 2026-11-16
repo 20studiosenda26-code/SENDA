@@ -1,3 +1,9 @@
 node_modules
 dist
 .DS_Store
+
+# Datos privados: nunca se suben a GitHub
+.env
+.env.local
+.env.*.local
+*.local
