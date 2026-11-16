@@ -50,7 +50,7 @@ export function ClientPortal() {
 
   if (!brand) {
     return (
-      <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-20 text-center">
+      <div className="bg-surface-2 border border-dashed border-line rounded-xl py-20 text-center">
         <Film size={34} className="text-muted-2 mx-auto mb-3" />
         <p className="font-display text-lg font-semibold">Aún no hay entregas</p>
         <p className="text-sm text-muted mt-1">
@@ -76,7 +76,7 @@ export function ClientPortal() {
               key={b.id}
               type="button"
               onClick={() => { setBrandId(b.id); setVideoId(null); setFilter('todos'); }}
-              className={`snap-start shrink-0 w-56 text-left rounded-2xl border p-3.5 transition-all ${
+              className={`snap-start shrink-0 w-56 text-left rounded-xl border p-3.5 transition-all ${
                 active ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-2 border-line hover:border-accent/40'
               }`}
             >
@@ -140,7 +140,7 @@ function BrandOverview({
   );
 
   return (
-    <div className="bg-surface-2 border border-line rounded-3xl overflow-hidden animate-fadeIn">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden animate-fadeIn">
       <div className="p-5 sm:p-6 border-b border-line flex items-start justify-between gap-4 flex-wrap bg-gradient-to-br from-accent/5 to-transparent">
         <div>
           <span className="text-[11px] font-tech uppercase tracking-wider text-accent">Portal de entregas</span>
@@ -179,7 +179,7 @@ function BrandOverview({
 
       <div className="p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {videos.length === 0 ? (
-          <div className="col-span-full text-center py-12 border border-dashed border-line rounded-2xl">
+          <div className="col-span-full text-center py-12 border border-dashed border-line rounded-xl">
             <Clock size={26} className="text-amber mx-auto mb-2" />
             <p className="font-semibold">{plannedCount ? `${plannedCount} videos en producción` : 'Videos en producción'}</p>
             <p className="text-xs text-muted mt-1">Cada video aparecerá aquí en cuanto el equipo lo entregue{deliveryLabel ? ` (entrega ${deliveryLabel})` : ''}.</p>
@@ -220,7 +220,7 @@ function VideoCard({ video, index, onOpen }: { video: Video; index: number; onOp
 
   return (
     <button type="button" onClick={onOpen} disabled={!delivered}
-      className="group text-left rounded-2xl border border-line bg-surface-3/60 overflow-hidden hover:border-accent/50 hover:-translate-y-0.5 transition-all disabled:hover:translate-y-0 disabled:hover:border-line disabled:cursor-default">
+      className="group text-left rounded-xl border border-line bg-surface-3/60 overflow-hidden hover:border-accent/50 hover:-translate-y-0.5 transition-all disabled:hover:translate-y-0 disabled:hover:border-line disabled:cursor-default">
       <div className="relative aspect-video bg-gradient-to-br from-surface-3 to-surface flex items-center justify-center overflow-hidden">
         {thumb ? (
           <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline onError={() => setThumb(null)} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -346,7 +346,7 @@ function VideoReview({
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Reproductor + línea de tiempo */}
-        <div className="xl:col-span-8 bg-surface-2 border border-line rounded-3xl p-4 sm:p-5 space-y-4">
+        <div className="xl:col-span-8 glow-card bg-surface-2 border border-line rounded-xl p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-lg p-0.5">
               {([['auto', 'Auto', Sparkles], ['horizontal', 'Horizontal', Monitor], ['vertical', 'Vertical', Smartphone]] as const).map(([key, label, Icon]) => (
@@ -362,7 +362,7 @@ function VideoReview({
             </button>
           </div>
 
-          <div ref={frameRef} className="bg-black rounded-2xl overflow-hidden flex items-center justify-center">
+          <div ref={frameRef} className="bg-black rounded-xl overflow-hidden flex items-center justify-center">
             {!delivered ? (
               <div className="aspect-video w-full flex flex-col items-center justify-center text-center p-6 gap-2 bg-surface-3">
                 <Clock size={34} className="text-amber" />
@@ -398,7 +398,7 @@ function VideoReview({
           </div>
 
           {delivered && (
-            <div className="bg-surface-3/60 border border-line rounded-2xl p-3.5 space-y-2">
+            <div className="bg-surface-3/60 border border-line rounded-xl p-3.5 space-y-2">
               <p className="text-[11px] font-semibold text-muted flex items-center gap-1.5">
                 <Clock size={12} className="text-accent" /> Línea de tiempo del feedback
                 <span className="ml-auto flex items-center gap-3 font-normal text-muted-2">
@@ -426,7 +426,7 @@ function VideoReview({
 
         {/* Panel lateral: feedback + decisión */}
         <div className="xl:col-span-4 space-y-4">
-          <div className="bg-surface-2 border border-line rounded-3xl p-4 space-y-3">
+          <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold flex items-center gap-1.5"><MessageSquare size={15} className="text-amber" /> Feedback del cliente</span>
               <span className="flex gap-1">
@@ -518,7 +518,7 @@ function VideoReview({
           </div>
 
           {/* Decisión final */}
-          <div className={`rounded-3xl p-4 space-y-3 border ${video.qc === 'aprobado_cliente' ? 'bg-mint/10 border-mint/40' : 'bg-surface-2 border-line'}`}>
+          <div className={`rounded-xl p-4 space-y-3 border ${video.qc === 'aprobado_cliente' ? 'bg-mint/10 border-mint/40' : 'bg-surface-2 border-line'}`}>
             <span className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={15} className="text-mint" /> Decisión final</span>
             {video.qc === 'aprobado_cliente' ? (
               <p className="text-xs text-mint">Aprobado por el cliente{video.date ? ` el ${video.date}` : ''}. El pago del 100% quedó liberado.</p>

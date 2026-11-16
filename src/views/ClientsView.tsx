@@ -5,14 +5,17 @@ import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { ClientPortal } from './ClientPortal';
 import { ClientAccountField } from '../components/ClientAccountField';
 import { DriveFolderField } from '../components/DriveFolderField';
-import { takeNavIntent } from '../lib/navIntent';
 import { addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
-import { fmtDate } from '../components/home/home-bits';
+import { AttentionTile, fmtDate } from '../components/home/home-bits';
+import { GlowCard } from '../components/ui/spotlight-card';
+import NumberTicker, { CountTicker } from '../components/ui/number-ticker';
+import { setNavIntent, takeNavIntent } from '../lib/navIntent';
 import type { Order, Video } from '../types';
 import {
-  AlertTriangle, ArrowRight, Briefcase, Calendar, CheckCircle2, Clock, Cpu, DollarSign, ExternalLink,
+  AlertTriangle, ArrowRight, Briefcase, Calendar, CheckCircle2, Clock, Cpu, ExternalLink,
   FileText, FolderOpen, Layers, Loader2, Lock, Play, PlusCircle, Printer, Receipt, Search, Trash2,
   Upload, UserCircle2, Users, X,
+  Inbox, UserPlus, MessageSquareWarning, Link2Off,
 } from 'lucide-react';
 
 type Tab = 'portal_videos' | 'nuevo_pedido' | 'cartera';
@@ -52,7 +55,7 @@ const PRIORITY_STYLE: Record<Priority, string> = {
 const PRIORITY_LABEL: Record<Priority, string> = { critico: 'Crítica', urgente: 'Urgente', prioritario: 'Prioritaria', normal: 'Normal' };
 
 export function ClientsView() {
-  const { orders, brands, financeSettings } = useStore();
+  const { orders, brands, financeSettings, setView } = useStore();
   const [tab, setTab] = useState<Tab>(() => {
     const intent = takeNavIntent('clientes');
     return intent === 'nuevo_pedido' || intent === 'cartera' ? intent : 'portal_videos';
@@ -68,6 +71,9 @@ export function ClientsView() {
       clients: new Set(orders.map(o => baseBrand(o.brand).toLowerCase()).filter(Boolean)).size,
       active: active.length,
       waitingClient: allVideos.filter(v => isDelivered(v) && v.qc !== 'aprobado_cliente' && v.qc !== 'correcciones').length,
+      clientFeedback: allVideos.filter(v => v.qc === 'correcciones' && v.corrections.some(c => c.author === 'cliente' && !c.resolved)).length,
+      briefReady: active.filter(o => o.briefConfirmedAt && !o.clipperId).length,
+      noAccount: active.filter(o => !o.clientId).length,
       toCollect: pending.reduce((s, o) => s + amount(o), 0),
       pendingCount: pending.length,
       billed: orders.filter(isPaid).reduce((s, o) => s + amount(o), 0),
@@ -75,41 +81,64 @@ export function ClientsView() {
   }, [orders, allVideos, financeSettings]);
 
   const openFile = (brand: string) => { setFocusBrand(brand); setTab('cartera'); };
+  const goTasks = (folder: 'disponibles' | 'iniciados') => { setNavIntent('tareas', folder); setView('tareas'); };
 
-  const TABS: { key: Tab; label: string; icon: typeof Play }[] = [
-    { key: 'portal_videos', label: 'Entregas y feedback', icon: Play },
-    { key: 'nuevo_pedido', label: 'Nuevo pedido', icon: PlusCircle },
-    { key: 'cartera', label: `Expedientes (${summary.clients})`, icon: FolderOpen },
+  const TABS: { key: Tab; label: string; icon: typeof Play; count: number }[] = [
+    { key: 'portal_videos', label: 'Entregas y feedback', icon: Play, count: summary.waitingClient },
+    { key: 'nuevo_pedido', label: 'Nuevo pedido', icon: PlusCircle, count: 0 },
+    { key: 'cartera', label: 'Expedientes', icon: FolderOpen, count: summary.clients },
   ];
+  const attentionTotal = summary.pendingCount + summary.briefReady + summary.clientFeedback + summary.noAccount;
 
   return (
     <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      {/* Encabezado */}
+      <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
         <div>
-          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent">Clientes</p>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+          </p>
           <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Clientes y pedidos</h2>
           <p className="text-sm text-muted mt-1">Registra pedidos, vincula la cuenta del cliente y sigue sus entregas, feedback y pagos.</p>
         </div>
-        <div className="flex items-center bg-surface-2 border border-line rounded-xl p-1 gap-1 flex-wrap">
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const on = tab === t.key;
-            return (
-              <button key={t.key} type="button" onClick={() => setTab(t.key)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${on ? 'bg-accent text-on-accent' : 'text-muted hover:text-text hover:bg-surface-3'}`}>
-                <Icon size={14} /> {t.label}
-              </button>
-            );
-          })}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <StatChip label="Clientes" value={<CountTicker value={summary.clients} />} tone="accent" onClick={() => setTab('cartera')} />
+          <StatChip label="Pedidos activos" value={<CountTicker value={summary.active} />} tone="accent" onClick={() => goTasks('iniciados')} />
+          <StatChip label="Por cobrar" value={<NumberTicker value={summary.toCollect} />} tone={summary.pendingCount ? 'amber' : 'muted'} onClick={() => setTab('cartera')} />
+          <StatChip label="Facturado y pagado" value={<NumberTicker value={summary.billed} />} tone="mint" />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <Kpi icon={<Users size={16} />} label="Clientes" value={String(summary.clients)} tone="accent" />
-        <Kpi icon={<Layers size={16} />} label="Pedidos activos" value={String(summary.active)} tone="accent" />
-        <Kpi icon={<Play size={16} />} label="Esperando al cliente" value={String(summary.waitingClient)} hint="Videos entregados sin respuesta" tone="accent" onClick={() => setTab('portal_videos')} />
-        <Kpi icon={<Receipt size={16} />} label="Por cobrar" value={fmtMoney(summary.toCollect)} hint={`${summary.pendingCount} pedido(s) con pago pendiente`} tone={summary.pendingCount ? 'amber' : 'mint'} onClick={() => setTab('cartera')} />
-        <Kpi icon={<DollarSign size={16} />} label="Facturado y pagado" value={fmtMoney(summary.billed)} tone="mint" />
+      {/* Requiere tu atención */}
+      <GlowCard contentClassName="p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+            <Inbox size={18} className="text-accent shrink-0" /> Requiere tu atención
+            {attentionTotal > 0 && <span className="font-tech text-xs px-2 py-0.5 rounded-full bg-accent-dim text-accent">{attentionTotal}</span>}
+          </h3>
+          {attentionTotal === 0 && <span className="text-xs text-mint flex items-center gap-1"><CheckCircle2 size={14} /> Todo al día</span>}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <AttentionTile icon={<Receipt size={18} />} tone="amber" count={summary.pendingCount} label="Pagos por confirmar" hint={summary.pendingCount ? `${fmtMoney(summary.toCollect)} por cobrar` : 'Pedidos con pago pendiente'} onClick={() => setTab('cartera')} />
+          <AttentionTile icon={<UserPlus size={18} />} tone="accent" count={summary.briefReady} label="Briefs listos" hint="El cliente confirmó: asigna responsable" onClick={() => goTasks('disponibles')} />
+          <AttentionTile icon={<MessageSquareWarning size={18} />} tone="red" count={summary.clientFeedback} label="Feedback del cliente" hint="Correcciones por aplicar" onClick={() => goTasks('iniciados')} />
+          <AttentionTile icon={<Link2Off size={18} />} tone="amber" count={summary.noAccount} label="Sin cuenta de cliente" hint="El cliente no ve estos pedidos" onClick={() => setTab('cartera')} />
+        </div>
+      </GlowCard>
+
+      {/* Pestañas */}
+      <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-xl p-1 w-fit" role="tablist">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          const on = tab === t.key;
+          return (
+            <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${on ? 'bg-accent text-on-accent shadow-[0_0_16px_-6px_rgba(53,214,228,0.7)]' : 'text-muted hover:text-text'}`}>
+              <Icon size={15} /> {t.label}
+              {t.count > 0 && <span className={`font-tech text-[11px] px-1.5 rounded ${on ? 'bg-black/20' : 'bg-surface-3'}`}>{t.count}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'portal_videos' && <ClientPortal />}
@@ -119,24 +148,18 @@ export function ClientsView() {
   );
 }
 
-function Kpi({ icon, label, value, hint, tone, onClick }: {
-  icon: React.ReactNode; label: string; value: string; hint?: string; tone: 'accent' | 'mint' | 'amber'; onClick?: () => void;
-}) {
-  const cls = tone === 'mint' ? 'text-mint bg-mint-dim' : tone === 'amber' ? 'text-amber bg-amber-dim' : 'text-accent bg-accent-dim';
+function StatChip({ label, value, tone, onClick }: { label: string; value: React.ReactNode; tone: 'accent' | 'amber' | 'mint' | 'muted'; onClick?: () => void }) {
+  const cls = { accent: 'text-accent', amber: 'text-amber', mint: 'text-mint', muted: 'text-muted-2' }[tone];
   const body = (
     <>
-      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cls}`}>{icon}</span>
-      <div className="min-w-0">
-        <p className="text-[11px] text-muted-2">{label}</p>
-        <p className="font-tech text-lg font-bold leading-tight truncate">{value}</p>
-        {hint && <p className="text-[10px] text-muted-2 truncate">{hint}</p>}
-      </div>
+      <p className={`font-display text-xl font-bold leading-none ${cls}`}>{value}</p>
+      <p className="text-[11px] text-muted mt-1">{label}</p>
     </>
   );
-  const base = 'bg-surface-2 border border-line rounded-xl p-3.5 flex items-center gap-3 text-left';
-  return onClick ? (
-    <button type="button" onClick={onClick} className={`${base} hover:border-accent/40 transition-colors`}>{body}</button>
-  ) : <div className={base}>{body}</div>;
+  const base = 'glow-card text-left bg-surface-2 border border-line rounded-xl px-3.5 py-2 min-w-[140px]';
+  return onClick
+    ? <button type="button" onClick={onClick} className={`${base} hover:border-accent/40 transition-colors`}>{body}</button>
+    : <div className={base}>{body}</div>;
 }
 
 // =====================================================================
@@ -309,7 +332,7 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
       )}
 
       <form onSubmit={submit} className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl divide-y divide-line">
+        <div className="lg:col-span-7 glow-card bg-surface-2 border border-line rounded-xl divide-y divide-line">
           {/* 1. Cliente */}
           <section className="p-5 space-y-3">
             <StepTitle n={1} title="Cliente y volumen" />
@@ -413,7 +436,7 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
 
         {/* Resumen en vivo */}
         <aside className="lg:col-span-5 lg:sticky lg:top-4 space-y-4">
-          <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+          <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-display text-lg font-semibold">Resumen del pedido</h3>
               <span className="font-tech text-xs text-mint">Margen {money.pct}%</span>
@@ -607,7 +630,7 @@ function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; on
             const on = active?.brand === f.brand;
             return (
               <button key={f.brand} type="button" onClick={() => setSelected(f.brand)}
-                className={`w-full text-left p-3.5 rounded-xl border transition-colors ${on ? 'bg-accent/10 border-accent' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
+                className={`glow-card w-full text-left p-3.5 rounded-xl border transition-colors ${on ? 'bg-accent/10 border-accent' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
                 <div className="flex items-center gap-3">
                   <span className="w-9 h-9 rounded-lg bg-accent-dim text-accent font-display font-bold flex items-center justify-center shrink-0">{f.brand.charAt(0).toUpperCase()}</span>
                   <div className="min-w-0 flex-1">
@@ -632,7 +655,7 @@ function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; on
 function ClientDetail({ file }: { file: ClientFile }) {
   return (
     <div className="lg:col-span-8 space-y-4">
-      <div className="bg-surface-2 border border-line rounded-xl p-5 flex items-start justify-between gap-4 flex-wrap">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Expediente</p>
           <h3 className="font-display text-2xl font-bold">{file.brand}</h3>
@@ -719,7 +742,7 @@ th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.m
     : { l: 'Sin asignar', c: 'bg-amber-dim text-amber' };
 
   return (
-    <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4 hover:border-accent/30 transition-colors">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 space-y-4 hover:border-accent/30 transition-colors">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
