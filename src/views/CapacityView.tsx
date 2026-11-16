@@ -1,3 +1,4 @@
+import { setNavIntent } from '../lib/navIntent';
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import type { Order } from '../types';
@@ -69,7 +70,7 @@ function formatHour(h: number): string {
 export function CapacityView() {
   const {
     workers, orders, brands, capacityConfig, updateCapacityConfig,
-    getWorkerCapacity, setWorkerCapacity, assignOrderClipper, assignOrderEditor,
+    getWorkerCapacity, setWorkerCapacity, assignOrderClipper, setView,
   } = useStore();
 
   const [screen, setScreen] = useState<ActiveScreen>('dashboard');
@@ -358,7 +359,7 @@ export function CapacityView() {
           minute: '2-digit',
           hour12: false,
         });
-        const maxReassignDayIso = maxReassignDate.toISOString().slice(0, 10);
+        const maxReassignDayIso = `${maxReassignDate.getFullYear()}-${String(maxReassignDate.getMonth() + 1).padStart(2, '0')}-${String(maxReassignDate.getDate()).padStart(2, '0')}`;
         const maxReassignDayLabel =
           maxReassignDayIso === todayIso()
             ? 'Hoy'
@@ -406,11 +407,10 @@ export function CapacityView() {
     const chosenClipperId = selectedClipperByOrder[order.id] ?? order.clipperId ?? '';
     const chosenEditorId = selectedEditorByOrder[order.id] ?? order.editorId ?? '';
 
+    // Rol único: una sola asignación deja a la persona a cargo del video completo
+    void chosenEditorId;
     if (chosenClipperId && chosenClipperId !== order.clipperId) {
       await assignOrderClipper(order.id, chosenClipperId);
-    }
-    if (chosenEditorId && chosenEditorId !== order.editorId) {
-      await assignOrderEditor(order.id, chosenEditorId);
     }
     setReassignedToastId(order.id);
     setTimeout(() => {
@@ -451,13 +451,13 @@ export function CapacityView() {
   }, [workersWorkloadToday, protocolRoleFilter]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto min-h-[calc(100vh-4.5rem)] flex flex-col justify-between gap-6">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto min-h-[calc(100vh-4.5rem)] flex flex-col justify-between gap-6 animate-fadeIn">
       {/* =====================================================================
           BARRA SUPERIOR FUTURISTA CON DOCK FLOTANTE DE LOGOS (0, 1, 2, 3, 4)
          ===================================================================== */}
-      <div className="bg-surface-2/85 backdrop-blur-xl border border-line rounded-2xl px-4 py-3 flex items-center justify-between gap-4 flex-wrap shadow-[0_10px_30px_-12px_rgba(0,0,0,0.5)]">
+      <div className="bg-surface-2/85 backdrop-blur-xl border border-line rounded-xl px-4 py-3 flex items-center justify-between gap-4 flex-wrap shadow-[0_10px_30px_-12px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-3.5">
-          <div className="relative w-11 h-11 rounded-2xl bg-gradient-to-br from-accent/25 via-surface-3 to-mint/20 border border-accent/40 text-accent flex items-center justify-center shadow-[0_0_24px_-4px_rgba(53,214,228,0.45)]">
+          <div className="relative w-11 h-11 rounded-xl bg-gradient-to-br from-accent/25 via-surface-3 to-mint/20 border border-accent/40 text-accent flex items-center justify-center shadow-[0_0_24px_-4px_rgba(53,214,228,0.45)]">
             <Gauge size={21} />
             <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-mint ring-2 ring-surface-2" />
           </div>
@@ -481,7 +481,7 @@ export function CapacityView() {
 
         {/* DOCK SUTIL DE ICONOS CON NUMERACIÓN */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-surface-3/90 border border-line rounded-2xl p-1.5">
+          <div className="flex items-center gap-1.5 bg-surface-3/90 border border-line rounded-xl p-1.5">
             {DOCK_ITEMS.map(item => {
               const Icon = item.icon;
               const isActive = screen === item.id;
@@ -531,7 +531,7 @@ export function CapacityView() {
       {screen === 'dashboard' && (
         <div className="flex-1 flex flex-col justify-between gap-5 animate-fadeIn">
           <div
-            className="relative flex-1 bg-surface-2 border border-accent/35 rounded-3xl p-6 sm:p-8 overflow-hidden flex flex-col justify-between"
+            className="relative flex-1 bg-surface-2 border border-accent/35 rounded-xl p-6 sm:p-8 overflow-hidden flex flex-col justify-between"
             style={{
               boxShadow: `0 0 70px -22px ${alertMeta.glowColor}, inset 0 1px 0 0 rgba(255,255,255,0.06)`,
             }}
@@ -697,7 +697,7 @@ export function CapacityView() {
                 {/* Pipeline de 3 tarjetas con conectores de ecuación (Segura - En Cola = Aceptable Hoy) */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch relative">
                   {/* Nodo 1: Capacidad Segura */}
-                  <div className="group bg-surface/90 backdrop-blur-md border border-accent/40 hover:border-accent rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden transition-all shadow-[0_8px_30px_-12px_rgba(53,214,228,0.25)]">
+                  <div className="group bg-surface/90 backdrop-blur-md border border-accent/40 hover:border-accent rounded-xl p-5 flex flex-col justify-between relative overflow-hidden transition-all shadow-[0_8px_30px_-12px_rgba(53,214,228,0.25)]">
                     <CardNodeDeco color="var(--accent)" />
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-tech uppercase tracking-wider text-accent font-semibold">
@@ -720,7 +720,7 @@ export function CapacityView() {
                   </div>
 
                   {/* Nodo 2: En Cola / Comprometidos */}
-                  <div className="group bg-surface/90 backdrop-blur-md border border-amber/40 hover:border-amber rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden transition-all shadow-[0_8px_30px_-12px_rgba(255,200,87,0.22)]">
+                  <div className="group bg-surface/90 backdrop-blur-md border border-amber/40 hover:border-amber rounded-xl p-5 flex flex-col justify-between relative overflow-hidden transition-all shadow-[0_8px_30px_-12px_rgba(255,200,87,0.22)]">
                     <CardNodeDeco color="var(--amber)" />
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-tech uppercase tracking-wider text-amber font-semibold">
@@ -743,7 +743,7 @@ export function CapacityView() {
                   </div>
 
                   {/* Nodo 3: Aceptable Hoy (Hero Card) */}
-                  <div className="group bg-gradient-to-br from-mint/20 via-surface/95 to-accent/15 backdrop-blur-md border-2 border-mint/70 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-[0_0_38px_-8px_rgba(111,231,200,0.42)]">
+                  <div className="group bg-gradient-to-br from-mint/20 via-surface/95 to-accent/15 backdrop-blur-md border-2 border-mint/70 rounded-xl p-5 flex flex-col justify-between relative overflow-hidden shadow-[0_0_38px_-8px_rgba(111,231,200,0.42)]">
                     <CardNodeDeco color="var(--mint)" />
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-tech uppercase tracking-wider text-mint font-bold">
@@ -775,7 +775,7 @@ export function CapacityView() {
                 {/* Módulos de Telemetría por Etapa: Clippers vs Editores */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Telemetría Clippers */}
-                  <div className="bg-surface/85 backdrop-blur-md border border-line hover:border-accent/40 rounded-2xl p-4 space-y-3 transition-colors">
+                  <div className="bg-surface/85 backdrop-blur-md border border-line hover:border-accent/40 rounded-xl p-4 space-y-3 transition-colors">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-lg bg-accent-dim text-accent flex items-center justify-center">
@@ -811,7 +811,7 @@ export function CapacityView() {
                   </div>
 
                   {/* Pipeline del equipo: dónde está el trabajo pendiente */}
-                  <div className="bg-surface/85 backdrop-blur-md border border-line hover:border-mint/40 rounded-2xl p-4 space-y-3 transition-colors">
+                  <div className="bg-surface/85 backdrop-blur-md border border-line hover:border-mint/40 rounded-xl p-4 space-y-3 transition-colors">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-lg bg-mint-dim text-mint flex items-center justify-center">
                         <Film size={15} />
@@ -845,7 +845,7 @@ export function CapacityView() {
       {screen === '1' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
           {/* Consola Izquierda: Dial Visual de Volumen + Selector de Complejidad */}
-          <div className="lg:col-span-5 bg-surface-2 border border-accent/30 rounded-3xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden shadow-[0_0_45px_-18px_rgba(53,214,228,0.28)]">
+          <div className="lg:col-span-5 bg-surface-2 border border-accent/30 rounded-xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden shadow-[0_0_45px_-18px_rgba(53,214,228,0.28)]">
             <CardNodeDeco color="var(--accent)" />
 
             <div className="flex items-center justify-between relative z-10">
@@ -858,7 +858,7 @@ export function CapacityView() {
             </div>
 
             {/* Dial Circular + Slider de Volumen */}
-            <div className="bg-surface-3/80 border border-line rounded-2xl p-5 space-y-5 my-auto relative z-10">
+            <div className="bg-surface-3/80 border border-line rounded-xl p-5 space-y-5 my-auto relative z-10">
               <div className="flex items-center justify-between gap-4">
                 <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
                   <svg className="w-28 h-28 -rotate-90" viewBox="0 0 124 124">
@@ -949,12 +949,12 @@ export function CapacityView() {
           </div>
 
           {/* Consola Derecha: Dictamen + Ventana ETA + Cadena Visual de Tandas */}
-          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden">
+          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl p-6 flex flex-col justify-between space-y-6 relative overflow-hidden">
             <CardNodeDeco color={evaluation.canAcceptFullOnDate ? 'var(--mint)' : 'var(--amber)'} />
 
             {/* Tarjetas gemelas de Dictamen y Ventana ETA */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
-              <div className={`rounded-2xl p-5 border flex flex-col justify-between ${
+              <div className={`rounded-xl p-5 border flex flex-col justify-between ${
                 evaluation.canAcceptFullOnDate
                   ? 'bg-gradient-to-br from-mint/20 to-surface-3 border-mint/50 shadow-[0_0_30px_-10px_rgba(111,231,200,0.35)]'
                   : 'bg-gradient-to-br from-amber/20 to-surface-3 border-amber/50 shadow-[0_0_30px_-10px_rgba(255,200,87,0.3)]'
@@ -978,7 +978,7 @@ export function CapacityView() {
                 </span>
               </div>
 
-              <div className="bg-surface-3/90 border border-accent/40 rounded-2xl p-5 flex flex-col justify-between">
+              <div className="bg-surface-3/90 border border-accent/40 rounded-xl p-5 flex flex-col justify-between">
                 <span className="font-tech text-[11px] uppercase text-accent font-bold flex items-center gap-1.5">
                   <Clock size={15} /> Ventana Estimada (ETA)
                 </span>
@@ -988,6 +988,13 @@ export function CapacityView() {
                 <span className="text-xs text-mint mt-1.5 font-tech">
                   Cierre total del lote: {evaluation.finalCompletionDate}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => { setNavIntent('clientes', `nuevo_pedido|${evalVideos}|${evalComplexity}|${evaluation.finalCompletionDate}`); setView('clientes'); }}
+                  className="mt-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold bg-accent text-on-accent rounded-lg px-3 py-2 hover:bg-accent-strong transition-colors"
+                >
+                  Crear pedido con esta cotización →
+                </button>
               </div>
             </div>
 
@@ -1005,7 +1012,7 @@ export function CapacityView() {
                   return (
                     <div
                       key={b.date}
-                      className="bg-surface-3/90 border border-line hover:border-accent/50 rounded-2xl p-4 space-y-3 relative overflow-hidden transition-all"
+                      className="bg-surface-3/90 border border-line hover:border-accent/50 rounded-xl p-4 space-y-3 relative overflow-hidden transition-all"
                     >
                       <div className="flex items-center justify-between text-[11px] font-tech">
                         <span className="px-2.5 py-0.5 rounded-full bg-accent-dim text-accent border border-accent/30 font-bold">
@@ -1042,7 +1049,7 @@ export function CapacityView() {
       {screen === '2' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
           {/* Controles del Laboratorio */}
-          <div className="lg:col-span-6 bg-surface-2 border border-mint/30 rounded-3xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden shadow-[0_0_45px_-18px_rgba(111,231,200,0.22)]">
+          <div className="lg:col-span-6 bg-surface-2 border border-mint/30 rounded-xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden shadow-[0_0_45px_-18px_rgba(111,231,200,0.22)]">
             <CardNodeDeco color="var(--mint)" />
 
             <div className="flex items-center justify-between relative z-10">
@@ -1065,7 +1072,7 @@ export function CapacityView() {
             </div>
 
             <div className="space-y-3.5 my-auto relative z-10">
-              <div className="bg-surface-3/90 border border-line rounded-2xl p-4">
+              <div className="bg-surface-3/90 border border-line rounded-xl p-4">
                 <div className="flex justify-between items-baseline mb-2">
                   <span className="text-xs font-semibold">Pico de demanda extra</span>
                   <span className="font-display text-2xl font-bold font-tech text-accent">+{simExtraVideos} videos</span>
@@ -1082,7 +1089,7 @@ export function CapacityView() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface-3/90 border border-accent/25 rounded-2xl p-4">
+                <div className="bg-surface-3/90 border border-accent/25 rounded-xl p-4">
                   <div className="flex justify-between items-baseline mb-2">
                     <span className="text-xs font-semibold flex items-center gap-1">
                       <Scissors size={12} className="text-accent" /> + Personas en el equipo
@@ -1105,7 +1112,7 @@ export function CapacityView() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface-3/90 border border-line rounded-2xl p-4">
+                <div className="bg-surface-3/90 border border-line rounded-xl p-4">
                   <div className="flex justify-between items-baseline mb-2">
                     <span className="text-xs font-semibold">Ausentismo equipo</span>
                     <span className="font-display text-xl font-bold font-tech text-amber">{simUnavailablePct}%</span>
@@ -1121,9 +1128,9 @@ export function CapacityView() {
                   />
                 </div>
 
-                <div className="bg-surface-3/90 border border-line rounded-2xl p-4">
+                <div className="bg-surface-3/90 border border-line rounded-xl p-4">
                   <div className="flex justify-between items-baseline mb-2">
-                    <span className="text-xs font-semibold">Exigencia edición</span>
+                    <span className="text-xs font-semibold">Retrabajo extra (correcciones)</span>
                     <span className="font-display text-xl font-bold font-tech text-violet">+{simEditorDemandBoostPct}%</span>
                   </div>
                   <input
@@ -1141,7 +1148,7 @@ export function CapacityView() {
           </div>
 
           {/* Telemetría de Impacto Simulado */}
-          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
+          <div className="lg:col-span-6 bg-surface-2 border border-line rounded-xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
             <CardNodeDeco color={simulation.simDeficit > 0 ? 'var(--amber)' : 'var(--mint)'} />
 
             <div className="flex items-center justify-between relative z-10">
@@ -1158,17 +1165,17 @@ export function CapacityView() {
             </div>
 
             <div className="grid grid-cols-2 gap-4 my-auto relative z-10">
-              <div className="bg-surface-3/90 border border-mint/30 rounded-2xl p-5">
+              <div className="bg-surface-3/90 border border-mint/30 rounded-xl p-5">
                 <span className="text-[10px] font-tech uppercase text-mint block">Nueva Capacidad Segura</span>
                 <p className="font-display text-4xl sm:text-5xl font-bold font-tech text-mint mt-2">
                   {simulation.simSafeLimit}
                 </p>
                 <span className="text-xs text-muted font-tech mt-1.5 block">
-                  Clip: {simulation.simSafeClip} · Edic: {simulation.simSafeEdit}
+                  Equipo disponible al {100 - simUnavailablePct}% · margen {capacityConfig.safetyMarginPct}%
                 </span>
               </div>
 
-              <div className="bg-surface-3/90 border border-accent/30 rounded-2xl p-5">
+              <div className="bg-surface-3/90 border border-accent/30 rounded-xl p-5">
                 <span className="text-[10px] font-tech uppercase text-accent block">Cuello de Botella</span>
                 <p className="font-display text-3xl sm:text-4xl font-bold font-tech text-accent mt-2">
                   Equipo
@@ -1178,7 +1185,7 @@ export function CapacityView() {
                 </span>
               </div>
 
-              <div className={`rounded-2xl p-5 border ${
+              <div className={`rounded-xl p-5 border ${
                 simulation.simDeficit > 0
                   ? 'bg-red-500/10 border-red-500/40'
                   : 'bg-mint-dim/30 border-mint/40'
@@ -1194,7 +1201,7 @@ export function CapacityView() {
                 </span>
               </div>
 
-              <div className="bg-surface-3/90 border border-amber/30 rounded-2xl p-5">
+              <div className="bg-surface-3/90 border border-amber/30 rounded-xl p-5">
                 <span className="text-[10px] font-tech uppercase text-amber block">Días para Absorber</span>
                 <p className="font-display text-3xl sm:text-4xl font-bold font-tech text-amber mt-2">
                   {simulation.daysNeededForExtra}d
@@ -1214,7 +1221,7 @@ export function CapacityView() {
       {screen === '3' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
           {/* Columna Izquierda (5 cols): Radar de Carga Hoy por Creador (Filas Desplegables) */}
-          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-5 flex flex-col justify-between space-y-4 relative overflow-hidden">
+          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-xl p-5 flex flex-col justify-between space-y-4 relative overflow-hidden">
             <CardNodeDeco color="var(--accent)" />
 
             <div className="flex items-center justify-between gap-2 flex-wrap relative z-10">
@@ -1248,7 +1255,7 @@ export function CapacityView() {
                 return (
                   <div
                     key={item.worker.id}
-                    className={`bg-surface-3/90 border rounded-2xl transition-all overflow-hidden ${
+                    className={`bg-surface-3/90 border rounded-xl transition-all overflow-hidden ${
                       isOpen ? 'border-accent/60 shadow-lg' : 'border-line hover:border-accent/30'
                     }`}
                   >
@@ -1316,7 +1323,7 @@ export function CapacityView() {
           </div>
 
           {/* Columna Derecha (7 cols): Pedidos con Alerta Activa + Cronómetro de Hora Máxima de Reasignación */}
-          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-5 flex flex-col justify-between space-y-4 relative overflow-hidden">
+          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl p-5 flex flex-col justify-between space-y-4 relative overflow-hidden">
             <CardNodeDeco color="var(--amber)" />
 
             <div className="flex items-center justify-between gap-2 flex-wrap relative z-10">
@@ -1329,7 +1336,7 @@ export function CapacityView() {
             </div>
 
             {protocolAlertOrders.length === 0 ? (
-              <div className="my-auto text-center py-14 bg-surface-3/40 border border-dashed border-line rounded-2xl relative z-10">
+              <div className="my-auto text-center py-14 bg-surface-3/40 border border-dashed border-line rounded-xl relative z-10">
                 <CheckCircle2 size={30} className="text-mint mx-auto mb-2" />
                 <p className="text-sm font-semibold">Sin pedidos con alerta activa</p>
                 <p className="text-xs text-muted mt-1">
@@ -1372,7 +1379,7 @@ export function CapacityView() {
                   return (
                     <div
                       key={order.id}
-                      className={`bg-surface-3/90 border rounded-2xl transition-all overflow-hidden ${
+                      className={`bg-surface-3/90 border rounded-xl transition-all overflow-hidden ${
                         isExpanded ? 'border-accent/60 shadow-lg' : 'border-line hover:border-accent/35'
                       }`}
                     >
@@ -1491,7 +1498,7 @@ export function CapacityView() {
       {screen === '4' && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch animate-fadeIn">
           {/* Embudo de Eficiencia: Física -> Segura -> Real Efectiva */}
-          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
+          <div className="lg:col-span-5 bg-surface-2 border border-line rounded-xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden">
             <CardNodeDeco color="var(--accent)" />
 
             <span className="font-tech text-xs uppercase tracking-wider text-accent font-semibold flex items-center gap-1.5 relative z-10">
@@ -1499,7 +1506,7 @@ export function CapacityView() {
             </span>
 
             <div className="grid grid-cols-2 gap-4 my-auto relative z-10">
-              <div className="bg-surface-3/90 border border-amber/30 rounded-2xl p-5">
+              <div className="bg-surface-3/90 border border-amber/30 rounded-xl p-5">
                 <span className="text-[10px] font-tech uppercase text-amber block">Fricción Retrabajo</span>
                 <p className="font-display text-4xl sm:text-5xl font-bold font-tech text-amber mt-2">
                   {engine.reworkRatePct}%
@@ -1509,7 +1516,7 @@ export function CapacityView() {
                 </span>
               </div>
 
-              <div className="bg-surface-3/90 border border-mint/40 rounded-2xl p-5">
+              <div className="bg-surface-3/90 border border-mint/40 rounded-xl p-5">
                 <span className="text-[10px] font-tech uppercase text-mint block">Capacidad Efectiva</span>
                 <p className="font-display text-4xl sm:text-5xl font-bold font-tech text-mint mt-2">
                   {engine.effectiveRealCapacity}
@@ -1520,7 +1527,7 @@ export function CapacityView() {
               </div>
             </div>
 
-            <div className="bg-surface-3/90 border border-line rounded-2xl p-4 space-y-2 relative z-10">
+            <div className="bg-surface-3/90 border border-line rounded-xl p-4 space-y-2 relative z-10">
               <div className="flex items-center justify-between text-xs font-tech">
                 <span className="text-muted">1. Teórica Física:</span>
                 <strong className="text-text">{engine.physicalBottleneckDaily} vid/día</strong>
@@ -1537,14 +1544,14 @@ export function CapacityView() {
           </div>
 
           {/* Tarjeta de Expansión de Equipo Basada en Promedios Reales */}
-          <div className="lg:col-span-7 bg-surface-2 border border-mint/35 rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden shadow-[0_0_50px_-18px_rgba(111,231,200,0.25)]">
+          <div className="lg:col-span-7 bg-surface-2 border border-mint/35 rounded-xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden shadow-[0_0_50px_-18px_rgba(111,231,200,0.25)]">
             <CardNodeDeco color="var(--mint)" />
 
             <span className="font-tech text-xs uppercase tracking-wider text-mint font-semibold flex items-center gap-1.5 relative z-10">
               <UserPlus size={14} /> Señal de Contratación Basada en Promedios Reales
             </span>
 
-            <div className="bg-gradient-to-br from-mint/15 via-surface-3 to-accent/10 border border-mint/40 rounded-2xl p-6 space-y-3 my-auto relative z-10">
+            <div className="bg-gradient-to-br from-mint/15 via-surface-3 to-accent/10 border border-mint/40 rounded-xl p-6 space-y-3 my-auto relative z-10">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="text-xs font-tech uppercase text-mint font-bold">
                   Límite actual: capacidad del equipo
@@ -1564,7 +1571,7 @@ export function CapacityView() {
             </div>
 
             <div className="grid grid-cols-2 gap-4 relative z-10">
-              <div className="bg-surface-3/90 border border-line rounded-2xl p-4 flex items-center justify-between">
+              <div className="bg-surface-3/90 border border-line rounded-xl p-4 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-muted-2 block">Promedio por persona</span>
                   <p className="font-display text-2xl font-bold font-tech text-accent">{engine.avgClipperDaily} vid/día</p>
@@ -1572,7 +1579,7 @@ export function CapacityView() {
                 <Scissors size={22} className="text-accent opacity-60" />
               </div>
 
-              <div className="bg-surface-3/90 border border-line rounded-2xl p-4 flex items-center justify-between">
+              <div className="bg-surface-3/90 border border-line rounded-xl p-4 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-muted-2 block">Personas en el equipo</span>
                   <p className="font-display text-2xl font-bold font-tech text-mint">{clippers.length}</p>
@@ -1594,7 +1601,7 @@ export function CapacityView() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="bg-surface-2 border border-line rounded-3xl max-w-2xl w-full p-6 space-y-5 animate-fadeIn"
+            className="bg-surface-2 border border-line rounded-xl max-w-2xl w-full p-6 space-y-5 animate-fadeIn"
           >
             <div className="flex items-center justify-between">
               <h3 className="font-display text-lg font-bold flex items-center gap-2">
