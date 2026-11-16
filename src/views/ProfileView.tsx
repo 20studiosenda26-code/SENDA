@@ -1,21 +1,21 @@
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useStore } from '../store';
 import {
-  Flame, TrendingUp, Target, CheckCircle2, Award, Star,
+  TrendingUp, CheckCircle2, Hourglass, Clapperboard, DollarSign,
   Phone, Mail, Landmark, Globe2, BellRing, FileText, Download, Wallet, Building2, CreditCard, UserCheck,
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import {
   parseBankInfo, serializeBankInfo, openWorkerPayrollReportPdf, fmtMoneyClean,
 } from '../lib/payrollPdf';
-import { workerEarnedItems } from '../lib/economics';
+import { fmtMoney, PAY_SPLIT, workerEarnedItems, workerEarningsSummary } from '../lib/economics';
 import type { PayrollReportItem, Order } from '../types';
 import { isAssignedTo } from '../lib/roles';
 
 export function ProfileView() {
   const {
     workers, currentWorkerId, brands, orders, financeSettings,
-    getWorkerGoals, role, updateWorkerProfile, payrollPayments,
+    role, updateWorkerProfile, payrollPayments,
   } = useStore();
   const worker = workers.find(w => w.id === currentWorkerId);
 
@@ -73,7 +73,8 @@ export function ProfileView() {
     );
   }
 
-  const goals = getWorkerGoals(worker.id, worker.role);
+  const earnings = workerEarningsSummary(worker, brands, orders, financeSettings, payrollPayments);
+  const payPerVideo = financeSettings.payPerVideo;
   const myTotalApprovedAmount = myReportItems.reduce((s, i) => s + i.subtotal, 0);
 
   const handleSavePersonalInfo = () => {
@@ -109,20 +110,20 @@ export function ProfileView() {
             </div>
           </div>
           <div className="text-right">
-            <div className="flex items-center gap-1 text-amber justify-end">
-              <Star size={16} />
-              <span className="font-display text-xl font-bold">{worker.pointsMonth}</span>
+            <div className="flex items-center gap-1 text-mint justify-end">
+              <DollarSign size={16} />
+              <span className="font-display text-xl font-bold">{fmtMoney(earnings.earnedMonth).replace('$', '')}</span>
             </div>
-            <p className="text-xs text-muted-2">puntos este mes</p>
+            <p className="text-xs text-muted-2">ganado este mes</p>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MiniStat icon={Target} label="Puntos hoy" value={worker.pointsToday} color="accent" />
-        <MiniStat icon={TrendingUp} label="Puntos mes" value={worker.pointsMonth} color="mint" />
-        <MiniStat icon={Flame} label="Racha actual" value={worker.streak} color="amber" />
-        <MiniStat icon={Award} label="Mejor racha" value={worker.bestStreak} color="violet" />
+        <MiniStat icon={TrendingUp} label="Ganado este mes" value={fmtMoney(earnings.earnedMonth)} color="mint" />
+        <MiniStat icon={Wallet} label="Por cobrar (en Nóminas)" value={fmtMoney(earnings.pending)} color="accent" />
+        <MiniStat icon={Hourglass} label={`Esperando al cliente (${earnings.waitingClientVideos} video${earnings.waitingClientVideos === 1 ? '' : 's'})`} value={fmtMoney(earnings.waitingClientAmount)} color="amber" />
+        <MiniStat icon={Clapperboard} label={`En producción (${earnings.inProductionVideos} video${earnings.inProductionVideos === 1 ? '' : 's'})`} value={fmtMoney(earnings.inProductionAmount)} color="violet" />
       </div>
 
       {/* Mis Pagos, Comprobantes e Informe PDF Automático (Sincronizado con Nóminas Admin) */}
@@ -135,7 +136,7 @@ export function ProfileView() {
             <div>
               <h3 className="font-display text-base font-semibold">Mis Pagos, Comprobantes e Informe PDF</h3>
               <p className="text-xs text-muted">
-                Resumen de tus videos finalizados (Aprobado Cliente) y comprobantes de transferencia enviados.
+                Ganas {fmtMoney(payPerVideo)} por video: {fmtMoney(payPerVideo * PAY_SPLIT)} cuando SENDA lo aprueba y {fmtMoney(payPerVideo * PAY_SPLIT)} cuando lo aprueba el cliente.
               </p>
             </div>
           </div>
@@ -209,7 +210,7 @@ export function ProfileView() {
           </div>
         ) : (
           <p className="text-xs text-muted bg-surface-3 rounded-lg p-3">
-            Tus pedidos en estado <strong className="text-text">Aprobado Cliente</strong> ya están pre-cargados en tu Informe PDF ({completed.length} proyectos · {fmtMoneyClean(myTotalApprovedAmount)}). Cuando se realice el pago del fin de semana verás aquí tu comprobante de transferencia junto con el PDF.
+            Lo que has ganado ya está pre-cargado en tu Informe PDF ({myReportItems.length} pago(s) · {fmtMoneyClean(myTotalApprovedAmount)}). Cuando se realice el pago del fin de semana verás aquí tu comprobante de transferencia junto con el PDF.
           </p>
         )}
       </div>
@@ -268,26 +269,27 @@ export function ProfileView() {
       )}
 
       <div className="bg-surface-2 border border-line rounded-xl p-5">
-        <h3 className="font-display text-base font-semibold mb-4">Metas asignadas</h3>
+        <h3 className="font-display text-base font-semibold mb-1">Cómo vas</h3>
+        <p className="text-xs text-muted mb-4">Total ganado: <strong className="text-text">{fmtMoney(earnings.earnedTotal)}</strong> · Pagado: <strong className="text-mint">{fmtMoney(earnings.paidTotal)}</strong></p>
         <div className="space-y-3">
-          <div>
-            <div className="flex justify-between text-sm mb-1">
-              <span>Diaria</span>
-              <span className="text-muted font-tech">{worker.pointsToday} / {goals.daily}</span>
-            </div>
-            <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-              <div className="h-full bg-accent rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsToday / Math.max(goals.daily, 1)) * 100)}%` }} />
-            </div>
-          </div>
-          <div>
-            <div className="flex justify-between text-sm mb-1">
-              <span>Mensual</span>
-              <span className="text-muted font-tech">{worker.pointsMonth} / {goals.monthly}</span>
-            </div>
-            <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-              <div className="h-full bg-mint rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (worker.pointsMonth / Math.max(goals.monthly, 1)) * 100)}%` }} />
-            </div>
-          </div>
+          {([
+            { label: 'Aprobados por el cliente (100%)', n: earnings.clientApprovedVideos, cls: 'bg-mint' },
+            { label: 'Aprobados por SENDA, esperando al cliente (50%)', n: earnings.waitingClientVideos, cls: 'bg-amber' },
+            { label: 'En producción (0%)', n: earnings.inProductionVideos, cls: 'bg-accent' },
+          ]).map(row => {
+            const total = Math.max(1, earnings.clientApprovedVideos + earnings.waitingClientVideos + earnings.inProductionVideos);
+            return (
+              <div key={row.label}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span>{row.label}</span>
+                  <span className="text-muted font-tech">{row.n} video{row.n === 1 ? '' : 's'}</span>
+                </div>
+                <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+                  <div className={`h-full ${row.cls} rounded-full transition-all duration-500`} style={{ width: `${(row.n / total) * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -335,8 +337,9 @@ export function ProfileView() {
             {completed.map(v => (
               <div key={v.id} className="flex items-center gap-3 p-2.5 bg-surface-3 rounded-lg">
                 <CheckCircle2 size={16} className="text-mint shrink-0" />
-                <span className="text-sm flex-1 font-medium">{v.name}</span>
-                <span className="text-xs text-muted-2 font-tech">{v.date}</span>
+                <span className="text-sm flex-1 font-medium">{v.brandName} · {v.name}</span>
+                <span className="text-xs text-mint font-tech">+{fmtMoney(myReportItems.filter(i => i.videoId === v.id).reduce((s, i) => s + i.subtotal, 0))}</span>
+                <span className="text-xs text-muted-2 font-tech">{(v.clientApprovedAt || v.date || '').slice(0, 10)}</span>
               </div>
             ))}
           </div>
@@ -346,7 +349,7 @@ export function ProfileView() {
   );
 }
 
-function MiniStat({ icon: Icon, label, value, color }: { icon: typeof Flame; label: string; value: number; color: string }) {
+function MiniStat({ icon: Icon, label, value, color }: { icon: typeof Wallet; label: string; value: string | number; color: string }) {
   const map: Record<string, string> = {
     accent: 'text-accent bg-accent-dim',
     mint: 'text-mint bg-mint-dim',

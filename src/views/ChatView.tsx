@@ -5,6 +5,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Send, Search, Paperclip, Plus, X, Users, Bell, Loader2, Download, Check, Trash2 } from 'lucide-react';
 import type { NotificationCategory } from '../types';
 import { TEAM_ROLE_SHORT } from '../lib/roles';
+import { takeNavIntent } from '../lib/navIntent';
 
 function timeShort(iso: string) {
   const d = new Date(iso);
@@ -32,7 +33,7 @@ export function ChatView() {
   const isAdmin = role === 'admin';
 
   // 'notif' = pestaña especial de solo lectura con todas las notificaciones.
-  const [activeId, setActiveId] = useState<string>('notif');
+  const [activeId, setActiveId] = useState<string>(() => takeNavIntent('chat') || 'notif');
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [showNewGroup, setShowNewGroup] = useState(false);

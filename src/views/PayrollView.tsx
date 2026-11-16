@@ -5,7 +5,7 @@ import type { Worker, PayrollReportItem } from '../types';
 import { workerPayrollStatus } from '../lib/economics';
 import { fmtMoneyClean, parseBankInfo, openWorkerPayrollReportPdf } from '../lib/payrollPdf';
 import {
-  Wallet, Scissors, Film, Upload, CheckCircle2, Landmark,
+  Wallet, Scissors, Upload, CheckCircle2, Landmark,
   Copy, Check, Eye, Calendar, ChevronLeft, ChevronRight,
   Loader2, FileText, Download, Building2, CreditCard, UserCheck, Send,
 } from 'lucide-react';
@@ -44,7 +44,6 @@ export function PayrollView() {
     payrollPayments, recordPayrollPayment, startAdminDm, sendChatGroupMessage,
   } = useStore();
 
-  const [roleTab, setRoleTab] = useState<'clipper' | 'editor'>('clipper');
   const [weekOffset, setWeekOffset] = useState<number>(0);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
 
@@ -57,8 +56,8 @@ export function PayrollView() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cycle = useMemo(() => getWeekendCycle(weekOffset), [weekOffset]);
 
-  // Cálculo 100% automático: cada video Aprobado Cliente suma 1 vez; lo ya pagado en
-  // cualquier ciclo no vuelve a aparecer (antes reaparecía cada semana y contaba el pedido entero por video).
+  // Cálculo 100% automático con la regla de $5 por video:
+  // 50% se gana al Aprobado Senda y 50% al Aprobado Cliente. Cada tramo se paga una sola vez.
   const workerPayrollRows = useMemo(() => {
     return workers.map(w => {
       const status = workerPayrollStatus(w, brands, orders, financeSettings, payrollPayments);
@@ -85,15 +84,13 @@ export function PayrollView() {
     });
   }, [workers, brands, orders, financeSettings, payrollPayments, cycle.weekKey]);
 
-  const clippersRows = workerPayrollRows;
-  const editorsRows = useMemo<typeof workerPayrollRows>(() => [], []);
-  const currentList = roleTab === 'clipper' ? clippersRows : editorsRows;
+  const currentList = workerPayrollRows;
 
   useEffect(() => {
     if (!selectedWorkerId || !currentList.some(r => r.worker.id === selectedWorkerId)) {
       setSelectedWorkerId(currentList[0]?.worker.id || null);
     }
-  }, [roleTab, currentList, selectedWorkerId]);
+  }, [currentList, selectedWorkerId]);
 
   const selectedRow = useMemo(
     () => currentList.find(r => r.worker.id === selectedWorkerId) || currentList[0] || null,
@@ -105,8 +102,6 @@ export function PayrollView() {
     const totalPaidAll = workerPayrollRows.reduce((s, r) => s + r.paidAmount, 0);
     const totalCycleAll = totalPendingAll + totalPaidAll;
 
-    const pendingClippers = clippersRows.reduce((s, r) => s + r.pendingAmount, 0);
-    const pendingEditors = editorsRows.reduce((s, r) => s + r.pendingAmount, 0);
 
     const remainingPct = totalCycleAll > 0 ? Math.round((totalPendingAll / totalCycleAll) * 100) : 0;
 
@@ -114,11 +109,9 @@ export function PayrollView() {
       totalPendingAll,
       totalPaidAll,
       totalCycleAll,
-      pendingClippers,
-      pendingEditors,
       remainingPct,
     };
-  }, [workerPayrollRows, clippersRows, editorsRows]);
+  }, [workerPayrollRows]);
 
   const handleUploadReceipt = async (workerId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -160,9 +153,9 @@ export function PayrollView() {
           const dmId = await startAdminDm(row.worker.id);
           if (dmId) {
             const summaryLines = row.reportItems
-              .map(i => `• ${i.projectName} (${i.videosCount} vid): ${fmtMoneyClean(i.subtotal)}`)
+              .map(i => `• ${i.brandName} · ${i.projectName}: ${fmtMoneyClean(i.subtotal)}`)
               .join('\n');
-            const msg = `Pago de nómina realizado (${cycle.weekendLabel}) por ${fmtMoneyClean(row.pendingAmount)}.\n\nInforme de pedidos Aprobado Cliente:\n${summaryLines}\n\nPuedes descargar tu Informe PDF y ver el comprobante directamente en tu pestaña Perfil.`;
+            const msg = `Pago de nómina realizado (${cycle.weekendLabel}) por ${fmtMoneyClean(row.pendingAmount)}.\n\nDetalle (50% Aprobado Senda + 50% Aprobado Cliente por video):\n${summaryLines}\n\nPuedes descargar tu Informe PDF y ver el comprobante directamente en tu pestaña Perfil.`;
             await sendChatGroupMessage(dmId, msg, draft?.fileName, draft?.fileUrl);
           }
         } catch {
@@ -246,24 +239,12 @@ export function PayrollView() {
 
         {/* Switch Clippers / Editores + Corte de Fin de Semana */}
         <div className="flex items-center gap-3 flex-wrap relative z-10">
-          <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
-            <button
-              type="button"
-              onClick={() => setRoleTab('clipper')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                roleTab === 'clipper'
-                  ? 'bg-accent text-on-accent shadow-sm'
-                  : 'text-muted hover:text-text'
-              }`}
-            >
-              <Scissors size={13} /> {TEAM_ROLE_PLURAL}
-              <span className={`font-tech text-[11px] px-1.5 py-0.5 rounded ${
-                roleTab === 'clipper' ? 'bg-black/20 text-on-accent' : 'bg-surface-2 text-muted'
-              }`}>
-                {fmtMoneyClean(totals.pendingClippers)}
-              </span>
-            </button>
-
+          <div className="flex items-center gap-2 bg-surface-3 border border-line rounded-xl px-3.5 py-2 text-xs" title="Regla de pago por video entregado">
+            <Scissors size={13} className="text-accent" />
+            <span className="font-semibold">{TEAM_ROLE_PLURAL}</span>
+            <span className="font-tech text-[11px] text-muted-2">
+              {fmtMoneyClean(financeSettings.payPerVideo)}/video · 50% Senda + 50% Cliente
+            </span>
           </div>
 
           <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1">
@@ -330,7 +311,7 @@ export function PayrollView() {
                     <div className="min-w-0">
                       <p className="text-sm font-semibold truncate">{row.worker.name}</p>
                       <p className="text-[11px] text-muted-2 font-tech">
-                        {row.reportItems.length} proyecto(s) finalizados
+                        {row.reportItems.length} pago(s) de video
                       </p>
                     </div>
                   </div>
@@ -490,7 +471,7 @@ export function PayrollView() {
                           Informe PDF de {w.name} (Pre-cargado desde su perfil)
                         </p>
                         <p className="text-[11px] text-muted-2 font-tech">
-                          {selectedRow.reportItems.length} pedido(s) con estado Aprobado Cliente
+                          {selectedRow.reportItems.length} pago(s) · 50% al Aprobado Senda + 50% al Aprobado Cliente
                         </p>
                       </div>
                     </div>
@@ -516,28 +497,28 @@ export function PayrollView() {
 
                   {selectedRow.reportItems.length === 0 ? (
                     <p className="text-xs text-muted text-center py-4">
-                      No hay videos Aprobado Cliente pendientes de pago para este creador.
+                      No hay pagos pendientes para esta persona. Cada video suma 50% al Aprobado Senda y 50% al Aprobado Cliente.
                     </p>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-line bg-surface-2">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="text-left text-muted-2 border-b border-line bg-surface-3/60 font-tech text-[10px] uppercase">
-                            <th className="py-2 px-3">Pedido finalizado (Aprobado Cliente)</th>
+                            <th className="py-2 px-3">Video y tramo de pago</th>
                             <th className="py-2 px-3">Fecha</th>
-                            <th className="py-2 px-3 text-center">Videos</th>
+                            <th className="py-2 px-3 text-center">Tramo</th>
                             <th className="py-2 px-3 text-right">Tarifa</th>
                             <th className="py-2 px-3 text-right">Subtotal</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-line/50">
                           {selectedRow.reportItems.map(item => (
-                            <tr key={item.videoId}>
+                            <tr key={`${item.videoId}-${item.stage || 'total'}`}>
                               <td className="py-2 px-3 font-medium">
                                 {item.projectName} <span className="text-muted-2">· {item.brandName}</span>
                               </td>
                               <td className="py-2 px-3 font-tech text-muted">{item.date}</td>
-                              <td className="py-2 px-3 font-tech text-center">{item.videosCount}</td>
+                              <td className="py-2 px-3 font-tech text-center">{item.stage ? '50%' : '100%'}</td>
                               <td className="py-2 px-3 font-tech text-right text-muted">{fmtMoneyClean(item.unitPay)}</td>
                               <td className="py-2 px-3 font-tech text-right font-semibold text-mint">{fmtMoneyClean(item.subtotal)}</td>
                             </tr>

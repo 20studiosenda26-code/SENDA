@@ -2,7 +2,7 @@ import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import type { Video, AppExpense, QcStatus } from '../types';
-import { findOrderForVideo, unitEconomics, unpromotedOrders, workerPayrollStatus } from '../lib/economics';
+import { findOrderForVideo, fmtMoney as fmtMoneyShared, unitEconomics, unpromotedOrders, workerPayrollStatus } from '../lib/economics';
 
 const QC_LABEL: Partial<Record<QcStatus, string>> = {
   sin_iniciar: 'Sin iniciar',
@@ -13,7 +13,7 @@ const QC_LABEL: Partial<Record<QcStatus, string>> = {
 import { CardNodeDeco } from '../components/BrandBackground';
 import {
   DollarSign, Clock, CheckCircle2, ShieldCheck,
-  Calendar, FileDown, Users, Scissors, Film,
+  Calendar, FileDown, Users, Scissors,
   ArrowUpRight, Sparkles, Layers, Eye, History, Cpu, Plus, Trash2, ChevronDown,
 } from 'lucide-react';
 
@@ -43,12 +43,8 @@ interface FinancialProjectRow {
   videoRef?: Video;
 }
 
-const CURRENCY_SIGN = String.fromCharCode(36);
-
-function fmtMoney(n: number): string {
-  const clean = Math.round(Number(n) || 0);
-  return CURRENCY_SIGN + clean.toLocaleString('es-CO');
-}
+// Formato único de dinero (centavos cuando hacen falta: $2,50)
+const fmtMoney = fmtMoneyShared;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -242,9 +238,10 @@ export function FinancesView() {
     const realizedCreatorCost = rowsAprobadoCliente.reduce((s, r) => s + r.creatorCostTotal, 0);
     const realizedVideos = rowsAprobadoCliente.reduce((s, r) => s + r.videoCount, 0);
 
-    const totalClipperPay = [...rowsAprobadoSenda, ...rowsAprobadoCliente].reduce((s, r) => s + r.clipperPayTotal, 0);
-    const totalEditorPay = [...rowsAprobadoSenda, ...rowsAprobadoCliente].reduce((s, r) => s + r.editorPayTotal, 0);
-    const totalCreatorPayroll = totalClipperPay + totalEditorPay;
+    // Regla $5: el equipo ya ganó 50% de cada video Aprobado Senda y 100% de cada Aprobado Cliente
+    const totalCreatorPayroll = accruedPaid50Cost + realizedCreatorCost;
+    const totalClipperPay = totalCreatorPayroll;
+    const totalEditorPay = 0;
 
     const realizedNetRevenue = realizedGrossRevenue - realizedCreatorCost - expensesSummary.periodTotal;
 
@@ -272,7 +269,8 @@ export function FinancesView() {
   const workerPayoutBreakdown = useMemo(() => {
     return workers.map(w => {
       const asClipper = filteredRows.filter(r => r.clipperId === w.id && (r.stage === 'aprobado_senda' || r.stage === 'aprobado_cliente'));
-      const asEditor = filteredRows.filter(r => r.editorId === w.id && (r.stage === 'aprobado_senda' || r.stage === 'aprobado_cliente'));
+      // Rol único: no hay pagos separados de edición
+      const asEditor: typeof asClipper = [];
 
       const earned50 = [
         ...asClipper.filter(r => r.stage === 'aprobado_senda').map(r => r.clipperPayTotal * 0.5),
@@ -329,7 +327,7 @@ export function FinancesView() {
         <td>${i + 1}</td>
         <td><strong>${r.name}</strong><br/><span style="color:#64748b;font-size:11px;">${r.brand} · ${r.videoCount} video(s)</span></td>
         <td>${r.date}</td>
-        <td>${r.clipperName} / ${r.editorName}</td>
+        <td>${r.clipperName}</td>
         <td>${r.statusLabel}</td>
         <td style="text-align:right;">${fmtMoney(r.grossAmount)}</td>
         <td style="text-align:right;">${fmtMoney(r.creatorCostTotal)}</td>
@@ -340,7 +338,7 @@ export function FinancesView() {
     const payrollRowsHtml = workerPayoutBreakdown.map(item => `
       <tr>
         <td><strong>${item.worker.name}</strong></td>
-        <td>${item.worker.role === 'clipper' ? 'Clipper' : 'Editor(a)'}</td>
+        <td>Clipper · Asistente</td>
         <td>${item.worker.email || 'Sin correo'}<br/><span style="color:#64748b;font-size:11px;">${item.worker.phone || ''}</span></td>
         <td>${item.worker.bankInfo || 'Pendiente en Perfil'}</td>
         <td style="text-align:center;">${item.totalAssignedProjects}</td>
@@ -420,7 +418,7 @@ export function FinancesView() {
           </div>
         </div>
 
-        <h2>Respaldo para Pago Manual a Clippers y Editores</h2>
+        <h2>Respaldo para pago manual al equipo</h2>
         <table>
           <thead>
             <tr>
@@ -707,30 +705,19 @@ export function FinancesView() {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="bg-surface-2 border border-accent/25 rounded-xl p-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] text-muted flex items-center gap-1">
-                    <Scissors size={11} className="text-accent" /> Clippers
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                </div>
-                <p className="font-display text-xl font-bold text-accent">
-                  {fmtMoney(metrics.totalClipperPay)}
-                </p>
+            <div className="bg-surface-2 border border-accent/25 rounded-xl p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-muted flex items-center gap-1">
+                  <Scissors size={11} className="text-accent" /> Clippers · Asistentes
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               </div>
-
-              <div className="bg-surface-2 border border-mint/25 rounded-xl p-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] text-muted flex items-center gap-1">
-                    <Film size={11} className="text-mint" /> Editores
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" />
-                </div>
-                <p className="font-display text-xl font-bold text-mint">
-                  {fmtMoney(metrics.totalEditorPay)}
-                </p>
-              </div>
+              <p className="font-display text-xl font-bold text-accent">
+                {fmtMoney(metrics.totalClipperPay)}
+              </p>
+              <p className="text-[10px] text-muted-2 font-tech mt-0.5">
+                {fmtMoney(financeSettings.payPerVideo)} por video · 50% al Aprobado Senda + 50% al Aprobado Cliente
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] font-tech">
@@ -739,7 +726,7 @@ export function FinancesView() {
                 <span className="text-amber font-semibold">{fmtMoney(metrics.accruedPaid50Cost)}</span>
               </div>
               <div className="bg-surface-3 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-                <span className="text-muted-2">100% Cliente:</span>
+                <span className="text-muted-2">100% (Senda + Cliente):</span>
                 <span className="text-mint font-semibold">{fmtMoney(metrics.realizedCreatorCost)}</span>
               </div>
             </div>
@@ -984,7 +971,7 @@ export function FinancesView() {
                   <th className="py-2.5 pr-3 font-medium">Videos</th>
                   <th className="py-2.5 pr-3 font-medium">Equipo</th>
                   <th className="py-2.5 pr-3 font-medium text-right">Bruto</th>
-                  <th className="py-2.5 pr-3 font-medium text-right">Nómina (C + E)</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Nómina</th>
                   <th className="py-2.5 pr-3 font-medium text-right">Neto</th>
                   <th className="py-2.5 font-medium text-right">Pago Automático</th>
                 </tr>
@@ -1000,8 +987,6 @@ export function FinancesView() {
                     <td className="py-3 pr-3 font-tech text-xs">{r.videoCount}</td>
                     <td className="py-3 pr-3 text-xs">
                       <span className="text-text">{r.clipperName}</span>
-                      <span className="text-muted-2"> + </span>
-                      <span className="text-text">{r.editorName}</span>
                     </td>
                     <td className="py-3 pr-3 text-right font-tech text-xs font-medium">
                       {fmtMoney(r.grossAmount)}

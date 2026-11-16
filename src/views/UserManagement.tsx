@@ -200,7 +200,7 @@ export function UserManagement() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs text-muted block mb-1">Nombre completo</label>
-                  <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Juan Pérez" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
+                  <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Nombre y apellido" className="w-full bg-surface-2 border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent" />
                 </div>
                 <div>
                   <label className="text-xs text-muted block mb-1">Correo electrónico</label>

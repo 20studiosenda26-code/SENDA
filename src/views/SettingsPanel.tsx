@@ -92,7 +92,7 @@ export function SettingsPanel() {
 
   const dirtyByTab: Record<Tab, boolean> = { finanzas: finDirty, capacidad: capDirty, drive: driveDirty, catalogo: false, apariencia: false };
 
-  const margin = fin.clientPricePerVideo - fin.defaultClipperCost - fin.defaultEditorCost;
+  const margin = fin.clientPricePerVideo - fin.payPerVideo;
   const marginPct = fin.clientPricePerVideo > 0 ? Math.round((margin / fin.clientPricePerVideo) * 100) : 0;
 
   const teamCapacity = useMemo(() => {
@@ -181,12 +181,14 @@ export function SettingsPanel() {
               <NumberField label="Precio al cliente por video" prefix="$" min={1} value={fin.clientPricePerVideo}
                 onChange={n => setFin(f => ({ ...f, clientPricePerVideo: n }))}
                 hint="Se precarga al crear un pedido nuevo." />
-              <NumberField label="Pago por clips (por video)" prefix="$" value={fin.defaultClipperCost}
-                onChange={n => setFin(f => ({ ...f, defaultClipperCost: n }))}
-                hint="Se usa si el pedido no define su propio pago." />
-              <NumberField label="Pago por edición (por video)" prefix="$" value={fin.defaultEditorCost}
-                onChange={n => setFin(f => ({ ...f, defaultEditorCost: n }))}
-                hint="Se usa si el pedido no define su propio pago." />
+              <NumberField label="Pago al equipo por video" prefix="$" step={0.5} value={fin.payPerVideo}
+                onChange={n => setFin(f => ({ ...f, payPerVideo: n, defaultClipperCost: n, defaultEditorCost: 0 }))}
+                hint="Total por video entregado a la persona responsable." />
+              <div className="bg-surface-3 border border-line rounded-xl p-3">
+                <p className="text-xs font-medium text-muted mb-1.5">Se paga en 2 tramos</p>
+                <p className="text-sm font-tech text-text">{fmtMoney(fin.payPerVideo / 2)} <span className="text-muted-2">al Aprobado Senda</span></p>
+                <p className="text-sm font-tech text-text">{fmtMoney(fin.payPerVideo / 2)} <span className="text-muted-2">al Aprobado Cliente</span></p>
+              </div>
             </div>
             <div className={`flex items-center justify-between gap-3 flex-wrap rounded-xl px-4 py-3 border ${marginInvalid ? 'bg-red-500/10 border-red-500/30' : 'bg-surface-3 border-line'}`}>
               <div className="flex items-center gap-2 text-xs text-muted">
@@ -197,7 +199,7 @@ export function SettingsPanel() {
                 {fmtMoney(margin)} <span className="text-xs font-tech text-muted-2">({marginPct}%)</span>
               </p>
             </div>
-            <p className="text-[11px] text-muted-2">La persona asignada cobra clips + edición de cada video aprobado por el cliente. Los pedidos que ya tienen precios propios no cambian. Los videos sin precio propio se recalculan al instante en Finanzas y Nóminas.</p>
+            <p className="text-[11px] text-muted-2">La persona responsable cobra el 50% cuando SENDA aprueba el video y el otro 50% cuando lo aprueba el cliente. Los pedidos con un pago propio (definido al crearlos) no cambian; el resto se recalcula al instante en Inicio, Finanzas, Nóminas y Perfil.</p>
           </>
         )}
 

@@ -10,6 +10,7 @@ import { TasksBoard } from "./TasksView";
 import { DriveFolderField } from "../components/DriveFolderField";
 import { ClientAccountField } from "../components/ClientAccountField";
 import { TEAM_ROLE_LABEL, TEAM_ROLE_SHORT } from "../lib/roles";
+import { takeNavIntent } from "../lib/navIntent";
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   aprobado_senda: "Aprobado Senda",
@@ -33,7 +34,10 @@ type Folder = "disponibles" | "iniciados";
 
 export function AdminTasksRoot() {
   const { orders, brands } = useStore();
-  const [folder, setFolder] = useState<Folder | null>(null);
+  const [folder, setFolder] = useState<Folder | null>(() => {
+    const intent = takeNavIntent('tareas');
+    return intent === 'disponibles' || intent === 'iniciados' ? intent : null;
+  });
 
   const availableCount = useMemo(
     () => orders.filter(o => !o.clipperId).length,

@@ -512,3 +512,18 @@ h1, h2, h3, .display {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
+
+/* ───────────── Rueda del equipo (Inicio admin) ───────────── */
+@keyframes senda-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+.senda-orbit {
+  animation: senda-orbit-spin var(--orbit-speed, 90s) linear infinite;
+}
+.senda-orbit-wrap:hover .senda-orbit,
+.senda-orbit-wrap:focus-within .senda-orbit {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .senda-orbit { animation: none; }
+}

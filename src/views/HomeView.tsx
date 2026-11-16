@@ -1,101 +1,48 @@
-import { useState, useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useStore } from '../store';
-import { Flame, Target, TrendingUp, Play, ArrowRight, CheckCircle2, Clock, AlertCircle, CalendarDays, GraduationCap, BookOpen, Users } from 'lucide-react';
+import { Play, ArrowRight, CheckCircle2, Clock, AlertCircle, GraduationCap, BookOpen, Wallet, TrendingUp, Hourglass, Sparkles } from 'lucide-react';
 import { CardNodeDeco } from '../components/BrandBackground';
-import { CLASSROOM_MODULES } from '../data';
-import { AdminHomePanels, workerLoadColor, type WorkerLoad } from './AdminHomePanels';
+import { AdminHomePanels } from './AdminHomePanels';
 import { pendingRoleSuffix } from '../lib/qcLabel';
 import { isAssignedTo } from '../lib/roles';
+import { findOrderForVideo, fmtMoney, PAY_SPLIT, unitEconomics, videoEarned, workerEarningsSummary } from '../lib/economics';
+import NumberTicker from '../components/ui/number-ticker';
+import type { Video } from '../types';
 
 export function HomeView() {
-  const { role, workers, currentWorkerId, brands, getWorkerCapacity, getWorkerWorkload, setView, getWorkerGoals, setSelectedVideo, setSelectedClassroomModuleId } = useStore();
-  const [selectedTeamWorkerId, setSelectedTeamWorkerId] = useState<string | null>(null);
+  const {
+    role, workers, currentWorkerId, brands, orders, financeSettings, payrollPayments,
+    classroomModules, lessonCompletions, setView, setSelectedVideo, setSelectedClassroomModuleId,
+  } = useStore();
 
   const worker = workers.find(w => w.id === currentWorkerId);
-  const goals = getWorkerGoals(currentWorkerId, role === 'admin' ? 'clipper' : (role as 'clipper' | 'editor'));
 
-  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
-
-  const myVideos = allVideos.filter(v =>
-    role === 'admin' ? true : isAssignedTo(v, currentWorkerId)
+  const myVideos = useMemo(
+    () => brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name }))).filter(v => isAssignedTo(v, currentWorkerId)),
+    [brands, currentWorkerId]
   );
   const inProgress = myVideos.filter(v => v.qc !== 'aprobado_cliente' && v.qc !== 'sin_iniciar');
   const done = myVideos.filter(v => v.qc === 'aprobado_cliente');
 
-  const workerLoadStatusMap = useMemo(() => {
-    const map: Record<string, { load: WorkerLoad; activeVideos: number; cap: number; label: string }> = {};
-    for (const w of workers) {
-      const cap = getWorkerCapacity(w.id);
-      const activeVideos = getWorkerWorkload(w.id);
-
-      let load: WorkerLoad = "sin_trabajo";
-      let label = `Sin trabajo (0/${cap} vid)`;
-      if (activeVideos >= cap) {
-        load = "lleno";
-        label = `Lleno (${activeVideos}/${cap} vid)`;
-      } else if (activeVideos > 0) {
-        load = "meta";
-        label = `Meta diaria (${activeVideos}/${cap} vid)`;
-      }
-
-      map[w.id] = { load, activeVideos, cap, label };
-    }
-    return map;
-  }, [workers, getWorkerCapacity, getWorkerWorkload]);
-
-  const greeting = role === 'admin' ? 'Panel de administración' : `Hola, ${worker?.name?.split(' ')[0] || ''}`;
-
+  // El administrador tiene su propio Inicio: centro de atención, entregas, equipo y economía
   if (role === 'admin') {
-    return (
-      <div className="p-6 max-w-6xl mx-auto space-y-6">
-        <div>
-          <h2 className="font-display text-3xl font-bold">{greeting}</h2>
-          <p className="text-muted mt-1">Aquí está tu resumen de hoy, {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}.</p>
-        </div>
-
-        <div className="bg-surface-2 border border-line rounded-xl p-5">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
-              <Users size={18} className="text-accent" /> Estado del equipo
-            </h3>
-            <span className="text-xs text-muted-2">Haz clic en cualquier punto o nombre para ver su carga real</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {workers.map(w => {
-              const st = workerLoadStatusMap[w.id] || { load: 'sin_trabajo' as WorkerLoad, activeVideos: 0, cap: 10, label: 'Sin trabajo' };
-              return (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => setSelectedTeamWorkerId(w.id)}
-                  className="flex items-center gap-2.5 bg-surface-3 hover:bg-line/40 border border-line hover:border-accent/40 rounded-lg px-3 py-2.5 text-left transition-colors"
-                >
-                  <span
-                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${workerLoadColor(st.load)}`}
-                    title={st.label}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="text-xs font-medium truncate">{w.name}</p>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${w.online ? 'bg-mint' : 'bg-muted-2'}`} title={w.online ? 'En línea' : 'No en línea'} />
-                    </div>
-                    <p className="text-[10px] text-muted-2 truncate">
-                      {st.label} · {w.online ? 'En línea' : 'Offline'}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <AdminHomePanels
-          externalSelectedWorkerId={selectedTeamWorkerId}
-          onClearExternalWorker={() => setSelectedTeamWorkerId(null)}
-        />
-      </div>
-    );
+    return <AdminHomePanels />;
   }
+
+  const greeting = `Hola, ${worker?.name?.split(' ')[0] || ''}`;
+  const earnings = worker
+    ? workerEarningsSummary(worker, brands, orders, financeSettings, payrollPayments)
+    : null;
+  const payOf = (v: Video & { brandName: string }) => unitEconomics(v, findOrderForVideo(v, v.brandName, orders), financeSettings).creatorPay;
+  const completedLessons = new Set(lessonCompletions[currentWorkerId] || []);
+  const modules = classroomModules
+    .map(m => {
+      const doneCount = m.lessons.filter(l => completedLessons.has(l.id)).length;
+      return { m, doneCount, complete: m.lessons.length > 0 && doneCount === m.lessons.length };
+    })
+    // Primero lo que falta por terminar
+    .sort((a, b) => Number(a.complete) - Number(b.complete))
+    .slice(0, 3);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -114,11 +61,37 @@ export function HomeView() {
         </div>
       </div>
 
+      {/* Ganancias: $X por video · 50% al Aprobado Senda + 50% al Aprobado Cliente */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard icon={Target} label="Puntos hoy" value={worker?.pointsToday || 0} target={goals.daily} sub={`Meta: ${goals.daily}`} accent="accent" onClick={() => setView('perfil')} />
-        <StatCard icon={TrendingUp} label="Puntos del mes" value={worker?.pointsMonth || 0} target={goals.monthly} sub={`Meta: ${goals.monthly}`} accent="mint" onClick={() => setView('perfil')} />
-        <StatCard icon={Flame} label="Racha" value={worker?.streak || 0} target={worker?.bestStreak || 0} sub={`Mejor: ${worker?.bestStreak || 0}`} accent="amber" onClick={() => setView('perfil')} />
+        <EarnCard
+          icon={TrendingUp}
+          label="Ganado este mes"
+          value={earnings?.earnedMonth || 0}
+          sub={`Hoy: ${fmtMoney(earnings?.earnedToday || 0)}`}
+          accent="mint"
+          onClick={() => setView('perfil')}
+        />
+        <EarnCard
+          icon={Wallet}
+          label="Por cobrar"
+          value={earnings?.pending || 0}
+          sub="Se paga en el corte del fin de semana"
+          accent="accent"
+          onClick={() => setView('perfil')}
+        />
+        <EarnCard
+          icon={Hourglass}
+          label="Esperando al cliente"
+          value={earnings?.waitingClientAmount || 0}
+          sub={`${earnings?.waitingClientVideos || 0} video(s) aprobados por SENDA`}
+          accent="amber"
+          onClick={() => setView('perfil')}
+        />
       </div>
+      <p className="text-xs text-muted-2 -mt-3 flex items-center gap-1.5">
+        <Sparkles size={12} className="text-accent" />
+        Ganas {fmtMoney(financeSettings.payPerVideo)} por video: {fmtMoney(financeSettings.payPerVideo * PAY_SPLIT)} cuando SENDA lo aprueba y {fmtMoney(financeSettings.payPerVideo * PAY_SPLIT)} cuando lo aprueba el cliente.
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-surface-2 border border-line rounded-xl p-5">
@@ -132,22 +105,27 @@ export function HomeView() {
             <p className="text-muted text-sm py-6 text-center">No tienes videos en progreso.</p>
           ) : (
             <div className="space-y-2">
-              {inProgress.slice(0, 4).map(v => (
-                <button
-                  key={v.id}
-                  onClick={() => { setSelectedVideo(v); setView('tareas'); }}
-                  className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-2 border border-transparent hover:border-accent/40 rounded-lg text-left transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-accent-dim flex items-center justify-center shrink-0">
-                    <Play size={16} className="text-accent" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{v.name}</p>
-                    <p className="text-xs text-muted">QC: {v.qc === 'pendiente' ? `pendiente ${pendingRoleSuffix(v)}` : v.qc.replace(/_/g, ' ')}</p>
-                  </div>
-                  <QcBadge status={v.qc} suffix={v.qc === 'pendiente' ? pendingRoleSuffix(v) : undefined} />
-                </button>
-              ))}
+              {inProgress.slice(0, 4).map(v => {
+                const earned = videoEarned(v, payOf(v));
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => { setSelectedVideo(v); setView('tareas'); }}
+                    className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-2 border border-transparent hover:border-accent/40 rounded-lg text-left transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-accent-dim flex items-center justify-center shrink-0">
+                      <Play size={16} className="text-accent" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{v.brandName} · {v.name}</p>
+                      <p className="text-xs text-muted">
+                        Vale {fmtMoney(payOf(v))}{earned > 0 ? ` · ya ganaste ${fmtMoney(earned)}` : ''}
+                      </p>
+                    </div>
+                    <QcBadge status={v.qc} suffix={v.qc === 'pendiente' ? pendingRoleSuffix(v) : undefined} />
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -165,10 +143,10 @@ export function HomeView() {
                 <div key={v.id} className="flex items-center gap-3 p-3 bg-surface-3 rounded-lg">
                   <CheckCircle2 size={18} className="text-mint shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{v.name}</p>
-                    <p className="text-xs text-muted">{v.date}</p>
+                    <p className="text-sm font-medium truncate">{v.brandName} · {v.name}</p>
+                    <p className="text-xs text-muted">{(v.clientApprovedAt || v.date || '').slice(0, 10)}</p>
                   </div>
-                  {v.paid100 && <span className="text-xs text-mint font-medium">Pagado</span>}
+                  <span className="text-xs text-mint font-tech font-semibold">+{fmtMoney(videoEarned(v, payOf(v)))}</span>
                 </div>
               ))}
             </div>
@@ -183,102 +161,69 @@ export function HomeView() {
               <GraduationCap size={20} />
             </div>
             <div>
-              <h3 className="font-display text-lg font-semibold">Clases recomendadas</h3>
-              <p className="text-xs text-muted mt-0.5">Sigue aprendiendo a tu ritmo</p>
+              <h3 className="font-display text-lg font-semibold">Capacitaciones</h3>
+              <p className="text-xs text-muted mt-0.5">Clases del equipo en Classroom</p>
             </div>
           </div>
           <button onClick={() => { setSelectedClassroomModuleId(null); setView('classroom'); }} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">
             Ver Classroom <ArrowRight size={14} />
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {CLASSROOM_MODULES.slice(0, 3).map(m => {
-            const totalLessons = m.lessons.length;
-            const shortTitle = m.title.replace(/^Módulo \d+ · /, '');
-            return (
+        {modules.length === 0 ? (
+          <p className="text-sm text-muted text-center py-6 bg-surface-3/40 border border-dashed border-line rounded-lg">
+            Aún no hay capacitaciones publicadas. Cuando el administrador suba clases aparecerán aquí.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {modules.map(({ m, doneCount, complete }) => (
               <button
                 key={m.id}
                 onClick={() => { setSelectedClassroomModuleId(m.id); setView('classroom'); }}
                 className="text-left bg-surface-3 border border-line rounded-lg p-3 hover:border-accent/50 transition-colors group"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center text-accent">
-                    <BookOpen size={15} />
+                  <div className={`w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center ${complete ? 'text-mint' : 'text-accent'}`}>
+                    {complete ? <CheckCircle2 size={15} /> : <BookOpen size={15} />}
                   </div>
                   <ArrowRight size={14} className="text-muted-2 group-hover:text-accent transition-colors mt-1" />
                 </div>
-                <p className="text-sm font-medium mt-3">{shortTitle}</p>
-                <p className="text-xs text-muted mt-1">{totalLessons} lecciones</p>
+                <p className="text-sm font-medium mt-3 truncate">{m.title}</p>
+                <p className="text-xs text-muted mt-1">{doneCount}/{m.lessons.length} clases vistas</p>
+                <div className="h-1 bg-surface-2 rounded-full overflow-hidden mt-2">
+                  <div className={`h-full rounded-full ${complete ? 'bg-mint' : 'bg-accent'}`} style={{ width: `${m.lessons.length ? (doneCount / m.lessons.length) * 100 : 0}%` }} />
+                </div>
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function StatCard({ icon: Icon, label, value, target, sub, accent, onClick }: { icon: typeof Flame; label: string; value: number; target: number; sub: string; accent: string; onClick?: () => void }) {
-  const colorMap: Record<string, { text: string; soft: string; fill: string; border: string }> = {
-    accent: { text: 'text-accent', soft: 'bg-accent-dim', fill: 'bg-accent', border: 'border-accent/30' },
-    mint: { text: 'text-mint', soft: 'bg-mint-dim', fill: 'bg-mint', border: 'border-mint/30' },
-    amber: { text: 'text-amber', soft: 'bg-amber-dim', fill: 'bg-amber', border: 'border-amber/30' },
-  };
-  const colors = colorMap[accent];
-  const percent = Math.min(100, Math.round((value / Math.max(target, 1)) * 100));
-  const isStreak = label === 'Racha';
-  const streakDays = [
-    { label: 'J', active: false },
-    { label: 'V', active: true },
-    { label: 'S', active: true },
-    { label: 'D', active: true },
-    { label: 'L', active: true },
-    { label: 'M', active: true },
-    { label: 'X', active: false },
-  ];
-
-  const nodeColor = accent === 'mint' ? 'var(--mint)' : accent === 'amber' ? 'var(--amber)' : 'var(--accent)';
-
+function EarnCard({ icon: Icon, label, value, sub, accent, onClick }: {
+  icon: typeof Wallet; label: string; value: number; sub: ReactNode; accent: 'accent' | 'mint' | 'amber'; onClick?: () => void;
+}) {
+  const colorMap = {
+    accent: { text: 'text-accent', soft: 'bg-accent-dim', node: 'var(--accent)' },
+    mint: { text: 'text-mint', soft: 'bg-mint-dim', node: 'var(--mint)' },
+    amber: { text: 'text-amber', soft: 'bg-amber-dim', node: 'var(--amber)' },
+  }[accent];
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`relative w-full text-left bg-surface-2 border border-line rounded-xl p-5 transition-colors overflow-hidden ${isStreak ? 'min-h-[160px]' : ''} ${onClick ? 'hover:border-accent/50 hover:bg-surface-3 cursor-pointer' : ''}`}
+      className="relative w-full text-left bg-surface-2 border border-line rounded-xl p-5 transition-colors overflow-hidden hover:border-accent/50 hover:bg-surface-3"
     >
-      <CardNodeDeco color={nodeColor} />
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colors.soft} ${colors.text}`}>
-            <Icon size={20} />
-          </div>
-          <span className="text-sm text-muted">{label}</span>
+      <CardNodeDeco color={colorMap.node} />
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap.soft} ${colorMap.text}`}>
+          <Icon size={20} />
         </div>
-        <span className={`text-xs font-semibold ${colors.text}`}>{percent}%</span>
+        <span className="text-sm text-muted">{label}</span>
       </div>
-      {isStreak ? (
-        <div className="flex items-end justify-between gap-1.5 mt-4">
-          {streakDays.map((day, index) => (
-            <div key={`${day.label}-${index}`} className="flex flex-col items-center gap-1.5">
-              <div className={`w-7 h-7 rounded-md flex items-center justify-center border ${day.active ? `${colors.soft} ${colors.text} ${colors.border}` : 'bg-surface-3 text-muted-2 border-line'}`}>
-                {day.active ? <Flame size={14} /> : <CalendarDays size={13} />}
-              </div>
-              <span className="text-[10px] text-muted-2">{day.label}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div>
-          <div className="flex items-end justify-between">
-            <p className="font-display text-3xl font-bold leading-none">{value}</p>
-            <p className="text-xs text-muted-2">{sub}</p>
-          </div>
-          <div className="relative h-3 bg-surface-3 border border-line rounded-full overflow-hidden mt-4">
-            <div className={`h-full ${colors.fill} rounded-full transition-all duration-500`} style={{ width: `${percent}%` }} />
-            <span className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-text rounded-full shadow-sm transition-all duration-500" style={{ left: `calc(${Math.max(percent, 4)}% - 8px)` }} />
-          </div>
-        </div>
-      )}
-      {isStreak && <p className="text-xs text-muted-2 mt-3">{value} días · {sub}</p>}
+      <p className={`font-display text-3xl font-bold leading-none ${colorMap.text}`}><NumberTicker value={value} /></p>
+      <p className="text-xs text-muted-2 mt-2">{sub}</p>
     </button>
   );
 }
