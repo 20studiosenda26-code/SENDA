@@ -1580,7 +1580,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addOrder = useCallback((o: Omit<Order, 'id' | 'createdAt'>) => {
     const newOrd: Order = {
       ...o,
-      paymentStatus: 'completado',
+      paymentStatus: o.paymentStatus ?? 'completado',
       id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       createdAt: new Date().toISOString(),
     };

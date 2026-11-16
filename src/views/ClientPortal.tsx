@@ -43,7 +43,10 @@ export function ClientPortal() {
   const brand = orderedBrands.find(b => b.id === brandId) || orderedBrands[0] || null;
   const videos = brand ? sortedVideos(brand) : [];
   const video = videos.find(v => v.id === videoId) || null;
-  const order = brand && videos[0] ? findOrderForVideo(videos[0], brand.name, orders) : null;
+  // La copia del cliente usa "brand-<idPedido>"; si aún no hay videos se busca el pedido por ese id o por la marca
+  const order = !brand ? null
+    : videos[0] ? findOrderForVideo(videos[0], brand.name, orders)
+    : orders.find(o => `brand-${o.id}` === brand.id) || orders.find(o => o.brand.trim().toLowerCase() === brand.name.trim().toLowerCase()) || null;
 
   if (!brand) {
     return (
@@ -108,6 +111,7 @@ export function ClientPortal() {
           videos={videos}
           driveUrl={order?.driveFolderUrl || null}
           deliveryLabel={order?.deliveryDate ? `${order.deliveryDate}${order.deliveryTime ? ` · ${order.deliveryTime}` : ''}` : null}
+          plannedCount={order?.videoCount || 0}
           filter={filter}
           onFilter={setFilter}
           onOpen={setVideoId}
@@ -118,9 +122,9 @@ export function ClientPortal() {
 }
 
 function BrandOverview({
-  brand, videos, driveUrl, deliveryLabel, filter, onFilter, onOpen,
+  brand, videos, driveUrl, deliveryLabel, plannedCount, filter, onFilter, onOpen,
 }: {
-  brand: Brand; videos: Video[]; driveUrl: string | null; deliveryLabel: string | null;
+  brand: Brand; videos: Video[]; driveUrl: string | null; deliveryLabel: string | null; plannedCount: number;
   filter: Filter; onFilter: (f: Filter) => void; onOpen: (id: string) => void;
 }) {
   const counts = {
@@ -174,7 +178,13 @@ function BrandOverview({
       </div>
 
       <div className="p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {visible.length === 0 && (
+        {videos.length === 0 ? (
+          <div className="col-span-full text-center py-12 border border-dashed border-line rounded-2xl">
+            <Clock size={26} className="text-amber mx-auto mb-2" />
+            <p className="font-semibold">{plannedCount ? `${plannedCount} videos en producción` : 'Videos en producción'}</p>
+            <p className="text-xs text-muted mt-1">Cada video aparecerá aquí en cuanto el equipo lo entregue{deliveryLabel ? ` (entrega ${deliveryLabel})` : ''}.</p>
+          </div>
+        ) : visible.length === 0 && (
           <p className="col-span-full text-sm text-muted text-center py-10">No hay videos en este filtro.</p>
         )}
         {visible.map((v, i) => <VideoCard key={v.id} video={v} index={i} onOpen={() => onOpen(v.id)} />)}
@@ -247,6 +257,8 @@ function VideoReview({
   const roundsUsed = video.clientFeedbackRoundsUsed ?? 0;
   const maxRounds = video.clientFeedbackMaxRounds ?? 1;
   const canSend = delivered && roundsUsed < maxRounds && video.qc !== 'aprobado_cliente';
+  // Feedback enviado y el equipo corrigiendo: no se aprueba la versión vieja
+  const inCorrection = delivered && video.qc === 'correcciones' && roundsUsed > 0;
 
   const playerRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -522,11 +534,16 @@ function VideoReview({
                 </div>
               </div>
             ) : (
-              <button type="button" disabled={!delivered || drafts.length > 0} onClick={() => setConfirmApprove(true)}
-                title={drafts.length > 0 ? 'Tienes correcciones sin enviar' : undefined}
+              <>
+              {inCorrection && (
+                <p className="text-xs text-muted">El equipo está aplicando tu feedback. Podrás aprobar cuando llegue la versión corregida.</p>
+              )}
+              <button type="button" disabled={!delivered || drafts.length > 0 || inCorrection} onClick={() => setConfirmApprove(true)}
+                title={drafts.length > 0 ? 'Tienes correcciones sin enviar' : inCorrection ? 'Esperando la versión corregida' : undefined}
                 className="w-full py-3 rounded-xl bg-mint text-on-accent text-xs font-bold flex items-center justify-center gap-2 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">
                 <CheckCircle2 size={15} /> Aprobar video
               </button>
+              </>
             )}
           </div>
 

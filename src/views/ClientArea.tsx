@@ -203,8 +203,8 @@ export function ClientHome() {
                         <p className="text-sm font-medium truncate">{o.brand}</p>
                         <p className="text-[11px] text-muted-2 font-tech">{o.invoiceNumber || 'Factura'}{o.invoiceDate ? ` · ${o.invoiceDate}` : ''}</p>
                       </div>
-                      <a href={o.invoiceFileUrl || '#'} download={o.invoiceFileName || 'factura'} className="text-xs text-accent hover:text-accent-strong flex items-center gap-1 shrink-0">
-                        <Download size={13} /> Descargar
+                      <a href={o.invoiceFileUrl || '#'} target="_blank" rel="noreferrer" className="text-xs text-accent hover:text-accent-strong flex items-center gap-1 shrink-0">
+                        <Download size={13} /> Abrir
                       </a>
                     </li>
                   ))}
@@ -271,7 +271,7 @@ export function ClientBriefs() {
   const active = sorted.find(o => o.id === openId) || sorted[0] || null;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5 animate-fadeIn">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="font-display text-2xl sm:text-3xl font-bold">Mis proyectos</h2>

@@ -1,30 +1,27 @@
-import { useState, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { uploadSharedFile } from '../lib/supabaseClient';
 import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { ClientPortal } from './ClientPortal';
-import { CardNodeDeco } from '../components/BrandBackground';
-import { fmtMoneyClean } from '../lib/payrollPdf';
+import { ClientAccountField } from '../components/ClientAccountField';
+import { DriveFolderField } from '../components/DriveFolderField';
 import { takeNavIntent } from '../lib/navIntent';
-import { unitEconomics } from '../lib/economics';
-import type { Order } from '../types';
+import { addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
+import { fmtDate } from '../components/home/home-bits';
+import type { Order, Video } from '../types';
 import {
-  Briefcase, PlusCircle, Calendar, Clock, Layers, DollarSign,
-  CheckCircle2, AlertTriangle, Upload, FileText, Loader2,
-  Sparkles, Scissors, Film, Eye,
-  Users, Cpu, Receipt, Search, ExternalLink, Printer, FolderOpen, Gauge,
-  Play, Lock, Trash2,
+  AlertTriangle, ArrowRight, Briefcase, Calendar, CheckCircle2, Clock, Cpu, DollarSign, ExternalLink,
+  FileText, FolderOpen, Layers, Loader2, Lock, Play, PlusCircle, Printer, Receipt, Search, Trash2,
+  Upload, UserCircle2, Users, X,
 } from 'lucide-react';
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+type Tab = 'portal_videos' | 'nuevo_pedido' | 'cartera';
+type Priority = 'normal' | 'prioritario' | 'urgente' | 'critico';
+type ClientFilter = 'todos' | 'activos' | 'por_cobrar';
 
-function addDaysIso(baseIso: string, days: number): string {
-  const d = new Date(`${baseIso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+const baseBrand = (name: string) => name.split(' · Tanda ')[0].trim();
+const isPaid = (o: Order) => o.paymentStatus !== 'incompleto';
+const isDelivered = (v: Video) => Boolean(v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente');
 
 function formatHour(h: number): string {
   const clamped = Math.max(0, Math.min(23, Math.floor(h)));
@@ -32,1090 +29,790 @@ function formatHour(h: number): string {
   return `${String(clamped).padStart(2, '0')}:${mins >= 30 ? '30' : '00'}`;
 }
 
-function formatCreatedAt(iso?: string): string {
-  if (!iso) return 'Fecha registrada en sistema';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('es-CO', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 }
 
-
-function buildInvoiceCode(brand: string, dateIso?: string): string {
-  const clean = (brand || 'CLI').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'CLI';
-  const datePart = (dateIso || todayIso()).replace(/-/g, '');
-  const rand = Math.floor(100 + Math.random() * 900);
-  return `FAC-${datePart}-${clean}-${rand}`;
+/** Folio consecutivo y estable: FAC-AAAAMMDD-MARC-0007 */
+function nextInvoiceCode(orders: Order[], brand: string, dateIso: string): string {
+  const clean = brand.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'CLI';
+  const seq = orders.reduce((max, o) => {
+    const m = /-(\d{3,})$/.exec(o.invoiceNumber || '');
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0) + 1;
+  return `FAC-${dateIso.replace(/-/g, '')}-${clean}-${String(seq).padStart(4, '0')}`;
 }
+
+const PRIORITY_STYLE: Record<Priority, string> = {
+  critico: 'bg-red-500/15 text-red-400 border-red-500/40',
+  urgente: 'bg-amber-dim text-amber border-amber/40',
+  prioritario: 'bg-accent-dim text-accent border-accent/40',
+  normal: 'bg-mint-dim text-mint border-mint/30',
+};
+const PRIORITY_LABEL: Record<Priority, string> = { critico: 'Crítica', urgente: 'Urgente', prioritario: 'Prioritaria', normal: 'Normal' };
 
 export function ClientsView() {
-  const {
-    orders, brands, workers, financeSettings, capacityConfig,
-    getWorkerCapacity, addOrder, updateOrder, deleteOrder, setView,
-  } = useStore();
-
-  const [activeTab, setActiveTab] = useState<'portal_videos' | 'nuevo_pedido' | 'cartera'>(() => {
+  const { orders, brands, financeSettings } = useStore();
+  const [tab, setTab] = useState<Tab>(() => {
     const intent = takeNavIntent('clientes');
     return intent === 'nuevo_pedido' || intent === 'cartera' ? intent : 'portal_videos';
   });
-  const [selectedClientBrand, setSelectedClientBrand] = useState<string | null>(null);
-  const [searchClient, setSearchClient] = useState('');
+  const [focusBrand, setFocusBrand] = useState<string | null>(null);
 
-  // Borrador de varios puntos de feedback para 1 sola ronda de envío
+  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
+  const summary = useMemo(() => {
+    const active = orders.filter(o => o.status !== 'finalizado');
+    const pending = orders.filter(o => !isPaid(o));
+    const amount = (o: Order) => Math.max(1, o.videoCount || 1) * unitEconomics(null, o, financeSettings).price;
+    return {
+      clients: new Set(orders.map(o => baseBrand(o.brand).toLowerCase()).filter(Boolean)).size,
+      active: active.length,
+      waitingClient: allVideos.filter(v => isDelivered(v) && v.qc !== 'aprobado_cliente' && v.qc !== 'correcciones').length,
+      toCollect: pending.reduce((s, o) => s + amount(o), 0),
+      pendingCount: pending.length,
+      billed: orders.filter(isPaid).reduce((s, o) => s + amount(o), 0),
+    };
+  }, [orders, allVideos, financeSettings]);
+
+  const openFile = (brand: string) => { setFocusBrand(brand); setTab('cartera'); };
+
+  const TABS: { key: Tab; label: string; icon: typeof Play }[] = [
+    { key: 'portal_videos', label: 'Entregas y feedback', icon: Play },
+    { key: 'nuevo_pedido', label: 'Nuevo pedido', icon: PlusCircle },
+    { key: 'cartera', label: `Expedientes (${summary.clients})`, icon: FolderOpen },
+  ];
+
+  return (
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent">Clientes</p>
+          <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Clientes y pedidos</h2>
+          <p className="text-sm text-muted mt-1">Registra pedidos, vincula la cuenta del cliente y sigue sus entregas, feedback y pagos.</p>
+        </div>
+        <div className="flex items-center bg-surface-2 border border-line rounded-xl p-1 gap-1 flex-wrap">
+          {TABS.map(t => {
+            const Icon = t.icon;
+            const on = tab === t.key;
+            return (
+              <button key={t.key} type="button" onClick={() => setTab(t.key)}
+                className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${on ? 'bg-accent text-on-accent' : 'text-muted hover:text-text hover:bg-surface-3'}`}>
+                <Icon size={14} /> {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Kpi icon={<Users size={16} />} label="Clientes" value={String(summary.clients)} tone="accent" />
+        <Kpi icon={<Layers size={16} />} label="Pedidos activos" value={String(summary.active)} tone="accent" />
+        <Kpi icon={<Play size={16} />} label="Esperando al cliente" value={String(summary.waitingClient)} hint="Videos entregados sin respuesta" tone="accent" onClick={() => setTab('portal_videos')} />
+        <Kpi icon={<Receipt size={16} />} label="Por cobrar" value={fmtMoney(summary.toCollect)} hint={`${summary.pendingCount} pedido(s) con pago pendiente`} tone={summary.pendingCount ? 'amber' : 'mint'} onClick={() => setTab('cartera')} />
+        <Kpi icon={<DollarSign size={16} />} label="Facturado y pagado" value={fmtMoney(summary.billed)} tone="mint" />
+      </div>
+
+      {tab === 'portal_videos' && <ClientPortal />}
+      {tab === 'nuevo_pedido' && <NewOrderForm onOpenFile={openFile} />}
+      {tab === 'cartera' && <ClientFiles focusBrand={focusBrand} onNewOrder={() => setTab('nuevo_pedido')} />}
+    </div>
+  );
+}
+
+function Kpi({ icon, label, value, hint, tone, onClick }: {
+  icon: React.ReactNode; label: string; value: string; hint?: string; tone: 'accent' | 'mint' | 'amber'; onClick?: () => void;
+}) {
+  const cls = tone === 'mint' ? 'text-mint bg-mint-dim' : tone === 'amber' ? 'text-amber bg-amber-dim' : 'text-accent bg-accent-dim';
+  const body = (
+    <>
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cls}`}>{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[11px] text-muted-2">{label}</p>
+        <p className="font-tech text-lg font-bold leading-tight truncate">{value}</p>
+        {hint && <p className="text-[10px] text-muted-2 truncate">{hint}</p>}
+      </div>
+    </>
+  );
+  const base = 'bg-surface-2 border border-line rounded-xl p-3.5 flex items-center gap-3 text-left';
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${base} hover:border-accent/40 transition-colors`}>{body}</button>
+  ) : <div className={base}>{body}</div>;
+}
+
+// =====================================================================
+// NUEVO PEDIDO
+// =====================================================================
+function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
+  const { orders, brands, workers, financeSettings, capacityConfig, getWorkerCapacity, addOrder, clientProfiles, setView } = useStore();
 
   const [brandName, setBrandName] = useState('');
-  const [videoCount, setVideoCount] = useState<number>(5);
-  const [deliveryDate, setDeliveryDate] = useState<string>(() => todayIso());
-  const [deliveryTime, setDeliveryTime] = useState<string>('18:00');
+  const [clientId, setClientId] = useState('');
+  const [videoCount, setVideoCount] = useState(5);
+  const [deliveryDate, setDeliveryDate] = useState(() => addDaysIso(todayIso(), 3));
+  const [deliveryTime, setDeliveryTime] = useState('18:00');
   const [complexity, setComplexity] = useState<'simple' | 'estandar' | 'alta'>('estandar');
-
-  const [unitPriceClient, setUnitPriceClient] = useState<number>(() => financeSettings.clientPricePerVideo || 25);
-  // Regla de pago: $X por video a la persona responsable (50% Aprobado Senda + 50% Aprobado Cliente)
-  const [creatorPay, setCreatorPay] = useState<number>(() => financeSettings.payPerVideo ?? 5);
-
+  const [unitPriceClient, setUnitPriceClient] = useState(() => financeSettings.clientPricePerVideo || 25);
+  const [creatorPay, setCreatorPay] = useState(() => financeSettings.payPerVideo ?? 5);
   const [clientNotes, setClientNotes] = useState('');
   const [briefFile, setBriefFile] = useState<{ name: string; url: string } | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<{ name: string; url: string } | null>(null);
-  const [uploadingBrief, setUploadingBrief] = useState(false);
-  const [uploadingInvoice, setUploadingInvoice] = useState(false);
-  const [uploadingOrderBriefId, setUploadingOrderBriefId] = useState<string | null>(null);
-  const [uploadingOrderInvoiceId, setUploadingOrderInvoiceId] = useState<string | null>(null);
-  const [createdToast, setCreatedToast] = useState<string | null>(null);
-  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<'brief' | 'invoice' | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ brand: string; paid: boolean; linked: boolean } | null>(null);
+  const briefRef = useRef<HTMLInputElement | null>(null);
+  const invoiceRef = useRef<HTMLInputElement | null>(null);
 
-  const briefInputRef = useRef<HTMLInputElement | null>(null);
-  const invoiceInputRef = useRef<HTMLInputElement | null>(null);
+  const knownBrands = useMemo(
+    () => Array.from(new Set([...orders.map(o => baseBrand(o.brand)), ...brands.map(b => b.name.trim())].filter(Boolean))).sort(),
+    [orders, brands]
+  );
 
-  // Rol único: todo el equipo produce el video completo
-  const clippers = workers;
-  const editors = workers;
+  // Si la marca ya tiene pedidos con cuenta de cliente, se propone la misma cuenta
+  useEffect(() => {
+    const key = brandName.trim().toLowerCase();
+    if (!key || clientId) return;
+    const prev = orders.find(o => baseBrand(o.brand).toLowerCase() === key && o.clientId);
+    if (prev?.clientId) setClientId(prev.clientId);
+  }, [brandName, orders, clientId]);
 
+  const capacity = useMemo(() => {
+    const safety = Math.max(0.5, (100 - capacityConfig.safetyMarginPct) / 100);
+    const physical = workers.reduce((s, w) => s + getWorkerCapacity(w.id), 0);
+    const dailyLimit = Math.max(1, Math.floor(physical * safety));
+    const load = spreadLoad(buildWorkUnits(orders.filter(o => o.status !== 'finalizado'), brands), u => u.editRemaining);
+    const committed: Record<string, number> = {};
+    for (const [d, n] of Object.entries(load)) committed[d] = Math.ceil(n);
 
-  const capacityPreview = useMemo(() => {
-    const safetyFactor = Math.max(0.5, (100 - capacityConfig.safetyMarginPct) / 100);
-    const physicalClip = clippers.reduce((s, w) => s + getWorkerCapacity(w.id), 0);
-    const physicalEdit = editors.reduce((s, w) => s + getWorkerCapacity(w.id), 0);
-    const safeClip = Math.max(1, Math.floor(physicalClip * safetyFactor));
-    const safeEdit = Math.max(1, Math.floor(physicalEdit * safetyFactor));
-    const safeDailyLimit = Math.min(safeClip, safeEdit);
-    const bottleneckStage = 'Equipo';
+    const target = deliveryDate || todayIso();
+    const mult = complexity === 'alta' ? 1.3 : complexity === 'simple' ? 0.85 : 1;
+    const committedOnTarget = committed[target] || 0;
+    const freeOnTarget = Math.max(0, Math.floor(Math.max(0, dailyLimit - committedOnTarget) / mult));
+    const fits = videoCount <= freeOnTarget;
+    const hoursLeft = Math.max(1, Math.round((new Date(`${target}T${deliveryTime || '18:00'}:00`).getTime() - Date.now()) / 3600000));
+    const loadRatio = (committedOnTarget + videoCount * mult) / dailyLimit;
 
-    // Mismo motor que Capacidad: cada video pendiente cuenta una vez, repartido hasta su entrega
-    const activeOrders = orders.filter(o => o.status !== 'finalizado');
-    const load = spreadLoad(buildWorkUnits(activeOrders, brands), u => u.editRemaining);
-    const committedByDate: Record<string, number> = {};
-    for (const [d, n] of Object.entries(load)) committedByDate[d] = Math.ceil(n);
-    const inProgressBoard = 0;
-    const targetDate = deliveryDate || todayIso();
-    const committedOnTarget =
-      (committedByDate[targetDate] || 0) + (targetDate === todayIso() ? inProgressBoard : 0);
-
-    const complexityMultiplier = complexity === 'alta' ? 1.3 : complexity === 'simple' ? 0.85 : 1.0;
-    const freeSafeOnTarget = Math.max(0, safeDailyLimit - committedOnTarget);
-    const maxAcceptableOnTarget = Math.floor(freeSafeOnTarget / complexityMultiplier);
-    const fitsInSingleDay = videoCount <= maxAcceptableOnTarget;
-
-    const nowMs = Date.now();
-    const deadlineMs = new Date(`${targetDate}T${deliveryTime || '18:00'}:00`).getTime();
-    const hoursUntilDeadline = Math.max(1, Math.round((deadlineMs - nowMs) / 3600000));
-    const loadRatio = (committedOnTarget + videoCount * complexityMultiplier) / Math.max(1, safeDailyLimit);
-
-    let autoPriority: 'normal' | 'prioritario' | 'urgente' | 'critico' = 'normal';
-    let priorityReason = 'Holgura suficiente y carga dentro del rango operativo.';
-
-    if (hoursUntilDeadline <= capacityConfig.urgentThresholdHours || (targetDate <= todayIso() && !fitsInSingleDay)) {
-      autoPriority = 'critico';
-      priorityReason = `Entrega en ~${hoursUntilDeadline}h con alta exigencia sobre el cupo del día.`;
-    } else if (hoursUntilDeadline <= 24 || !fitsInSingleDay || (complexity === 'alta' && videoCount >= 10)) {
-      autoPriority = 'urgente';
-      priorityReason = !fitsInSingleDay
-        ? 'El volumen supera el cupo libre del día; el motor activa partición automática por tandas.'
-        : `Ventana menor a 24h (${hoursUntilDeadline}h restantes).`;
-    } else if (hoursUntilDeadline <= 48 || loadRatio >= 0.75 || complexity === 'alta') {
-      autoPriority = 'prioritario';
-      priorityReason = `Ocupación proyectada del ${Math.min(100, Math.round(loadRatio * 100))}% en la fecha objetivo.`;
+    let priority: Priority = 'normal';
+    let reason = 'Hay holgura suficiente y la carga del equipo está dentro de lo normal.';
+    if (hoursLeft <= capacityConfig.urgentThresholdHours || (target <= todayIso() && !fits)) {
+      priority = 'critico';
+      reason = `Entrega en ~${hoursLeft} h con el cupo del día casi lleno.`;
+    } else if (hoursLeft <= 24 || !fits || (complexity === 'alta' && videoCount >= 10)) {
+      priority = 'urgente';
+      reason = !fits ? 'El volumen supera el cupo libre del día: se reparte en tandas.' : `Quedan menos de 24 h (${hoursLeft} h).`;
+    } else if (hoursLeft <= 48 || loadRatio >= 0.75 || complexity === 'alta') {
+      priority = 'prioritario';
+      reason = `Ocupación proyectada del ${Math.min(100, Math.round(loadRatio * 100))}% en la fecha de entrega.`;
     }
 
-    const batches: { index: number; date: string; videos: number }[] = [];
+    // Reparto por tandas desde la fecha de entrega
+    const batches: { date: string; videos: number }[] = [];
     let remaining = Math.max(1, videoCount);
-    let cursor = 0;
-
-    while (remaining > 0 && cursor < 20) {
-      const dStr = addDaysIso(targetDate, cursor);
-      const already = (committedByDate[dStr] || 0) + (dStr === todayIso() ? inProgressBoard : 0);
-      const freeRaw = Math.max(0, safeDailyLimit - already);
-      const maxDay = Math.max(cursor === 0 ? 0 : 1, Math.floor(freeRaw / complexityMultiplier));
-
-      if (maxDay > 0) {
-        const alloc = Math.min(remaining, maxDay);
-        batches.push({ index: batches.length + 1, date: dStr, videos: alloc });
-        remaining -= alloc;
+    for (let i = 0; remaining > 0 && i < 20; i++) {
+      const d = addDaysIso(target, i);
+      const free = Math.max(i === 0 ? 0 : 1, Math.floor(Math.max(0, dailyLimit - (committed[d] || 0)) / mult));
+      if (free > 0) {
+        const n = Math.min(remaining, free);
+        batches.push({ date: d, videos: n });
+        remaining -= n;
       }
-      cursor++;
     }
-
-    const finalDate = batches.length > 0 ? batches[batches.length - 1].date : targetDate;
     const workHours = Math.max(4, capacityConfig.workdayEndHour - capacityConfig.workdayStartHour);
-    const prioSpeed = autoPriority === 'critico' ? 0.65 : autoPriority === 'urgente' ? 0.8 : autoPriority === 'prioritario' ? 0.9 : 1.0;
-    const lastBatch = batches[batches.length - 1];
-    const ratio = lastBatch ? Math.min(1, lastBatch.videos / Math.max(1, safeDailyLimit)) : 0.5;
-    const startH = capacityConfig.workdayStartHour + Math.max(1.5, ratio * (workHours - 2) * prioSpeed);
-    const winStart = Math.min(capacityConfig.workdayEndHour - 2, Math.max(capacityConfig.workdayStartHour + 1, startH));
-    const winEnd = Math.min(capacityConfig.workdayEndHour, winStart + 2);
-
-    const etaText = `${finalDate === todayIso() ? 'Hoy' : finalDate} entre ${formatHour(winStart)} y ${formatHour(winEnd)}`;
-
-    const avgClipperCap = Math.max(1, capacityConfig.defaultClipperDailyVideos || 4);
-    const avgEditorCap = Math.max(1, capacityConfig.defaultEditorDailyVideos || 4);
-    const firstBatchVideos = batches[0]?.videos || videoCount;
-    const recommendedClippers = Math.min(Math.max(1, clippers.length), Math.max(1, Math.ceil((firstBatchVideos * complexityMultiplier) / avgClipperCap)));
-    const recommendedEditors = Math.min(Math.max(1, editors.length), Math.max(1, Math.ceil((firstBatchVideos * complexityMultiplier) / avgEditorCap)));
-    const daySaturationPct = Math.min(100, Math.round(((committedOnTarget + firstBatchVideos) / Math.max(1, safeDailyLimit)) * 100));
-    const pacePerHour = +(firstBatchVideos / workHours).toFixed(1);
-
+    const last = batches[batches.length - 1];
+    const ratio = last ? Math.min(1, last.videos / dailyLimit) : 0.5;
+    const start = Math.min(capacityConfig.workdayEndHour - 2, Math.max(capacityConfig.workdayStartHour + 1, capacityConfig.workdayStartHour + Math.max(1.5, ratio * (workHours - 2))));
+    const finalDate = last?.date || target;
+    const perPerson = Math.max(1, capacityConfig.defaultClipperDailyVideos || 4);
     return {
-      safeDailyLimit,
-      bottleneckStage,
-      committedOnTarget,
-      freeSafeOnTarget,
-      maxAcceptableOnTarget,
-      fitsInSingleDay,
-      batches,
-      finalDate,
-      etaText,
-      autoPriority,
-      priorityReason,
-      hoursUntilDeadline,
-      recommendedClippers,
-      recommendedEditors,
-      daySaturationPct,
-      pacePerHour,
-      workHours,
+      dailyLimit, freeOnTarget, fits, priority, reason, batches,
+      eta: `${finalDate === todayIso() ? 'Hoy' : fmtDate(finalDate)} entre ${formatHour(start)} y ${formatHour(Math.min(capacityConfig.workdayEndHour, start + 2))}`,
+      people: Math.min(Math.max(1, workers.length), Math.max(1, Math.ceil(((batches[0]?.videos || videoCount) * mult) / perPerson))),
+      saturation: Math.min(100, Math.round(((committedOnTarget + (batches[0]?.videos || videoCount)) / dailyLimit) * 100)),
     };
-  }, [
-    clippers,
-    editors,
-    orders,
-    brands,
-    deliveryDate,
-    deliveryTime,
-    videoCount,
-    complexity,
-    capacityConfig,
-    getWorkerCapacity,
-  ]);
+  }, [workers, getWorkerCapacity, capacityConfig, orders, brands, deliveryDate, deliveryTime, complexity, videoCount]);
 
-  const financialPreview = useMemo(() => {
-    const count = Math.max(1, videoCount || 1);
-    const grossTotal = count * Math.max(0, unitPriceClient);
-    const payrollTotal = count * Math.max(0, creatorPay);
-    const netMargin = grossTotal - payrollTotal;
-    const marginPct = grossTotal > 0 ? Math.round((netMargin / grossTotal) * 100) : 0;
-
-    return {
-      grossTotal,
-      payrollTotal,
-      netMargin,
-      marginPct,
-    };
+  const money = useMemo(() => {
+    const gross = videoCount * unitPriceClient;
+    const team = videoCount * creatorPay;
+    return { gross, team, net: gross - team, pct: gross > 0 ? Math.round(((gross - team) / gross) * 100) : 0 };
   }, [videoCount, unitPriceClient, creatorPay]);
 
-  const clientDirectory = useMemo(() => {
-    const map = new Map<string, {
-      brand: string;
-      totalOrders: number;
-      totalVideosOrdered: number;
-      videosCompletedClient: number;
-      videosApprovedSenda: number;
-      grossBilled: number;
-      creatorCost: number;
-      netProfit: number;
-      latestOrderAt: string;
-      ordersList: Order[];
-    }>();
-
-    for (const o of orders) {
-      const rawBrand = o.brand.trim();
-      if (!rawBrand) continue;
-      const baseBrand = rawBrand.split(' · Tanda ')[0].trim();
-
-      const existing = map.get(baseBrand) || {
-        brand: baseBrand,
-        totalOrders: 0,
-        totalVideosOrdered: 0,
-        videosCompletedClient: 0,
-        videosApprovedSenda: 0,
-        grossBilled: 0,
-        creatorCost: 0,
-        netProfit: 0,
-        latestOrderAt: o.createdAt || '',
-        ordersList: [],
-      };
-
-      const count = Math.max(1, o.videoCount || 1);
-      const eco = unitEconomics(null, o, financeSettings);
-      const gross = count * eco.price;
-      const cost = count * eco.creatorPay;
-
-      existing.totalOrders += 1;
-      existing.totalVideosOrdered += count;
-      existing.grossBilled += gross;
-      existing.creatorCost += cost;
-      existing.netProfit += gross - cost;
-      if (o.createdAt && (!existing.latestOrderAt || o.createdAt > existing.latestOrderAt)) {
-        existing.latestOrderAt = o.createdAt;
-      }
-      existing.ordersList.push(o);
-
-      const brandObj = brands.find(b => b.name.trim().toLowerCase() === baseBrand.toLowerCase());
-      if (brandObj) {
-        existing.videosCompletedClient = brandObj.videos.filter(v => v.qc === 'aprobado_cliente').length;
-        existing.videosApprovedSenda = brandObj.videos.filter(v => v.qc === 'aprobado_senda').length;
-      }
-
-      map.set(baseBrand, existing);
-    }
-
-    return Array.from(map.values()).sort((a, b) => b.grossBilled - a.grossBilled);
-  }, [orders, brands, financeSettings]);
-
-  const filteredClients = useMemo(() => {
-    return clientDirectory.filter(c => {
-      return !searchClient.trim() || c.brand.toLowerCase().includes(searchClient.trim().toLowerCase());
-    });
-  }, [clientDirectory, searchClient]);
-
-  const activeClient = useMemo(() => {
-    if (!filteredClients.length) return null;
-    if (selectedClientBrand) {
-      const found = filteredClients.find(c => c.brand === selectedClientBrand);
-      if (found) return found;
-    }
-    return filteredClients[0];
-  }, [filteredClients, selectedClientBrand]);
-
-  const handleUploadBrief = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+  const upload = async (kind: 'brief' | 'invoice', f: File | undefined) => {
     if (!f) return;
-    setUploadingBrief(true);
+    setUploading(kind);
+    setUploadError(null);
     try {
-      const url = await uploadSharedFile(f, 'client-briefs');
-      setBriefFile({ name: f.name, url });
+      const url = await uploadSharedFile(f, kind === 'brief' ? 'client-briefs' : 'client-invoices');
+      (kind === 'brief' ? setBriefFile : setInvoiceFile)({ name: f.name, url });
+    } catch {
+      setUploadError(`No se pudo subir ${kind === 'brief' ? 'el brief' : 'la factura'}. Intenta de nuevo.`);
     } finally {
-      setUploadingBrief(false);
+      setUploading(null);
     }
   };
 
-  const handleUploadInvoice = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setUploadingInvoice(true);
-    try {
-      const url = await uploadSharedFile(f, 'client-invoices');
-      setInvoiceFile({ name: f.name, url });
-    } finally {
-      setUploadingInvoice(false);
-    }
-  };
+  const pastDate = deliveryDate < todayIso();
+  const canSubmit = Boolean(brandName.trim()) && videoCount > 0 && !uploading && !pastDate;
 
-  const handleUploadExistingOrderBrief = async (orderId: string, f: File) => {
-    setUploadingOrderBriefId(orderId);
-    try {
-      const url = await uploadSharedFile(f, 'client-briefs');
-      updateOrder(orderId, { briefFileName: f.name, briefFileUrl: url });
-    } finally {
-      setUploadingOrderBriefId(null);
-    }
-  };
-
-  const handleUploadExistingOrderInvoice = async (orderId: string, f: File) => {
-    setUploadingOrderInvoiceId(orderId);
-    try {
-      const url = await uploadSharedFile(f, 'client-invoices');
-      updateOrder(orderId, {
-        invoiceFileName: f.name,
-        invoiceFileUrl: url,
-        paymentStatus: 'completado',
-      });
-    } finally {
-      setUploadingOrderInvoiceId(null);
-    }
-  };
-
-  const handlePrintInvoice = (ord: Order) => {
-    const count = Math.max(1, ord.videoCount || 1);
-    const unitPrice = ord.unitPriceClient ?? financeSettings.clientPricePerVideo;
-    const total = count * unitPrice;
-    const invCode = ord.invoiceNumber || buildInvoiceCode(ord.brand, ord.deliveryDate);
-    const win = window.open('', '_blank', 'width=840,height=720');
-    if (!win) return;
-
-    win.document.write(`<!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <title>Factura ${invCode} - SENDA</title>
-        <style>
-          body { font-family: 'Inter', -apple-system, sans-serif; background: #0f1216; color: #f1f5f9; padding: 40px; }
-          .card { max-width: 720px; margin: 0 auto; background: #181c22; border: 1px solid #2a303c; border-radius: 20px; padding: 36px; }
-          .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-          .brand { font-size: 24px; font-weight: 800; letter-spacing: 0.08em; color: #35D6E4; }
-          .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase; background: rgba(111,231,200,0.15); color: #6FE7C8; border: 1px solid #6FE7C8; }
-          table { width: 100%; border-collapse: collapse; margin-top: 28px; }
-          th, td { padding: 14px 12px; text-align: left; border-bottom: 1px solid #2a303c; font-size: 14px; }
-          th { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
-          .total { font-size: 22px; font-weight: 800; color: #6FE7C8; }
-          .meta { color: #94a3b8; font-size: 13px; line-height: 1.6; }
-          @media print { body { background: #fff; color: #111; padding: 0; } .card { border: 1px solid #ddd; background: #fff; color: #111; } }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <div class="row">
-            <div>
-              <div class="brand">SENDA STUDIO</div>
-              <p class="meta">Factura Comercial de Producción Audiovisual<br/>Folio: <strong>${invCode}</strong></p>
-            </div>
-            <div style="text-align:right">
-              <span class="badge">PAGO 100% VERIFICADO</span>
-              <p class="meta" style="margin-top:8px">Fecha de solicitud: ${formatCreatedAt(ord.createdAt)}<br/>Fecha límite entrega: ${ord.deliveryDate} · ${ord.deliveryTime}</p>
-            </div>
-          </div>
-          <hr style="border:none;border-top:1px solid #2a303c;margin:20px 0"/>
-          <div class="row">
-            <div>
-              <p class="meta" style="margin:0">CLIENTE / MARCA TITULAR</p>
-              <h2 style="margin:4px 0 0 0;font-size:20px">${ord.brand}</h2>
-            </div>
-            <div style="text-align:right">
-              <p class="meta" style="margin:0">COMPLEJIDAD / PRIORIDAD MOTOR</p>
-              <p style="margin:4px 0 0 0;font-weight:700;text-transform:uppercase">${ord.complexity || 'estandar'} · ${ord.priority || 'normal'}</p>
-            </div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Concepto</th>
-                <th>Cantidad</th>
-                <th>Tarifa Unitaria</th>
-                <th>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Producción y Edición de Videos Comerciales (${ord.brand})</td>
-                <td>${count} videos</td>
-                <td>${fmtMoneyClean(unitPrice)}</td>
-                <td><strong>${fmtMoneyClean(total)}</strong></td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="row" style="margin-top:24px;align-items:center">
-            <div class="meta">
-              <strong>Brief / Notas:</strong> ${ord.clientNotes || 'Sin notas adicionales'}<br/>
-              <strong>Factura adjunta:</strong> ${ord.invoiceFileName || 'Verificada en sistema'}
-            </div>
-            <div style="text-align:right">
-              <span class="meta">TOTAL FACTURADO (100%)</span>
-              <div class="total">${fmtMoneyClean(total)}</div>
-            </div>
-          </div>
-        </div>
-        <script>setTimeout(() => window.print(), 300);</script>
-      </body>
-      </html>`);
-    win.document.close();
-  };
-
-  // SOLO permite ingresar el pedido si la factura de pago (100%) ya fue subida
-  const handleInjectOrder = (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanBrand = brandName.trim();
-    if (!cleanBrand || videoCount <= 0 || !invoiceFile) return;
-
-    const baseInvoice = buildInvoiceCode(cleanBrand, deliveryDate);
-
+    if (!canSubmit) return;
+    const brand = brandName.trim();
     addOrder({
-      brand: cleanBrand,
+      brand,
       videoCount,
       deliveryDate,
       deliveryTime,
-      status: "sin_asignar",
+      status: 'sin_asignar',
       assignedWorkerIds: [],
       clipperId: null,
       editorId: null,
       unitPriceClient,
       creatorPayPerVideo: creatorPay,
       complexity,
-      priority: capacityPreview.autoPriority,
-      paymentStatus: "completado",
-      invoiceNumber: baseInvoice,
+      priority: capacity.priority,
+      paymentStatus: invoiceFile ? 'completado' : 'incompleto',
+      invoiceNumber: nextInvoiceCode(orders, brand, todayIso()),
       invoiceDate: todayIso(),
-      invoiceFileName: invoiceFile.name,
-      invoiceFileUrl: invoiceFile.url,
+      invoiceFileName: invoiceFile?.name || null,
+      invoiceFileUrl: invoiceFile?.url || null,
       briefFileName: briefFile?.name || null,
       briefFileUrl: briefFile?.url || null,
-      clientNotes: clientNotes.trim() || `ETA: ${capacityPreview.etaText}`,
+      clientNotes: clientNotes.trim() || null,
+      clientId: clientId || null,
     });
-
-    setSelectedClientBrand(cleanBrand);
-    setBrandName("");
-    setClientNotes("");
+    setCreated({ brand, paid: Boolean(invoiceFile), linked: Boolean(clientId) });
+    setBrandName('');
+    setClientId('');
+    setClientNotes('');
     setBriefFile(null);
     setInvoiceFile(null);
-    setView("tareas");
   };
 
-  const priorityBadgeStyle = (p?: string) => {
-    switch (p) {
-      case 'critico':
-        return 'bg-red-500/15 text-red-400 border-red-500/40';
-      case 'urgente':
-        return 'bg-amber-dim text-amber border-amber/40';
-      case 'prioritario':
-        return 'bg-accent-dim text-accent border-accent/40';
-      default:
-        return 'bg-mint-dim/40 text-mint border-mint/30';
-    }
-  };
+  const input = 'w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2';
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Cabecera con las 3 pestañas entrelazadas: Portal Clientes (Videos y Feedback) | Nuevo Pedido (Factura 100%) | Cartera */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-accent-dim border border-accent/40 text-accent flex items-center justify-center shadow-[0_0_24px_-4px_rgba(53,214,228,0.4)]">
-            <Briefcase size={22} />
-          </div>
-          <div>
-            <h2 className="font-display text-2xl sm:text-3xl font-bold">Clientes y Pedidos Comerciales</h2>
-            <p className="text-xs text-muted">
-              Portal de revisión de videos por cliente (1 ronda de feedback), ingreso con factura 100% pagada y expedientes
-            </p>
-          </div>
+    <div className="space-y-4">
+      {created && (
+        <div className="bg-mint-dim border border-mint/40 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap animate-fadeIn">
+          <CheckCircle2 size={18} className="text-mint shrink-0" />
+          <p className="text-sm flex-1 min-w-[220px]">
+            <strong>Pedido de {created.brand} registrado.</strong>{' '}
+            <span className="text-muted">
+              {created.paid ? 'Pago verificado.' : 'Quedó con pago pendiente.'}{' '}
+              {created.linked ? 'El cliente ya lo ve en su portal.' : 'Aún sin cuenta de cliente: vincúlala en Expedientes.'}
+            </span>
+          </p>
+          <button type="button" onClick={() => onOpenFile(created.brand)} className="text-xs font-semibold text-accent border border-accent/40 rounded-lg px-3 py-1.5 hover:bg-accent/10">Ver expediente</button>
+          <button type="button" onClick={() => setView('tareas')} className="text-xs font-semibold bg-accent text-on-accent rounded-lg px-3 py-1.5 hover:bg-accent-strong flex items-center gap-1">Asignar en Tareas <ArrowRight size={13} /></button>
+          <button type="button" onClick={() => setCreated(null)} title="Cerrar" className="text-muted hover:text-text"><X size={15} /></button>
         </div>
+      )}
 
-        <div className="flex items-center bg-surface-2 border border-line rounded-2xl p-1 gap-1 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setActiveTab('portal_videos')}
-            className={`px-4 py-2 rounded-xl text-xs font-display font-bold flex items-center gap-2 transition-all ${
-              activeTab === 'portal_videos'
-                ? 'bg-accent text-on-accent shadow-[0_0_20px_-4px_rgba(53,214,228,0.55)]'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <Play size={14} />
-            Clientes · Videos y Feedback
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('nuevo_pedido')}
-            className={`px-4 py-2 rounded-xl text-xs font-display font-bold flex items-center gap-2 transition-all ${
-              activeTab === 'nuevo_pedido'
-                ? 'bg-mint text-on-accent shadow-[0_0_20px_-4px_rgba(111,231,200,0.55)]'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <PlusCircle size={14} />
-            Nuevo Pedido (Pago 100%)
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('cartera')}
-            className={`px-4 py-2 rounded-xl text-xs font-display font-bold flex items-center gap-2 transition-all ${
-              activeTab === 'cartera'
-                ? 'bg-surface-3 text-accent border border-accent/40'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <FolderOpen size={14} />
-            Facturas y Expedientes ({clientDirectory.length})
-          </button>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          PESTAÑA 1: PORTAL DE CLIENTES (SELECCIONAR MARCA -> VIDEO 1, VIDEO 2... -> 1 RONDA DE FEEDBACK)
-         ========================================================================= */}
-      {activeTab === 'portal_videos' && <ClientPortal />}
-
-      {/* =========================================================================
-          PESTAÑA 2: NUEVO PEDIDO DE CLIENTE (PAGO 100% Y FACTURA OBLIGATORIA)
-         ========================================================================= */}
-      {activeTab === 'nuevo_pedido' && (
-        <form onSubmit={handleInjectOrder} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          <div className="lg:col-span-7 bg-surface-2 border border-line rounded-3xl p-6 space-y-5 relative overflow-hidden">
-            <CardNodeDeco color="var(--accent)" />
-
-            <div className="flex items-center justify-between relative z-10">
-              <span className="font-tech text-xs uppercase tracking-wider text-accent font-semibold flex items-center gap-1.5">
-                <PlusCircle size={14} /> Nuevo Pedido de Cliente
-              </span>
-              <span className="text-[11px] font-tech text-mint">Requisito obligatorio: Pago 100% + Factura adjunta</span>
+      <form onSubmit={submit} className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl divide-y divide-line">
+          {/* 1. Cliente */}
+          <section className="p-5 space-y-3">
+            <StepTitle n={1} title="Cliente y volumen" />
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <label className="sm:col-span-5 block">
+                <span className="text-xs text-muted block mb-1">Marca *</span>
+                <input list="senda-brands" value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="Nombre de la marca" required className={input} />
+                <datalist id="senda-brands">{knownBrands.map(b => <option key={b} value={b} />)}</datalist>
+              </label>
+              <label className="sm:col-span-4 block">
+                <span className="text-xs text-muted block mb-1">Cuenta del cliente</span>
+                <select value={clientId} onChange={e => setClientId(e.target.value)} className={`${input} cursor-pointer`}>
+                  <option value="">Sin vincular (no lo ve)</option>
+                  {clientProfiles.map(c => <option key={c.id} value={c.id}>{c.name}{c.email ? ` · ${c.email}` : ''}</option>)}
+                </select>
+              </label>
+              <label className="sm:col-span-3 block">
+                <span className="text-xs text-muted block mb-1">Videos *</span>
+                <input type="number" min={1} max={200} value={videoCount}
+                  onChange={e => setVideoCount(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
+                  className={`${input} font-tech font-bold text-accent`} />
+              </label>
             </div>
+            {clientProfiles.length === 0 && (
+              <p className="text-[11px] text-muted-2 flex items-center gap-1.5">
+                <UserCircle2 size={12} /> No hay cuentas con rol Cliente.
+                <button type="button" onClick={() => setView('administracion')} className="text-accent hover:underline">Crear una en Admin</button>
+              </p>
+            )}
+          </section>
 
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 relative z-10">
-              <div className="sm:col-span-8">
-                <label className="text-xs text-muted block mb-1">Nombre del Cliente / Marca</label>
-                <input
-                  value={brandName}
-                  onChange={e => setBrandName(e.target.value)}
-                  placeholder="Ej. Nike, Gymshark, Ecommerce..."
-                  required
-                  className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm font-medium outline-none focus:border-accent"
-                />
-              </div>
-
-              <div className="sm:col-span-4">
-                <label className="text-xs text-muted block mb-1">Cantidad de videos</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={videoCount}
-                  onChange={e => setVideoCount(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm font-tech font-bold text-accent outline-none focus:border-accent"
-                />
-              </div>
-            </div>
-
-            <div className="bg-surface-3/80 border border-line rounded-2xl p-4 space-y-3 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-tech uppercase tracking-wider text-mint font-semibold flex items-center gap-1.5">
-                  <DollarSign size={13} /> Base Comercial por Video (Finanzas y Nóminas)
-                </span>
-                <span className="font-tech text-xs text-mint font-bold">
-                  Margen proyecto: {financialPreview.marginPct}%
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <label className="block">
-                  <span className="text-[11px] text-muted-2 block mb-1">Cobro Cliente / vid</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={unitPriceClient}
-                    onChange={e => setUnitPriceClient(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full bg-surface-2 border border-line rounded-lg px-3 py-1.5 text-sm font-tech text-text outline-none focus:border-mint"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-[11px] text-muted-2 block mb-1 flex items-center gap-1">
-                    <Scissors size={10} className="text-accent" /> Pago al equipo / vid
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={creatorPay}
-                    onChange={e => setCreatorPay(Math.max(0, Number(e.target.value) || 0))}
-                    className="w-full bg-surface-2 border border-line rounded-lg px-3 py-1.5 text-sm font-tech text-accent outline-none focus:border-accent"
-                  />
-                </label>
-
-                <div className="block">
-                  <span className="text-[11px] text-muted-2 block mb-1 flex items-center gap-1">
-                    <Film size={10} className="text-mint" /> Se paga en 2 tramos
-                  </span>
-                  <p className="w-full bg-surface-2/60 border border-dashed border-line rounded-lg px-3 py-1.5 text-[11px] font-tech text-muted leading-snug">
-                    {fmtMoneyClean(creatorPay / 2)} Aprobado Senda + {fmtMoneyClean(creatorPay / 2)} Aprobado Cliente
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
-              <div className="bg-surface-3/80 border border-line rounded-2xl p-3.5 space-y-2">
-                <span className="text-[11px] font-tech uppercase text-muted-2 flex items-center gap-1">
-                  <Calendar size={12} className="text-accent" /> Fecha y Hora Límite
-                </span>
+          {/* 2. Entrega */}
+          <section className="p-5 space-y-3">
+            <StepTitle n={2} title="Entrega y complejidad" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <span className="text-xs text-muted flex items-center gap-1 mb-1"><Calendar size={12} className="text-accent" /> Fecha y hora límite</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="date"
-                    value={deliveryDate}
-                    onChange={e => setDeliveryDate(e.target.value)}
-                    className="bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs font-tech outline-none focus:border-accent"
-                  />
-                  <input
-                    type="time"
-                    value={deliveryTime}
-                    onChange={e => setDeliveryTime(e.target.value)}
-                    className="bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs font-tech outline-none focus:border-accent"
-                  />
+                  <input type="date" min={todayIso()} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className={`${input} font-tech ${pastDate ? 'border-red-500/60' : ''}`} />
+                  <input type="time" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} className={`${input} font-tech`} />
                 </div>
+                {pastDate && <p className="text-[11px] text-red-400 mt-1">La fecha ya pasó.</p>}
               </div>
-
-              <div className="bg-surface-3/80 border border-line rounded-2xl p-3.5 space-y-2">
-                <span className="text-[11px] font-tech uppercase text-muted-2 flex items-center gap-1">
-                  <Layers size={12} className="text-mint" /> Complejidad Operativa
-                </span>
+              <div>
+                <span className="text-xs text-muted flex items-center gap-1 mb-1"><Layers size={12} className="text-accent" /> Complejidad</span>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {(['simple', 'estandar', 'alta'] as const).map(c => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setComplexity(c)}
-                      className={`py-1.5 rounded-lg text-xs font-semibold capitalize border transition-all ${
-                        complexity === c
-                          ? 'bg-accent text-on-accent border-accent'
-                          : 'bg-surface-2 text-muted border-line hover:text-text'
-                      }`}
-                    >
-                      {c === 'alta' ? 'Compleja' : c}
+                  {([['simple', 'Simple'], ['estandar', 'Estándar'], ['alta', 'Compleja']] as const).map(([c, label]) => (
+                    <button key={c} type="button" onClick={() => setComplexity(c)}
+                      className={`py-2 rounded-lg text-xs font-semibold border transition-colors ${complexity === c ? 'bg-accent text-on-accent border-accent' : 'bg-surface-3 text-muted border-line hover:text-text'}`}>
+                      {label}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
+          </section>
 
-            <div className="bg-surface-3/90 border border-line rounded-2xl p-4 space-y-2.5 relative z-10">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-[11px] font-tech uppercase text-muted-2 flex items-center gap-1.5">
-                  <Cpu size={13} className="text-accent" /> Regla de Prioridad y Motor de Capacidad (Automático)
-                </span>
-                <span className={`font-tech text-[11px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${priorityBadgeStyle(capacityPreview.autoPriority)}`}>
-                  Prioridad Motor: {capacityPreview.autoPriority}
-                </span>
-              </div>
-              <p className="text-xs text-muted leading-relaxed">
-                {capacityPreview.priorityReason}
-              </p>
-            </div>
-
-            {/* Factura de Pago 100% Obligatoria + Brief del Cliente */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
-              <div>
-                <span className="text-[11px] font-tech uppercase text-mint font-semibold block mb-1.5 flex items-center gap-1">
-                  <Receipt size={12} /> Factura de Pago 100% (Obligatoria *)
-                </span>
-                <input
-                  ref={invoiceInputRef}
-                  type="file"
-                  accept=".pdf,image/*,*/*"
-                  className="hidden"
-                  onChange={e => void handleUploadInvoice(e)}
-                />
-                <button
-                  type="button"
-                  onClick={() => invoiceInputRef.current?.click()}
-                  disabled={uploadingInvoice}
-                  className={`w-full py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-colors ${
-                    invoiceFile
-                      ? 'bg-mint-dim/60 border-mint text-mint'
-                      : 'bg-amber-dim/20 border-amber/50 border-dashed text-amber hover:border-amber'
-                  }`}
-                >
-                  {uploadingInvoice ? <Loader2 size={14} className="animate-spin" /> : invoiceFile ? <CheckCircle2 size={14} /> : <Upload size={14} />}
-                  <span className="truncate">
-                    {uploadingInvoice ? 'Subiendo factura...' : invoiceFile ? `Factura cargada: ${invoiceFile.name}` : 'Subir Factura del Pago 100% (Requerido)'}
-                  </span>
-                </button>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-tech uppercase text-muted-2 block mb-1.5">Brief del Cliente</span>
-                <input
-                  ref={briefInputRef}
-                  type="file"
-                  accept=".pdf,.doc,.docx,image/*,*/*"
-                  className="hidden"
-                  onChange={e => void handleUploadBrief(e)}
-                />
-                <button
-                  type="button"
-                  onClick={() => briefInputRef.current?.click()}
-                  disabled={uploadingBrief}
-                  className={`w-full py-2.5 px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
-                    briefFile
-                      ? 'bg-accent-dim/60 border-accent text-accent'
-                      : 'bg-surface-3 border-line border-dashed text-muted hover:text-text hover:border-accent/40'
-                  }`}
-                >
-                  {uploadingBrief ? <Loader2 size={14} className="animate-spin" /> : briefFile ? <FileText size={14} /> : <Upload size={14} />}
-                  <span className="truncate">
-                    {uploadingBrief ? 'Subiendo...' : briefFile ? briefFile.name : 'Adjuntar Brief'}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <div className="relative z-10">
-              <label className="text-[11px] font-tech uppercase text-muted-2 block mb-1">
-                Especificaciones del Brief / Notas Operativas
+          {/* 3. Precio */}
+          <section className="p-5 space-y-3">
+            <StepTitle n={3} title="Precio y pago al equipo" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="block">
+                <span className="text-xs text-muted block mb-1">Cobro al cliente / video</span>
+                <input type="number" min={0} step={0.5} value={unitPriceClient} onChange={e => setUnitPriceClient(Math.max(0, Number(e.target.value) || 0))} className={`${input} font-tech`} />
               </label>
-              <input
-                value={clientNotes}
-                onChange={e => setClientNotes(e.target.value)}
-                placeholder="Indicaciones de estilo, referencias, formato de entrega o links del cliente..."
-                className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2 text-xs outline-none focus:border-accent"
+              <label className="block">
+                <span className="text-xs text-muted block mb-1">Pago al equipo / video</span>
+                <input type="number" min={0} step={0.5} value={creatorPay} onChange={e => setCreatorPay(Math.max(0, Number(e.target.value) || 0))} className={`${input} font-tech text-accent`} />
+              </label>
+              <div>
+                <span className="text-xs text-muted block mb-1">Se paga en 2 tramos</span>
+                <p className="bg-surface-3/60 border border-dashed border-line rounded-lg px-3 py-2 text-[11px] font-tech text-muted leading-snug">
+                  {fmtMoney(creatorPay / 2)} Aprobado Senda + {fmtMoney(creatorPay / 2)} Aprobado Cliente
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* 4. Archivos */}
+          <section className="p-5 space-y-3">
+            <StepTitle n={4} title="Factura, brief y notas" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input ref={invoiceRef} type="file" accept=".pdf,image/*" className="hidden" onChange={e => { void upload('invoice', e.target.files?.[0]); e.target.value = ''; }} />
+              <FileButton
+                icon={<Receipt size={14} />} loading={uploading === 'invoice'} file={invoiceFile} tone="mint"
+                empty="Subir factura del pago" hint="Sin factura queda “Pago pendiente”"
+                onPick={() => invoiceRef.current?.click()} onClear={() => setInvoiceFile(null)}
+              />
+              <input ref={briefRef} type="file" accept=".pdf,.doc,.docx,image/*" className="hidden" onChange={e => { void upload('brief', e.target.files?.[0]); e.target.value = ''; }} />
+              <FileButton
+                icon={<FileText size={14} />} loading={uploading === 'brief'} file={briefFile} tone="accent"
+                empty="Adjuntar brief (opcional)" hint="El cliente también lo completa en su portal"
+                onPick={() => briefRef.current?.click()} onClear={() => setBriefFile(null)}
               />
             </div>
-          </div>
+            {uploadError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} /> {uploadError}</p>}
+            <textarea value={clientNotes} onChange={e => setClientNotes(e.target.value)} rows={2}
+              placeholder="Indicaciones de estilo, formato de entrega, enlaces del cliente…" className={`${input} resize-y`} />
+          </section>
+        </div>
 
-          <div className="lg:col-span-5 bg-surface-2 border border-mint/35 rounded-3xl p-6 flex flex-col justify-between space-y-5 relative overflow-hidden shadow-[0_0_45px_-18px_rgba(111,231,200,0.25)]">
-            <CardNodeDeco color="var(--mint)" />
+        {/* Resumen en vivo */}
+        <aside className="lg:col-span-5 lg:sticky lg:top-4 space-y-4">
+          <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg font-semibold">Resumen del pedido</h3>
+              <span className="font-tech text-xs text-mint">Margen {money.pct}%</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <MoneyBox label="Cobro total" value={fmtMoney(money.gross)} />
+              <MoneyBox label="Pago al equipo" value={fmtMoney(money.team)} cls="text-accent" />
+              <MoneyBox label="Neto SENDA" value={fmtMoney(money.net)} cls="text-mint" highlight />
+            </div>
 
-            <div className="space-y-4 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="font-tech text-xs uppercase tracking-wider text-mint font-semibold flex items-center gap-1.5">
-                  <Sparkles size={14} /> Impacto del Pedido en Vivo
+            <div className={`rounded-lg border p-3.5 space-y-2.5 ${capacity.fits ? 'bg-mint/5 border-mint/30' : 'bg-amber/5 border-amber/40'}`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-sm font-semibold flex items-center gap-1.5">
+                  {capacity.fits
+                    ? <><CheckCircle2 size={15} className="text-mint" /> Cabe en la fecha pedida</>
+                    : <><AlertTriangle size={15} className="text-amber" /> Supera el cupo del día ({capacity.freeOnTarget} libres)</>}
                 </span>
-                <span className="font-tech text-[11px] text-muted-2">Pago 100% anticipado</span>
+                <span className={`font-tech text-[11px] font-bold px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[capacity.priority]}`}>
+                  Prioridad {PRIORITY_LABEL[capacity.priority]}
+                </span>
               </div>
-
-              <div className="grid grid-cols-3 gap-2.5">
-                <div className="bg-surface-3/90 border border-line rounded-2xl p-3.5">
-                  <span className="text-[10px] font-tech uppercase text-amber block">Ingreso Bruto</span>
-                  <p className="font-display text-xl font-bold font-tech text-text mt-1">
-                    {fmtMoneyClean(financialPreview.grossTotal)}
-                  </p>
-                  <span className="text-[10px] text-muted-2 font-tech">Facturación 100%</span>
-                </div>
-
-                <div className="bg-surface-3/90 border border-line rounded-2xl p-3.5">
-                  <span className="text-[10px] font-tech uppercase text-accent block">Nómina del equipo</span>
-                  <p className="font-display text-xl font-bold font-tech text-accent mt-1">
-                    {fmtMoneyClean(financialPreview.payrollTotal)}
-                  </p>
-                  <span className="text-[10px] text-muted-2 font-tech">
-                    {fmtMoneyClean(creatorPay)} por video · 50% + 50%
-                  </span>
-                </div>
-
-                <div className="bg-mint-dim/30 border border-mint/40 rounded-2xl p-3.5">
-                  <span className="text-[10px] font-tech uppercase text-mint font-bold block">Neto SENDA</span>
-                  <p className="font-display text-xl font-bold font-tech text-mint mt-1">
-                    {fmtMoneyClean(financialPreview.netMargin)}
-                  </p>
-                  <span className="text-[10px] text-mint font-tech">Libre ({financialPreview.marginPct}%)</span>
-                </div>
+              <p className="text-xs text-muted">{capacity.reason}</p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <MiniStat icon={<Users size={12} />} label="Personas" value={String(capacity.people)} />
+                <MiniStat icon={<Cpu size={12} />} label="Cupo diario" value={`${capacity.dailyLimit} vid`} />
+                <MiniStat icon={<Clock size={12} />} label="Ocupación" value={`${capacity.saturation}%`} />
               </div>
-
-              <div className={`rounded-2xl p-4 border space-y-3 ${
-                capacityPreview.fitsInSingleDay
-                  ? 'bg-mint-dim/20 border-mint/40'
-                  : 'bg-amber-dim/20 border-amber/40'
-              }`}>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="font-tech text-xs uppercase font-bold flex items-center gap-1.5">
-                    {capacityPreview.fitsInSingleDay ? (
-                      <><CheckCircle2 size={15} className="text-mint" /> Cabe en la fecha solicitada</>
-                    ) : (
-                      <><AlertTriangle size={15} className="text-amber" /> Supera el cupo del día ({capacityPreview.maxAcceptableOnTarget} libres)</>
-                    )}
-                  </span>
-                  <span className="font-tech text-[11px] text-accent">{capacityPreview.etaText}</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  <div className="bg-surface-2/80 border border-line rounded-xl p-2.5">
-                    <span className="text-[10px] font-tech uppercase text-muted-2 flex items-center gap-1">
-                      <Users size={11} className="text-accent" /> Fuerza Sugerida
-                    </span>
-                    <p className="font-tech text-xs font-bold text-text mt-1">
-                      {capacityPreview.recommendedClippers} persona(s)
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-2/80 border border-line rounded-xl p-2.5">
-                    <span className="text-[10px] font-tech uppercase text-muted-2 flex items-center gap-1">
-                      <Gauge size={11} className="text-mint" /> Ritmo / Hora
-                    </span>
-                    <p className="font-tech text-xs font-bold text-mint mt-1">
-                      {capacityPreview.pacePerHour} vid/h
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-2/80 border border-line rounded-xl p-2.5">
-                    <span className="text-[10px] font-tech uppercase text-muted-2 flex items-center gap-1">
-                      <Clock size={11} className="text-amber" /> Etapa Crítica
-                    </span>
-                    <p className="font-tech text-xs font-bold text-amber mt-1">
-                      {capacityPreview.bottleneckStage}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3 relative z-10">
-              {!invoiceFile && (
-                <div className="bg-amber-dim/30 border border-amber/40 text-amber rounded-xl px-3.5 py-2.5 text-xs flex items-center gap-2">
-                  <Lock size={14} className="shrink-0" />
-                  <span>Debes subir la <strong>Factura del Pago (100%)</strong> para poder habilitar el ingreso del pedido.</span>
-                </div>
+              {capacity.batches.length > 1 && (
+                <ul className="text-[11px] font-tech text-muted space-y-1 pt-1 border-t border-line/60">
+                  {capacity.batches.map((b, i) => (
+                    <li key={b.date} className="flex justify-between"><span>Tanda {i + 1} · {fmtDate(b.date)}</span><span className="text-text">{b.videos} videos</span></li>
+                  ))}
+                </ul>
               )}
-
-
-
-              <button
-                type="submit"
-                disabled={!invoiceFile || !brandName.trim()}
-                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-accent to-mint text-on-accent font-display text-sm font-bold hover:opacity-95 transition-all flex items-center justify-center gap-2 shadow-[0_10px_28px_-6px_rgba(53,214,228,0.55)] disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <PlusCircle size={17} />
-                Ingresar Pedido al Sistema SENDA
-              </button>
-            </div>
-          </div>
-        </form>
-      )}
-
-      {/* =========================================================================
-          PESTAÑA 3: EXPEDIENTES Y FACTURAS (TODOS 100% PAGADOS)
-         ========================================================================= */}
-      {activeTab === 'cartera' && (
-        <div className="space-y-5">
-          <div className="bg-surface-2 border border-line rounded-3xl p-5 flex items-center justify-between gap-4 flex-wrap">
-            <div className="relative flex-1 max-w-md">
-              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                value={searchClient}
-                onChange={e => setSearchClient(e.target.value)}
-                placeholder="Buscar cliente o marca en los expedientes..."
-                className="w-full bg-surface-3 border border-line rounded-xl pl-9 pr-3.5 py-2 text-xs outline-none focus:border-accent"
-              />
+              <p className="text-[11px] text-accent font-tech">Entrega estimada: {capacity.eta}</p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('nuevo_pedido')}
-              className="px-4 py-2 rounded-xl bg-accent-dim border border-accent/40 text-accent text-xs font-display font-bold flex items-center gap-1.5 hover:bg-accent hover:text-on-accent transition-all"
-            >
-              <PlusCircle size={14} /> Nuevo Pedido
+            <div className="space-y-1.5 text-xs">
+              <Check ok={Boolean(brandName.trim())} label="Marca" />
+              <Check ok={Boolean(clientId)} label="Cuenta del cliente vinculada" optional />
+              <Check ok={Boolean(invoiceFile)} label="Factura del pago" optional />
+            </div>
+
+            <button type="submit" disabled={!canSubmit}
+              className="w-full py-3 rounded-xl bg-accent text-on-accent font-display text-sm font-bold hover:bg-accent-strong transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
+              {uploading ? 'Esperando la subida…' : invoiceFile ? 'Registrar pedido pagado' : 'Registrar con pago pendiente'}
             </button>
           </div>
+        </aside>
+      </form>
+    </div>
+  );
+}
 
-          {filteredClients.length === 0 ? (
-            <div className="bg-surface-2 border border-line rounded-3xl p-12 text-center space-y-3">
-              <Briefcase size={32} className="text-muted mx-auto" />
-              <p className="font-display text-base font-bold">No hay expedientes registrados</p>
+function StepTitle({ n, title }: { n: number; title: string }) {
+  return (
+    <p className="font-semibold flex items-center gap-2.5">
+      <span className="w-6 h-6 rounded-md bg-accent-dim text-accent font-tech text-xs font-bold flex items-center justify-center">{n}</span>
+      {title}
+    </p>
+  );
+}
+
+function FileButton({ icon, loading, file, tone, empty, hint, onPick, onClear }: {
+  icon: React.ReactNode; loading: boolean; file: { name: string } | null; tone: 'mint' | 'accent';
+  empty: string; hint: string; onPick: () => void; onClear: () => void;
+}) {
+  const on = tone === 'mint' ? 'bg-mint/5 border-mint/40 text-mint' : 'bg-accent/5 border-accent/40 text-accent';
+  return (
+    <div>
+      <div className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs ${file ? on : 'bg-surface-3 border-dashed border-line text-muted'}`}>
+        {loading ? <Loader2 size={14} className="animate-spin shrink-0" /> : file ? <CheckCircle2 size={14} className="shrink-0" /> : icon}
+        <button type="button" onClick={onPick} disabled={loading} className="flex-1 min-w-0 text-left truncate font-medium hover:text-text disabled:cursor-wait">
+          {loading ? 'Subiendo…' : file ? file.name : empty}
+        </button>
+        {file && !loading && <button type="button" onClick={onClear} title="Quitar" className="text-muted-2 hover:text-red-400"><X size={13} /></button>}
+        {!file && !loading && <Upload size={13} className="shrink-0" />}
+      </div>
+      <p className="text-[10px] text-muted-2 mt-1">{hint}</p>
+    </div>
+  );
+}
+
+function MoneyBox({ label, value, cls = 'text-text', highlight }: { label: string; value: string; cls?: string; highlight?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${highlight ? 'bg-mint/5 border-mint/30' : 'bg-surface-3 border-line'}`}>
+      <p className="text-[10px] text-muted-2">{label}</p>
+      <p className={`font-tech text-base font-bold mt-0.5 truncate ${cls}`}>{value}</p>
+    </div>
+  );
+}
+
+function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="bg-surface-2 border border-line rounded-lg py-2">
+      <p className="text-[10px] text-muted-2 flex items-center justify-center gap-1">{icon} {label}</p>
+      <p className="font-tech text-xs font-bold mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+function Check({ ok, label, optional }: { ok: boolean; label: string; optional?: boolean }) {
+  return (
+    <p className={`flex items-center gap-2 ${ok ? 'text-mint' : 'text-muted-2'}`}>
+      {ok ? <CheckCircle2 size={13} /> : <span className="w-3 h-3 rounded-full border border-current" />}
+      {label}{!ok && optional && <span className="text-[10px]">(opcional)</span>}
+    </p>
+  );
+}
+
+// =====================================================================
+// EXPEDIENTES
+// =====================================================================
+interface ClientFile {
+  brand: string;
+  orders: Order[];
+  videos: number;
+  billed: number;
+  net: number;
+  pendingAmount: number;
+  active: number;
+  latest: string;
+  linked: boolean;
+}
+
+function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; onNewOrder: () => void }) {
+  const { orders, financeSettings } = useStore();
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ClientFilter>('todos');
+  const [selected, setSelected] = useState<string | null>(focusBrand);
+
+  const files = useMemo<ClientFile[]>(() => {
+    const map = new Map<string, ClientFile>();
+    for (const o of orders) {
+      const name = baseBrand(o.brand);
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const f = map.get(key) || { brand: name, orders: [], videos: 0, billed: 0, net: 0, pendingAmount: 0, active: 0, latest: '', linked: false };
+      const count = Math.max(1, o.videoCount || 1);
+      const eco = unitEconomics(null, o, financeSettings);
+      f.orders.push(o);
+      f.videos += count;
+      if (isPaid(o)) f.billed += count * eco.price; else f.pendingAmount += count * eco.price;
+      f.net += count * (eco.price - eco.creatorPay);
+      if (o.status !== 'finalizado') f.active += 1;
+      if (o.clientId) f.linked = true;
+      if ((o.createdAt || '') > f.latest) f.latest = o.createdAt || '';
+      map.set(key, f);
+    }
+    for (const f of map.values()) f.orders.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return Array.from(map.values()).sort((a, b) => b.latest.localeCompare(a.latest));
+  }, [orders, financeSettings]);
+
+  const visible = files.filter(f =>
+    (!search.trim() || f.brand.toLowerCase().includes(search.trim().toLowerCase())) &&
+    (filter === 'todos' || (filter === 'activos' ? f.active > 0 : f.pendingAmount > 0))
+  );
+  const active = visible.find(f => f.brand.toLowerCase() === selected?.toLowerCase()) || visible[0] || null;
+
+  if (files.length === 0) {
+    return (
+      <div className="bg-surface-2 border border-dashed border-line rounded-xl py-16 text-center">
+        <Briefcase size={30} className="text-muted-2 mx-auto mb-3" />
+        <p className="font-display text-lg font-semibold">Aún no hay pedidos</p>
+        <p className="text-sm text-muted mt-1">Registra el primero y aquí verás su expediente, factura y avance.</p>
+        <button type="button" onClick={onNewOrder} className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold bg-accent text-on-accent rounded-lg px-4 py-2 hover:bg-accent-strong">
+          <PlusCircle size={14} /> Nuevo pedido
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      <div className="lg:col-span-4 space-y-3">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-2" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar marca…"
+            className="w-full bg-surface-2 border border-line rounded-lg pl-8 pr-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+        </div>
+        <div className="flex gap-1.5">
+          {([['todos', 'Todos'], ['activos', 'Activos'], ['por_cobrar', 'Por cobrar']] as [ClientFilter, string][]).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setFilter(k)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === k ? 'bg-accent text-on-accent' : 'bg-surface-2 border border-line text-muted hover:text-text'}`}>{l}</button>
+          ))}
+        </div>
+        <div className="space-y-2 lg:max-h-[calc(100vh-320px)] lg:overflow-y-auto lg:pr-1">
+          {visible.length === 0 && <p className="text-sm text-muted text-center py-8">Ningún cliente coincide.</p>}
+          {visible.map(f => {
+            const on = active?.brand === f.brand;
+            return (
+              <button key={f.brand} type="button" onClick={() => setSelected(f.brand)}
+                className={`w-full text-left p-3.5 rounded-xl border transition-colors ${on ? 'bg-accent/10 border-accent' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-lg bg-accent-dim text-accent font-display font-bold flex items-center justify-center shrink-0">{f.brand.charAt(0).toUpperCase()}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold truncate">{f.brand}</p>
+                    <p className="text-[11px] text-muted-2 font-tech">{f.orders.length} pedido(s) · {f.videos} videos</p>
+                  </div>
+                  {f.pendingAmount > 0
+                    ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-dim text-amber shrink-0">Por cobrar</span>
+                    : !f.linked && <span title="Sin cuenta de cliente" className="text-muted-2 shrink-0"><UserCircle2 size={15} /></span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {active && <ClientDetail key={active.brand} file={active} />}
+    </div>
+  );
+}
+
+function ClientDetail({ file }: { file: ClientFile }) {
+  return (
+    <div className="lg:col-span-8 space-y-4">
+      <div className="bg-surface-2 border border-line rounded-xl p-5 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Expediente</p>
+          <h3 className="font-display text-2xl font-bold">{file.brand}</h3>
+          <p className="text-xs text-muted mt-1">{file.orders.length} pedido(s) · {file.videos} videos · {file.active} activo(s)</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 min-w-[300px]">
+          <MoneyBox label="Pagado" value={fmtMoney(file.billed)} />
+          <MoneyBox label="Por cobrar" value={fmtMoney(file.pendingAmount)} cls={file.pendingAmount ? 'text-amber' : 'text-muted'} />
+          <MoneyBox label="Neto SENDA" value={fmtMoney(file.net)} cls="text-mint" highlight />
+        </div>
+      </div>
+      {file.orders.map((o, i) => <OrderCard key={o.id} order={o} number={file.orders.length - i} />)}
+    </div>
+  );
+}
+
+function OrderCard({ order, number }: { order: Order; number: number }) {
+  const { orders, brands, financeSettings, updateOrder, deleteOrder, setView } = useStore();
+  const [busy, setBusy] = useState<'brief' | 'invoice' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const count = Math.max(1, order.videoCount || 1);
+  const eco = unitEconomics(null, order, financeSettings);
+  const total = count * eco.price;
+  const paid = isPaid(order);
+  const videos = brands.flatMap(b => b.videos).filter(v => v.orderId === order.id || v.id === order.boardVideoId);
+  const approved = videos.filter(v => v.qc === 'aprobado_cliente').length;
+  const delivered = videos.filter(isDelivered).length;
+  const soleOrderOfBrand = !orders.some(o => o.id !== order.id && baseBrand(o.brand).toLowerCase() === baseBrand(order.brand).toLowerCase());
+
+  const uploadFile = async (kind: 'brief' | 'invoice', f: File | undefined) => {
+    if (!f) return;
+    setBusy(kind);
+    setError(null);
+    try {
+      const url = await uploadSharedFile(f, kind === 'brief' ? 'client-briefs' : 'client-invoices');
+      updateOrder(order.id, kind === 'brief'
+        ? { briefFileName: f.name, briefFileUrl: url }
+        : { invoiceFileName: f.name, invoiceFileUrl: url, paymentStatus: 'completado' });
+    } catch {
+      setError('No se pudo subir el archivo. Intenta de nuevo.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const printInvoice = () => {
+    let code = order.invoiceNumber;
+    if (!code) {
+      code = nextInvoiceCode(orders, order.brand, (order.createdAt || todayIso()).slice(0, 10));
+      updateOrder(order.id, { invoiceNumber: code, invoiceDate: order.invoiceDate || todayIso() });
+    }
+    const win = window.open('', '_blank', 'width=840,height=760');
+    if (!win) { setError('El navegador bloqueó la ventana. Permite ventanas emergentes para SENDA.'); return; }
+    const b = escapeHtml(order.brand);
+    win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>Factura ${code} · SENDA</title>
+<style>
+body{font-family:Inter,-apple-system,sans-serif;background:#fff;color:#111;padding:40px;margin:0}
+.card{max-width:720px;margin:0 auto;border:1px solid #e2e8f0;border-radius:16px;padding:36px}
+.row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.brand{font-size:22px;font-weight:800;letter-spacing:.08em;color:#0EA6B8}
+.badge{display:inline-block;padding:5px 12px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase}
+.ok{background:#e7faf4;color:#0f8a68;border:1px solid #6FE7C8}.pend{background:#fff7e0;color:#9a6a00;border:1px solid #FFC857}
+table{width:100%;border-collapse:collapse;margin-top:28px}th,td{padding:12px;text-align:left;border-bottom:1px solid #e2e8f0;font-size:14px}
+th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.meta{color:#64748b;font-size:13px;line-height:1.6}
+.total{font-size:22px;font-weight:800}
+</style></head><body><div class="card">
+<div class="row"><div><div class="brand">SENDA STUDIO</div><p class="meta">Factura de producción audiovisual<br/>Folio: <strong>${escapeHtml(code)}</strong></p></div>
+<div style="text-align:right"><span class="badge ${paid ? 'ok' : 'pend'}">${paid ? 'Pagado' : 'Pago pendiente'}</span>
+<p class="meta" style="margin-top:8px">Fecha: ${escapeHtml(order.invoiceDate || (order.createdAt || '').slice(0, 10))}<br/>Entrega: ${escapeHtml(fmtDate(order.deliveryDate, order.deliveryTime))}</p></div></div>
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0"/>
+<p class="meta" style="margin:0">CLIENTE</p><h2 style="margin:4px 0 0;font-size:20px">${b}</h2>
+<table><thead><tr><th>Concepto</th><th>Cantidad</th><th>Tarifa</th><th>Subtotal</th></tr></thead>
+<tbody><tr><td>Producción y edición de videos (${b})</td><td>${count}</td><td>${fmtMoney(eco.price)}</td><td><strong>${fmtMoney(total)}</strong></td></tr></tbody></table>
+<div class="row" style="margin-top:24px;align-items:center"><div class="meta">Gracias por confiar en SENDA.</div>
+<div style="text-align:right"><span class="meta">TOTAL</span><div class="total">${fmtMoney(total)}</div></div></div>
+</div><script>setTimeout(function(){window.print()},300)</script></body></html>`);
+    win.document.close();
+  };
+
+  const statusChip = order.status === 'finalizado' ? { l: 'Finalizado', c: 'bg-mint-dim text-mint' }
+    : order.clipperId || order.status === 'asignado' ? { l: 'En producción', c: 'bg-accent-dim text-accent' }
+    : { l: 'Sin asignar', c: 'bg-amber-dim text-amber' };
+
+  return (
+    <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4 hover:border-accent/30 transition-colors">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-display font-bold">Pedido #{number}</span>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusChip.c}`}>{statusChip.l}</span>
+            {order.priority && order.priority !== 'normal' && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[order.priority]}`}>{PRIORITY_LABEL[order.priority]}</span>
+            )}
+          </div>
+          <p className="text-xs text-muted mt-1 font-tech">
+            Entrega {fmtDate(order.deliveryDate, order.deliveryTime)}{order.invoiceNumber ? ` · ${order.invoiceNumber}` : ''}
+          </p>
+        </div>
+        {paid ? (
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-mint-dim text-mint flex items-center gap-1.5"><CheckCircle2 size={13} /> Pagado</span>
+        ) : (
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-dim text-amber flex items-center gap-1.5"><Lock size={13} /> Pago pendiente</span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <MoneyBox label={`${count} videos · ${fmtMoney(eco.price)} c/u`} value={fmtMoney(total)} />
+        <MoneyBox label="Neto SENDA" value={fmtMoney(total - count * eco.creatorPay)} cls="text-mint" />
+        <div className="bg-surface-3 border border-line rounded-lg p-3">
+          <p className="text-[10px] text-muted-2">Avance</p>
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-surface-2 mt-2">
+            <span className="bg-mint" style={{ width: `${(approved / count) * 100}%` }} />
+            <span className="bg-accent" style={{ width: `${(Math.max(0, delivered - approved) / count) * 100}%` }} />
+          </div>
+          <p className="text-[10px] font-tech text-muted-2 mt-1.5"><span className="text-accent">{delivered}</span> entregados · <span className="text-mint">{approved}</span> aprobados de {count}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        <ClientAccountField order={order} />
+        <DriveFolderField order={order} compact />
+      </div>
+
+      {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>}
+
+      <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-line/60">
+        {order.briefFileUrl ? (
+          <a href={order.briefFileUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+            <FileText size={13} className="text-accent" /> Brief <ExternalLink size={11} className="text-muted-2" />
+          </a>
+        ) : (
+          <label className="px-3 py-1.5 rounded-lg bg-surface-3 border border-dashed border-line text-muted hover:text-text text-xs font-medium flex items-center gap-1.5 cursor-pointer">
+            {busy === 'brief' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Subir brief
+            <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={e => { void uploadFile('brief', e.target.files?.[0]); e.target.value = ''; }} />
+          </label>
+        )}
+
+        {order.invoiceFileUrl && (
+          <a href={order.invoiceFileUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-mint/40">
+            <Receipt size={13} className="text-mint" /> Comprobante <ExternalLink size={11} className="text-muted-2" />
+          </a>
+        )}
+        <label className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer border ${paid ? 'bg-surface-3 border-line text-muted hover:text-text' : 'bg-amber-dim border-amber/40 text-amber hover:bg-amber/20'}`}>
+          {busy === 'invoice' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+          {order.invoiceFileUrl ? 'Reemplazar comprobante' : 'Subir comprobante'}
+          <input type="file" className="hidden" accept=".pdf,image/*" onChange={e => { void uploadFile('invoice', e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+        {!paid && (
+          <button type="button" onClick={() => updateOrder(order.id, { paymentStatus: 'completado' })}
+            className="px-3 py-1.5 rounded-lg bg-mint text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:opacity-90">
+            <CheckCircle2 size={13} /> Marcar pagado
+          </button>
+        )}
+
+        <button type="button" onClick={printInvoice} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+          <Printer size={13} className="text-accent" /> Factura PDF
+        </button>
+        <button type="button" onClick={() => setView('tareas')} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-accent text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+          Ir a Tareas <ArrowRight size={12} />
+        </button>
+
+        <div className="ml-auto">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/40 rounded-lg px-2.5 py-1">
+              <span className="text-[11px] text-red-400 font-semibold">
+                {soleOrderOfBrand ? '¿Borrar pedido y sus videos?' : '¿Borrar pedido?'}
+              </span>
+              <button type="button" onClick={() => deleteOrder(order.id)} className="px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-bold hover:bg-red-600">Sí, borrar</button>
+              <button type="button" onClick={() => setConfirmDelete(false)} className="px-2 py-0.5 rounded text-muted text-[11px] hover:text-text">Cancelar</button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              <div className="lg:col-span-4 space-y-2.5">
-                {filteredClients.map(client => {
-                  const isSelected = activeClient?.brand === client.brand;
-                  return (
-                    <button
-                      key={client.brand}
-                      type="button"
-                      onClick={() => setSelectedClientBrand(client.brand)}
-                      className={`w-full text-left p-4 rounded-2xl border transition-all space-y-3 ${
-                        isSelected
-                          ? 'bg-surface-2 border-accent shadow-[0_0_25px_-8px_rgba(53,214,228,0.4)]'
-                          : 'bg-surface-2/70 border-line hover:border-accent/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-accent-dim text-accent font-display font-bold text-base flex items-center justify-center shrink-0">
-                            {client.brand.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-display text-base font-bold truncate">{client.brand}</p>
-                            <p className="text-[11px] text-muted font-tech">
-                              {client.totalOrders} pedido(s) · {client.totalVideosOrdered} videos
-                            </p>
-                          </div>
-                        </div>
-
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-tech font-bold uppercase border bg-mint-dim/40 text-mint border-mint/40 shrink-0">
-                          Factura 100%
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-line/60 font-tech text-xs">
-                        <div>
-                          <span className="text-[10px] text-muted-2 uppercase block">Facturado</span>
-                          <strong className="text-text">{fmtMoneyClean(client.grossBilled)}</strong>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[10px] text-mint uppercase block">Neto SENDA</span>
-                          <strong className="text-mint">{fmtMoneyClean(client.netProfit)}</strong>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {activeClient && (
-                <div className="lg:col-span-8 bg-surface-2 border border-line rounded-3xl p-6 space-y-6 relative overflow-hidden">
-                  <CardNodeDeco color="var(--accent)" />
-
-                  <div className="flex items-start justify-between gap-4 flex-wrap relative z-10 border-b border-line pb-5">
-                    <div>
-                      <h3 className="font-display text-2xl font-bold">{activeClient.brand}</h3>
-                      <p className="text-xs text-muted mt-1">
-                        {activeClient.totalVideosOrdered} videos solicitados en {activeClient.totalOrders} lote(s) · Pago 100% verificado con factura
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 relative z-10">
-                    {activeClient.ordersList.map((ord, idx) => {
-                      const count = Math.max(1, ord.videoCount || 1);
-                      const ordEco = unitEconomics(null, ord, financeSettings);
-                      const uPrice = ordEco.price;
-                      const orderTotal = count * uPrice;
-                      const orderNet = orderTotal - count * ordEco.creatorPay;
-                      const invCode = ord.invoiceNumber || buildInvoiceCode(ord.brand, ord.deliveryDate);
-
-                      return (
-                        <div
-                          key={ord.id}
-                          className="bg-surface-3/90 border border-line rounded-2xl p-5 space-y-4 hover:border-accent/35 transition-all"
-                        >
-                          <div className="flex items-start justify-between gap-3 flex-wrap">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-tech text-xs font-bold px-2.5 py-0.5 rounded-lg bg-accent-dim text-accent">
-                                  Pedido #{activeClient.ordersList.length - idx} · {count} videos
-                                </span>
-                                <span className="font-display text-sm font-bold text-text">{ord.brand}</span>
-                              </div>
-                              <p className="text-xs text-muted font-tech">
-                                Fecha límite: <strong className="text-accent">{ord.deliveryDate} a las {ord.deliveryTime}</strong> · Folio: <strong>{invCode}</strong>
-                              </p>
-                            </div>
-
-                            <span className="px-3 py-1 rounded-xl bg-mint-dim/40 border border-mint/40 text-mint text-xs font-tech font-bold flex items-center gap-1.5">
-                              <CheckCircle2 size={13} /> Factura Pagada (100%)
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-2.5 font-tech text-xs">
-                            <div className="bg-surface-2 border border-line rounded-xl p-3">
-                              <span className="text-[10px] uppercase text-muted-2 block">Videos</span>
-                              <strong className="text-sm text-accent">{count} videos ({fmtMoneyClean(uPrice)}/vid)</strong>
-                            </div>
-                            <div className="bg-surface-2 border border-line rounded-xl p-3">
-                              <span className="text-[10px] uppercase text-muted-2 block">Total Factura</span>
-                              <strong className="text-sm text-text">{fmtMoneyClean(orderTotal)}</strong>
-                            </div>
-                            <div className="bg-surface-2 border border-line rounded-xl p-3">
-                              <span className="text-[10px] uppercase text-mint block">Neto SENDA</span>
-                              <strong className="text-sm text-mint">{fmtMoneyClean(orderNet)}</strong>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-end gap-2 flex-wrap pt-2 border-t border-line/60">
-                            {ord.briefFileUrl ? (
-                              <a
-                                href={ord.briefFileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-3 py-1.5 rounded-xl bg-accent-dim/50 border border-accent/40 text-accent text-xs font-semibold flex items-center gap-1.5"
-                              >
-                                <FileText size={13} /> Brief: {ord.briefFileName || 'Abrir'} <ExternalLink size={11} />
-                              </a>
-                            ) : (
-                              <label className="px-3 py-1.5 rounded-xl bg-surface-2 border border-line border-dashed text-muted hover:text-text text-xs font-medium flex items-center gap-1.5 cursor-pointer">
-                                {uploadingOrderBriefId === ord.id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                                <span>Subir Brief</span>
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  onChange={e => {
-                                    const f = e.target.files?.[0];
-                                    if (f) void handleUploadExistingOrderBrief(ord.id, f);
-                                  }}
-                                />
-                              </label>
-                            )}
-
-                            {ord.invoiceFileUrl ? (
-                              <a
-                                href={ord.invoiceFileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-3 py-1.5 rounded-xl bg-mint-dim/50 border border-mint/40 text-mint text-xs font-semibold flex items-center gap-1.5"
-                              >
-                                <Receipt size={13} /> Factura: {ord.invoiceFileName || 'Ver'} <ExternalLink size={11} />
-                              </a>
-                            ) : (
-                              <label className="px-3 py-1.5 rounded-xl bg-surface-2 border border-line border-dashed text-muted hover:text-text text-xs font-medium flex items-center gap-1.5 cursor-pointer">
-                                {uploadingOrderInvoiceId === ord.id ? <Loader2 size={13} className="animate-spin" /> : <Receipt size={13} />}
-                                <span>Reemplazar Factura</span>
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  onChange={e => {
-                                    const f = e.target.files?.[0];
-                                    if (f) void handleUploadExistingOrderInvoice(ord.id, f);
-                                  }}
-                                />
-                              </label>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => handlePrintInvoice(ord)}
-                              className="px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line text-text text-xs font-semibold flex items-center gap-1.5"
-                            >
-                              <Printer size={13} className="text-mint" /> Factura PDF
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setView('tareas')}
-                              className="px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line text-accent text-xs font-semibold flex items-center gap-1"
-                            >
-                              <Eye size={13} /> Ir a Tareas
-                            </button>
-
-                            {confirmDeleteOrderId === ord.id ? (
-                              <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/40 rounded-xl px-2.5 py-1">
-                                <span className="text-[11px] text-red-300 font-semibold">¿Borrar pedido?</span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    deleteOrder(ord.id);
-                                    setConfirmDeleteOrderId(null);
-                                  }}
-                                  className="px-2 py-0.5 rounded-lg bg-red-500 text-white text-[11px] font-bold hover:bg-red-600"
-                                >
-                                  Sí, borrar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteOrderId(null)}
-                                  className="px-2 py-0.5 rounded-lg bg-surface-2 text-muted text-[11px] hover:text-text"
-                                >
-                                  Cancelar
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteOrderId(ord.id)}
-                                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                              >
-                                <Trash2 size={13} /> Borrar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+            <button type="button" onClick={() => setConfirmDelete(true)} title="Borrar pedido"
+              className="px-2.5 py-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 transition-colors">
+              <Trash2 size={13} /> Borrar
+            </button>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
