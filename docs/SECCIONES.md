@@ -6,7 +6,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 |---|---|---|---|---|
 | 1 | Inicio | Admin · Clipper · Cliente | `HomeView.tsx`, `AdminHomePanels.tsx`, `ClientArea.tsx` (ClientHome) | ✅ PR #3 #4 |
 | 2 | Tareas + detalle de video | Admin · Clipper | `AdminTasksPanels.tsx`, `TasksView.tsx` | ✅ PR #5 #6 |
-| 3 | Clientes / Pedidos + portal del cliente | Admin (Clientes) · Cliente (Mis proyectos, Revisión de videos) | `ClientsView.tsx`, `ClientArea.tsx` (ClientBriefs), `ClientPortal.tsx`, `lib/clientSync.ts` | ✅ rama actualizacion-clientes-pedidos |
+| 3 | Clientes / Pedidos + portal del cliente | Admin (Clientes) · Cliente (Mis proyectos, Revisión de videos) | `ClientsView.tsx`, `ClientArea.tsx` (ClientBriefs), `ClientPortal.tsx`, `lib/clientSync.ts` | ✅ PR #8 (funciones) + PR diseño |
 | 4 | Chat + notificaciones | Admin · Clipper · Cliente | `ChatView.tsx`, `TopBar.tsx` (campana) | ⏳ |
 | 5 | Calendario (reuniones y capacitaciones) | Admin · Clipper | `CalendarView.tsx` | ⏳ |
 | 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ⏳ |
@@ -28,6 +28,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 - [x] Limpiar restos de "clipper/editor" en la previsualización de capacidad.
 - [x] Portal (admin y cliente): pedido sin videos aún muestra los N videos "en producción"; no se aprueba mientras se corrige el feedback.
 - [x] Cliente: facturas abren en pestaña nueva; ancho de computador (1440px).
+- [x] Diseño igual a Inicio/Tareas (DISENO.md): esqueleto, GlowCard, StatChip compartido, pestañas con contador, EmptyState, MoneyCard + NumberTicker, medidor radial de capacidad.
 - [ ] Pendiente para otra etapa: procesar acciones del cliente en el servidor sin admin conectado (requiere Supabase).
 
 ## Pendientes ya detectados (asignar a su sección)

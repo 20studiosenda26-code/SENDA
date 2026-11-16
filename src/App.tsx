@@ -19,8 +19,7 @@ import { AdminView } from './views/AdminView';
 import { LoginView } from './views/LoginView';
 import { UserManagement } from './views/UserManagement';
 import { SettingsPanel } from './views/SettingsPanel';
-import { ClientHome, ClientBriefs } from './views/ClientArea';
-import { ClientPortal } from './views/ClientPortal';
+import { ClientHome, ClientBriefs, ClientReview } from './views/ClientArea';
 import MorphOrb from './components/ui/ai-thiking-orb-and-input';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -102,7 +101,7 @@ function Shell() {
     if (user.role === 'cliente') {
       switch (view) {
         case 'brief': return <ClientBriefs />;
-        case 'revision': return <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5"><div><p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent">Revisión de videos</p><h2 className="font-display text-3xl font-bold mt-1">Tus entregas</h2><p className="text-sm text-muted mt-1">Mira cada video, apruébalo o marca correcciones en el segundo exacto (1 ronda por video).</p></div><ClientPortal /></div>;
+        case 'revision': return <ClientReview />;
         case 'chat': return <ChatView />;
         default: return <ClientHome />;
       }

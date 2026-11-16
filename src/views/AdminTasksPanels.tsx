@@ -16,9 +16,8 @@ import { DriveFolderField } from "../components/DriveFolderField";
 import { ClientAccountField } from "../components/ClientAccountField";
 import { WorkerPicker } from "../components/tasks/WorkerPicker";
 import { GlowCard } from "../components/ui/spotlight-card";
-import { CountTicker } from "../components/ui/number-ticker";
 import { initialsOf } from "../components/ui/avatar-stack";
-import { countdownLabel, deadlineMs, EmptyState, fmtDate } from "../components/home/home-bits";
+import { countdownLabel, deadlineMs, EmptyState, fmtDate, StatChip } from "../components/home/home-bits";
 import { takeNavIntent } from "../lib/navIntent";
 import { flattenVideos, findOrderForVideo, type VideoWithBrand } from "../lib/economics";
 import { adminTurn, boardStage, BOARD_STAGES, type BoardStage } from "../lib/videoFlow";
@@ -136,16 +135,6 @@ export function AdminTasksRoot() {
       {tab === "produccion" && view === "proyectos" && <TasksBoard scope="activos" search={search} person={person} embedded />}
       {tab === "finalizados" && <TasksBoard scope="finalizados" search={search} embedded />}
     </div>
-  );
-}
-
-function StatChip({ label, value, tone, onClick }: { label: string; value: number; tone: "accent" | "amber" | "red" | "mint"; onClick: () => void }) {
-  const cls = { accent: "text-accent", amber: "text-amber", red: "text-red-400", mint: "text-mint" }[tone];
-  return (
-    <button type="button" onClick={onClick} className="text-left bg-surface-2 border border-line rounded-xl px-3.5 py-2 hover:border-accent/40 transition-colors min-w-[130px]">
-      <p className={`font-display text-xl font-bold leading-none ${value > 0 ? cls : "text-muted-2"}`}><CountTicker value={value} /></p>
-      <p className="text-[11px] text-muted mt-1">{label}</p>
-    </button>
   );
 }
 

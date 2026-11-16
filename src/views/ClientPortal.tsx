@@ -5,6 +5,8 @@ import type { Brand, Correction, Video } from '../types';
 import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { GlowCard } from '../components/ui/spotlight-card';
+import { EmptyState, StatChip } from '../components/home/home-bits';
 import {
   ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Film, FolderOpen, Lock, Maximize2,
   MessageSquare, Monitor, Play, Plus, Send, Smartphone, Sparkles, Trash2, Unlock, X,
@@ -50,15 +52,15 @@ export function ClientPortal() {
 
   if (!brand) {
     return (
-      <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-20 text-center">
-        <Film size={34} className="text-muted-2 mx-auto mb-3" />
-        <p className="font-display text-lg font-semibold">Aún no hay entregas</p>
-        <p className="text-sm text-muted mt-1">
-          {role === 'cliente'
+      <GlowCard contentClassName="p-8">
+        <EmptyState
+          icon={<Film size={22} />}
+          title="Aún no hay entregas"
+          text={role === 'cliente'
             ? 'Tus videos aparecerán aquí en cuanto el equipo SENDA los entregue.'
             : 'Cuando apruebes un video con “Aprobado Senda”, aparecerá aquí para el cliente.'}
-        </p>
-      </div>
+        />
+      </GlowCard>
     );
   }
 
@@ -76,12 +78,12 @@ export function ClientPortal() {
               key={b.id}
               type="button"
               onClick={() => { setBrandId(b.id); setVideoId(null); setFilter('todos'); }}
-              className={`snap-start shrink-0 w-56 text-left rounded-2xl border p-3.5 transition-all ${
-                active ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-2 border-line hover:border-accent/40'
+              className={`snap-start shrink-0 w-60 text-left rounded-xl border p-3.5 transition-all ${
+                active ? 'bg-accent-dim/40 border-accent shadow-[0_0_20px_-10px_rgba(53,214,228,0.8)]' : 'bg-surface-2 border-line hover:border-accent/40'
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="font-display font-bold truncate">{b.name}</p>
+                <p className="text-sm font-semibold truncate">{b.name}</p>
                 <span className="font-tech text-[11px] text-muted-2">{b.videos.length} vid</span>
               </div>
               <div className="flex h-1.5 rounded-full overflow-hidden bg-surface-3 mt-2.5">
@@ -140,65 +142,58 @@ function BrandOverview({
   );
 
   return (
-    <div className="bg-surface-2 border border-line rounded-3xl overflow-hidden animate-fadeIn">
-      <div className="p-5 sm:p-6 border-b border-line flex items-start justify-between gap-4 flex-wrap bg-gradient-to-br from-accent/5 to-transparent">
+    <GlowCard contentClassName="p-5 space-y-4" className="animate-fadeIn">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <span className="text-[11px] font-tech uppercase tracking-wider text-accent">Portal de entregas</span>
-          <h3 className="font-display text-2xl sm:text-3xl font-bold mt-0.5">{brand.name}</h3>
-          <p className="text-xs text-muted mt-1 flex items-center gap-3 flex-wrap">
+          <h3 className="font-display text-xl font-bold flex items-center gap-2"><Film size={18} className="text-accent shrink-0" /> {brand.name}</h3>
+          <p className="text-xs text-muted mt-0.5 flex items-center gap-3 flex-wrap">
             <span>{videos.length} videos en el pedido</span>
             {deliveryLabel && <span className="flex items-center gap-1"><Clock size={12} /> Entrega {deliveryLabel}</span>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Stat label="Por revisar" value={counts.revisar} cls="text-accent" />
-          <Stat label="Aprobados" value={counts.aprobados} cls="text-mint" />
-          <Stat label="En producción" value={counts.produccion} cls="text-muted" />
+          <StatChip label="Por revisar" value={counts.revisar} tone="accent" onClick={() => onFilter('revisar')} />
+          <StatChip label="Aprobados" value={counts.aprobados} tone="mint" onClick={() => onFilter('aprobados')} />
+          <StatChip label="En producción" value={counts.produccion} tone="amber" onClick={() => onFilter('produccion')} />
           {driveUrl && (
             <a href={driveUrl} target="_blank" rel="noreferrer"
-              className="h-14 px-3.5 rounded-xl bg-surface-3 border border-line hover:border-mint/40 text-xs font-medium text-muted hover:text-mint flex items-center gap-1.5 transition-colors">
+              className="self-stretch px-3.5 rounded-xl bg-surface-2 border border-line hover:border-mint/40 text-xs font-medium text-muted hover:text-mint flex items-center gap-1.5 transition-colors">
               <FolderOpen size={15} /> Carpeta Drive
             </a>
           )}
         </div>
       </div>
 
-      <div className="px-5 sm:px-6 pt-4 flex gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-xl p-1 w-fit flex-wrap" role="tablist">
         {([
-          ['todos', `Todos (${videos.length})`],
-          ['revisar', `Por revisar (${counts.revisar})`],
-          ['aprobados', `Aprobados (${counts.aprobados})`],
-          ['produccion', `En producción (${counts.produccion})`],
-        ] as [Filter, string][]).map(([key, label]) => (
-          <button key={key} type="button" onClick={() => onFilter(key)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === key ? 'bg-accent text-on-accent' : 'bg-surface-3 text-muted hover:text-text border border-line'}`}>
+          ['todos', 'Todos', videos.length],
+          ['revisar', 'Por revisar', counts.revisar],
+          ['aprobados', 'Aprobados', counts.aprobados],
+          ['produccion', 'En producción', counts.produccion],
+        ] as [Filter, string, number][]).map(([key, label, n]) => (
+          <button key={key} type="button" role="tab" aria-selected={filter === key} onClick={() => onFilter(key)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filter === key ? 'bg-accent text-on-accent shadow-[0_0_16px_-6px_rgba(53,214,228,0.7)]' : 'text-muted hover:text-text'}`}>
             {label}
+            <span className={`font-tech text-[11px] px-1.5 rounded ${filter === key ? 'bg-black/20' : 'bg-surface-2'}`}>{n}</span>
           </button>
         ))}
       </div>
 
-      <div className="p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
         {videos.length === 0 ? (
-          <div className="col-span-full text-center py-12 border border-dashed border-line rounded-2xl">
-            <Clock size={26} className="text-amber mx-auto mb-2" />
-            <p className="font-semibold">{plannedCount ? `${plannedCount} videos en producción` : 'Videos en producción'}</p>
-            <p className="text-xs text-muted mt-1">Cada video aparecerá aquí en cuanto el equipo lo entregue{deliveryLabel ? ` (entrega ${deliveryLabel})` : ''}.</p>
+          <div className="col-span-full">
+            <EmptyState icon={<Clock size={22} />}
+              title={plannedCount ? `${plannedCount} videos en producción` : 'Videos en producción'}
+              text={`Cada video aparecerá aquí en cuanto el equipo lo entregue${deliveryLabel ? ` (entrega ${deliveryLabel})` : ''}.`} />
           </div>
         ) : visible.length === 0 && (
-          <p className="col-span-full text-sm text-muted text-center py-10">No hay videos en este filtro.</p>
+          <div className="col-span-full">
+            <EmptyState icon={<Film size={22} />} title="Nada en este filtro" text="Prueba con otra pestaña para ver el resto de videos." action={{ label: 'Ver todos', onClick: () => onFilter('todos') }} />
+          </div>
         )}
         {visible.map((v, i) => <VideoCard key={v.id} video={v} index={i} onOpen={() => onOpen(v.id)} />)}
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, cls }: { label: string; value: number; cls: string }) {
-  return (
-    <div className="h-14 min-w-[86px] px-3 rounded-xl bg-surface-3 border border-line flex flex-col justify-center">
-      <span className={`font-display text-xl font-bold leading-none ${cls}`}>{value}</span>
-      <span className="text-[10px] text-muted-2 mt-1">{label}</span>
-    </div>
+    </GlowCard>
   );
 }
 
@@ -220,7 +215,7 @@ function VideoCard({ video, index, onOpen }: { video: Video; index: number; onOp
 
   return (
     <button type="button" onClick={onOpen} disabled={!delivered}
-      className="group text-left rounded-2xl border border-line bg-surface-3/60 overflow-hidden hover:border-accent/50 hover:-translate-y-0.5 transition-all disabled:hover:translate-y-0 disabled:hover:border-line disabled:cursor-default">
+      className="group text-left rounded-lg border border-line bg-surface-3 overflow-hidden hover:border-accent/40 hover:-translate-y-0.5 transition-all disabled:hover:translate-y-0 disabled:hover:border-line disabled:cursor-default">
       <div className="relative aspect-video bg-gradient-to-br from-surface-3 to-surface flex items-center justify-center overflow-hidden">
         {thumb ? (
           <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline onError={() => setThumb(null)} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -235,7 +230,7 @@ function VideoCard({ video, index, onOpen }: { video: Video; index: number; onOp
         <span className={`absolute top-2.5 left-2.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border backdrop-blur-sm ${st.cls}`}>{st.label}</span>
       </div>
       <div className="px-3.5 py-3 flex items-center justify-between gap-2">
-        <span className="font-display font-bold">Video {num}</span>
+        <span className="text-sm font-semibold">Video {num}</span>
         <span className="text-[11px] font-tech text-muted-2">
           {delivered ? `Feedback ${video.clientFeedbackRoundsUsed ?? 0}/${video.clientFeedbackMaxRounds ?? 1}` : <span className="flex items-center gap-1"><Lock size={11} /> Pendiente</span>}
         </span>
@@ -319,13 +314,13 @@ function VideoReview({
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
           <button type="button" onClick={onBack} title="Volver a la marca"
-            className="w-10 h-10 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/50 transition-colors">
+            className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent/50 transition-colors">
             <ArrowLeft size={17} />
           </button>
           <div className="min-w-0">
             <p className="text-[11px] font-tech uppercase tracking-wider text-muted-2">{brand.name}</p>
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-display text-2xl font-bold">{video.name}</h3>
+              <h3 className="font-display text-xl font-bold">{video.name}</h3>
               <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${st.cls}`}>{st.label}</span>
             </div>
           </div>
@@ -346,7 +341,7 @@ function VideoReview({
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Reproductor + línea de tiempo */}
-        <div className="xl:col-span-8 bg-surface-2 border border-line rounded-3xl p-4 sm:p-5 space-y-4">
+        <GlowCard className="xl:col-span-8" contentClassName="p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-lg p-0.5">
               {([['auto', 'Auto', Sparkles], ['horizontal', 'Horizontal', Monitor], ['vertical', 'Vertical', Smartphone]] as const).map(([key, label, Icon]) => (
@@ -362,7 +357,7 @@ function VideoReview({
             </button>
           </div>
 
-          <div ref={frameRef} className="bg-black rounded-2xl overflow-hidden flex items-center justify-center">
+          <div ref={frameRef} className="bg-black rounded-lg overflow-hidden flex items-center justify-center">
             {!delivered ? (
               <div className="aspect-video w-full flex flex-col items-center justify-center text-center p-6 gap-2 bg-surface-3">
                 <Clock size={34} className="text-amber" />
@@ -398,7 +393,7 @@ function VideoReview({
           </div>
 
           {delivered && (
-            <div className="bg-surface-3/60 border border-line rounded-2xl p-3.5 space-y-2">
+            <div className="bg-surface-3 border border-line rounded-lg p-3.5 space-y-2">
               <p className="text-[11px] font-semibold text-muted flex items-center gap-1.5">
                 <Clock size={12} className="text-accent" /> Línea de tiempo del feedback
                 <span className="ml-auto flex items-center gap-3 font-normal text-muted-2">
@@ -422,13 +417,13 @@ function VideoReview({
               )}
             </div>
           )}
-        </div>
+        </GlowCard>
 
         {/* Panel lateral: feedback + decisión */}
         <div className="xl:col-span-4 space-y-4">
-          <div className="bg-surface-2 border border-line rounded-3xl p-4 space-y-3">
+          <GlowCard tone="amber" contentClassName="p-5 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold flex items-center gap-1.5"><MessageSquare size={15} className="text-amber" /> Feedback del cliente</span>
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2"><MessageSquare size={18} className="text-amber shrink-0" /> Feedback</h3>
               <span className="flex gap-1">
                 {Array.from({ length: maxRounds }).map((_, i) => (
                   <span key={i} title={`Ronda ${i + 1}`} className={`w-5 h-1.5 rounded-full ${i < roundsUsed ? 'bg-amber' : 'bg-surface-3 border border-line'}`} />
@@ -515,11 +510,11 @@ function VideoReview({
                 </ul>
               </div>
             )}
-          </div>
+          </GlowCard>
 
           {/* Decisión final */}
-          <div className={`rounded-3xl p-4 space-y-3 border ${video.qc === 'aprobado_cliente' ? 'bg-mint/10 border-mint/40' : 'bg-surface-2 border-line'}`}>
-            <span className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={15} className="text-mint" /> Decisión final</span>
+          <GlowCard tone="mint" contentClassName="p-5 space-y-3">
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2"><CheckCircle2 size={18} className="text-mint shrink-0" /> Decisión final</h3>
             {video.qc === 'aprobado_cliente' ? (
               <p className="text-xs text-mint">Aprobado por el cliente{video.date ? ` el ${video.date}` : ''}. El pago del 100% quedó liberado.</p>
             ) : confirmApprove ? (
@@ -545,7 +540,7 @@ function VideoReview({
               </button>
               </>
             )}
-          </div>
+          </GlowCard>
 
           {isAdmin && delivered && video.qc !== 'aprobado_cliente' && !canSend && (
             <button type="button"

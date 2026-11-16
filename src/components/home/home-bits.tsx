@@ -182,3 +182,18 @@ export function Modal({ title, icon, onClose, children }: { title: string; icon?
     </div>
   );
 }
+
+/** Contador del encabezado (mismo de Tareas). Clic opcional para filtrar. */
+export function StatChip({ label, value, tone, onClick }: { label: string; value: number; tone: 'accent' | 'amber' | 'red' | 'mint'; onClick?: () => void }) {
+  const cls = { accent: 'text-accent', amber: 'text-amber', red: 'text-red-400', mint: 'text-mint' }[tone];
+  const body = (
+    <>
+      <p className={`font-display text-xl font-bold leading-none ${value > 0 ? cls : 'text-muted-2'}`}><CountTicker value={value} /></p>
+      <p className="text-[11px] text-muted mt-1">{label}</p>
+    </>
+  );
+  const base = 'text-left bg-surface-2 border border-line rounded-xl px-3.5 py-2 min-w-[130px]';
+  return onClick
+    ? <button type="button" onClick={onClick} className={`${base} hover:border-accent/40 transition-colors`}>{body}</button>
+    : <div className={base}>{body}</div>;
+}

@@ -1,27 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Clientes y pedidos del Administrador (pensado para computador). Mismo lenguaje que Inicio y Tareas.
+//   · Entregas y feedback → portal de revisión (lo mismo que ve el cliente, con ronda extra)
+//   · Nuevo pedido        → tarjetas numeradas por paso + resumen en vivo (dinero y capacidad)
+//   · Expedientes         → lista + detalle por cliente (pagos, cuenta, Drive, avance, factura)
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStore } from '../store';
 import { uploadSharedFile } from '../lib/supabaseClient';
 import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { ClientPortal } from './ClientPortal';
 import { ClientAccountField } from '../components/ClientAccountField';
 import { DriveFolderField } from '../components/DriveFolderField';
+import { GlowCard } from '../components/ui/spotlight-card';
+import NumberTicker from '../components/ui/number-ticker';
+import { AnimatedRadialChart } from '../components/ui/animated-radial-chart';
+import { LiquidMetalButton } from '../components/ui/liquid-metal-button';
+import { countdownLabel, deadlineMs, EmptyState, fmtDate, MoneyCard, StatChip } from '../components/home/home-bits';
 import { takeNavIntent } from '../lib/navIntent';
 import { addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
-import { fmtDate } from '../components/home/home-bits';
 import type { Order, Video } from '../types';
 import {
-  AlertTriangle, ArrowRight, Briefcase, Calendar, CheckCircle2, Clock, Cpu, DollarSign, ExternalLink,
-  FileText, FolderOpen, Layers, Loader2, Lock, Play, PlusCircle, Printer, Receipt, Search, Trash2,
-  Upload, UserCircle2, Users, X,
+  AlertTriangle, ArrowRight, Briefcase, Calendar, CheckCircle2, ChevronRight, ClipboardCheck, DollarSign,
+  ExternalLink, FileText, FolderOpen, Gauge, Layers, Loader2, Play, PlusCircle, Printer, Receipt, Search,
+  Trash2, TrendingUp, Upload, UserCircle2, Users, Wallet, X,
 } from 'lucide-react';
 
 type Tab = 'portal_videos' | 'nuevo_pedido' | 'cartera';
 type Priority = 'normal' | 'prioritario' | 'urgente' | 'critico';
-type ClientFilter = 'todos' | 'activos' | 'por_cobrar';
+type FileFilter = 'todos' | 'activos' | 'por_cobrar' | 'sin_cuenta';
 
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const baseBrand = (name: string) => name.split(' · Tanda ')[0].trim();
 const isPaid = (o: Order) => o.paymentStatus !== 'incompleto';
 const isDelivered = (v: Video) => Boolean(v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente');
+const waitingClient = (v: Video) => isDelivered(v) && v.qc !== 'aprobado_cliente' && v.qc !== 'correcciones';
 
 function formatHour(h: number): string {
   const clamped = Math.max(0, Math.min(23, Math.floor(h)));
@@ -44,104 +54,136 @@ function nextInvoiceCode(orders: Order[], brand: string, dateIso: string): strin
 }
 
 const PRIORITY_STYLE: Record<Priority, string> = {
-  critico: 'bg-red-500/15 text-red-400 border-red-500/40',
-  urgente: 'bg-amber-dim text-amber border-amber/40',
-  prioritario: 'bg-accent-dim text-accent border-accent/40',
+  critico: 'bg-red-500/10 text-red-400 border-red-500/30',
+  urgente: 'bg-amber-dim text-amber border-amber/30',
+  prioritario: 'bg-accent-dim text-accent border-accent/30',
   normal: 'bg-mint-dim text-mint border-mint/30',
 };
 const PRIORITY_LABEL: Record<Priority, string> = { critico: 'Crítica', urgente: 'Urgente', prioritario: 'Prioritaria', normal: 'Normal' };
 
 export function ClientsView() {
-  const { orders, brands, financeSettings } = useStore();
+  const { orders, brands } = useStore();
   const [tab, setTab] = useState<Tab>(() => {
     const intent = takeNavIntent('clientes');
     return intent === 'nuevo_pedido' || intent === 'cartera' ? intent : 'portal_videos';
   });
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<FileFilter>('todos');
   const [focusBrand, setFocusBrand] = useState<string | null>(null);
 
-  const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
-  const summary = useMemo(() => {
-    const active = orders.filter(o => o.status !== 'finalizado');
-    const pending = orders.filter(o => !isPaid(o));
-    const amount = (o: Order) => Math.max(1, o.videoCount || 1) * unitEconomics(null, o, financeSettings).price;
+  const counts = useMemo(() => {
+    const brandKeys = new Set(orders.map(o => baseBrand(o.brand).toLowerCase()).filter(Boolean));
     return {
-      clients: new Set(orders.map(o => baseBrand(o.brand).toLowerCase()).filter(Boolean)).size,
-      active: active.length,
-      waitingClient: allVideos.filter(v => isDelivered(v) && v.qc !== 'aprobado_cliente' && v.qc !== 'correcciones').length,
-      toCollect: pending.reduce((s, o) => s + amount(o), 0),
-      pendingCount: pending.length,
-      billed: orders.filter(isPaid).reduce((s, o) => s + amount(o), 0),
+      clients: brandKeys.size,
+      waiting: brands.flatMap(b => b.videos).filter(waitingClient).length,
+      unpaid: orders.filter(o => !isPaid(o)).length,
+      unlinked: orders.filter(o => !o.clientId && o.status !== 'finalizado').length,
     };
-  }, [orders, allVideos, financeSettings]);
+  }, [orders, brands]);
 
-  const openFile = (brand: string) => { setFocusBrand(brand); setTab('cartera'); };
+  const goFiles = (f: FileFilter, brand: string | null = null) => { setFilter(f); setFocusBrand(brand); setTab('cartera'); };
 
-  const TABS: { key: Tab; label: string; icon: typeof Play }[] = [
-    { key: 'portal_videos', label: 'Entregas y feedback', icon: Play },
-    { key: 'nuevo_pedido', label: 'Nuevo pedido', icon: PlusCircle },
-    { key: 'cartera', label: `Expedientes (${summary.clients})`, icon: FolderOpen },
+  const tabs: { key: Tab; label: string; count?: number; icon: ReactNode }[] = [
+    { key: 'portal_videos', label: 'Entregas y feedback', count: counts.waiting, icon: <Play size={15} /> },
+    { key: 'cartera', label: 'Expedientes', count: counts.clients, icon: <FolderOpen size={15} /> },
+    { key: 'nuevo_pedido', label: 'Nuevo pedido', icon: <PlusCircle size={15} /> },
   ];
 
   return (
     <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      {/* Encabezado */}
+      <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
         <div>
-          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent">Clientes</p>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+          </p>
           <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Clientes y pedidos</h2>
-          <p className="text-sm text-muted mt-1">Registra pedidos, vincula la cuenta del cliente y sigue sus entregas, feedback y pagos.</p>
+          <p className="text-muted text-sm mt-1">Registra pedidos, vincula la cuenta de cada cliente y sigue sus entregas, feedback y pagos.</p>
         </div>
-        <div className="flex items-center bg-surface-2 border border-line rounded-xl p-1 gap-1 flex-wrap">
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const on = tab === t.key;
-            return (
-              <button key={t.key} type="button" onClick={() => setTab(t.key)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${on ? 'bg-accent text-on-accent' : 'text-muted hover:text-text hover:bg-surface-3'}`}>
-                <Icon size={14} /> {t.label}
-              </button>
-            );
-          })}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <StatChip label="Esperando al cliente" value={counts.waiting} tone="accent" onClick={() => setTab('portal_videos')} />
+          <StatChip label="Pagos pendientes" value={counts.unpaid} tone="amber" onClick={() => goFiles('por_cobrar')} />
+          <StatChip label="Sin cuenta de cliente" value={counts.unlinked} tone="red" onClick={() => goFiles('sin_cuenta')} />
+          <StatChip label="Clientes" value={counts.clients} tone="mint" onClick={() => goFiles('todos')} />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <Kpi icon={<Users size={16} />} label="Clientes" value={String(summary.clients)} tone="accent" />
-        <Kpi icon={<Layers size={16} />} label="Pedidos activos" value={String(summary.active)} tone="accent" />
-        <Kpi icon={<Play size={16} />} label="Esperando al cliente" value={String(summary.waitingClient)} hint="Videos entregados sin respuesta" tone="accent" onClick={() => setTab('portal_videos')} />
-        <Kpi icon={<Receipt size={16} />} label="Por cobrar" value={fmtMoney(summary.toCollect)} hint={`${summary.pendingCount} pedido(s) con pago pendiente`} tone={summary.pendingCount ? 'amber' : 'mint'} onClick={() => setTab('cartera')} />
-        <Kpi icon={<DollarSign size={16} />} label="Facturado y pagado" value={fmtMoney(summary.billed)} tone="mint" />
+      {/* Pestañas + buscador */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-xl p-1 w-fit" role="tablist">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+                tab === t.key ? 'bg-accent text-on-accent shadow-[0_0_16px_-6px_rgba(53,214,228,0.7)]' : 'text-muted hover:text-text'
+              }`}
+            >
+              {t.icon} {t.label}
+              {t.count !== undefined && (
+                <span className={`font-tech text-[11px] px-1.5 rounded ${tab === t.key ? 'bg-black/20' : 'bg-surface-3'}`}>{t.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === 'cartera' && (
+            <>
+              <label className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-2" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Buscar marca…"
+                  className="w-56 bg-surface-2 border border-line rounded-lg pl-8 pr-8 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch('')} aria-label="Limpiar búsqueda" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 hover:text-text">
+                    <X size={14} />
+                  </button>
+                )}
+              </label>
+              <select
+                value={filter}
+                onChange={e => setFilter(e.target.value as FileFilter)}
+                aria-label="Filtrar expedientes"
+                className="bg-surface-2 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="todos">Todos los clientes</option>
+                <option value="activos">Con pedidos activos</option>
+                <option value="por_cobrar">Con pagos pendientes</option>
+                <option value="sin_cuenta">Sin cuenta de cliente</option>
+              </select>
+            </>
+          )}
+          {tab !== 'nuevo_pedido' && (
+            <button
+              type="button"
+              onClick={() => setTab('nuevo_pedido')}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm font-semibold hover:bg-accent-strong transition-all hover:-translate-y-0.5 shadow-[0_0_20px_-6px_rgba(53,214,228,0.6)]"
+            >
+              <PlusCircle size={15} /> Nuevo pedido
+            </button>
+          )}
+        </div>
       </div>
 
       {tab === 'portal_videos' && <ClientPortal />}
-      {tab === 'nuevo_pedido' && <NewOrderForm onOpenFile={openFile} />}
-      {tab === 'cartera' && <ClientFiles focusBrand={focusBrand} onNewOrder={() => setTab('nuevo_pedido')} />}
+      {tab === 'nuevo_pedido' && <NewOrderForm onOpenFile={brand => goFiles('todos', brand)} />}
+      {tab === 'cartera' && (
+        <ClientFiles key={focusBrand || 'all'} search={search} filter={filter} focusBrand={focusBrand}
+          onClearFilter={() => { setFilter('todos'); setSearch(''); }} onNewOrder={() => setTab('nuevo_pedido')} />
+      )}
     </div>
   );
 }
 
-function Kpi({ icon, label, value, hint, tone, onClick }: {
-  icon: React.ReactNode; label: string; value: string; hint?: string; tone: 'accent' | 'mint' | 'amber'; onClick?: () => void;
-}) {
-  const cls = tone === 'mint' ? 'text-mint bg-mint-dim' : tone === 'amber' ? 'text-amber bg-amber-dim' : 'text-accent bg-accent-dim';
-  const body = (
-    <>
-      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cls}`}>{icon}</span>
-      <div className="min-w-0">
-        <p className="text-[11px] text-muted-2">{label}</p>
-        <p className="font-tech text-lg font-bold leading-tight truncate">{value}</p>
-        {hint && <p className="text-[10px] text-muted-2 truncate">{hint}</p>}
-      </div>
-    </>
-  );
-  const base = 'bg-surface-2 border border-line rounded-xl p-3.5 flex items-center gap-3 text-left';
-  return onClick ? (
-    <button type="button" onClick={onClick} className={`${base} hover:border-accent/40 transition-colors`}>{body}</button>
-  ) : <div className={base}>{body}</div>;
-}
-
-// =====================================================================
-// NUEVO PEDIDO
-// =====================================================================
+// ---------------------------------------------------------------------------
+// Nuevo pedido: tarjetas numeradas (8) + resumen en vivo (4)
+// ---------------------------------------------------------------------------
 function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
   const { orders, brands, workers, financeSettings, capacityConfig, getWorkerCapacity, addOrder, clientProfiles, setView } = useStore();
 
@@ -204,7 +246,6 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
       reason = `Ocupación proyectada del ${Math.min(100, Math.round(loadRatio * 100))}% en la fecha de entrega.`;
     }
 
-    // Reparto por tandas desde la fecha de entrega
     const batches: { date: string; videos: number }[] = [];
     let remaining = Math.max(1, videoCount);
     for (let i = 0; remaining > 0 && i < 20; i++) {
@@ -253,8 +294,7 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
   const pastDate = deliveryDate < todayIso();
   const canSubmit = Boolean(brandName.trim()) && videoCount > 0 && !uploading && !pastDate;
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = () => {
     if (!canSubmit) return;
     const brand = brandName.trim();
     addOrder({
@@ -286,67 +326,71 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
     setClientNotes('');
     setBriefFile(null);
     setInvoiceFile(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const input = 'w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2';
+  const input = 'w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2 transition-colors';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {created && (
-        <div className="bg-mint-dim border border-mint/40 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap animate-fadeIn">
+        <div className="bg-mint-dim border border-mint/30 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap animate-fadeIn">
           <CheckCircle2 size={18} className="text-mint shrink-0" />
           <p className="text-sm flex-1 min-w-[220px]">
             <strong>Pedido de {created.brand} registrado.</strong>{' '}
             <span className="text-muted">
               {created.paid ? 'Pago verificado.' : 'Quedó con pago pendiente.'}{' '}
-              {created.linked ? 'El cliente ya lo ve en su portal.' : 'Aún sin cuenta de cliente: vincúlala en Expedientes.'}
+              {created.linked ? 'El cliente ya lo ve en su portal.' : 'Aún sin cuenta de cliente: vincúlala en el expediente.'}
             </span>
           </p>
-          <button type="button" onClick={() => onOpenFile(created.brand)} className="text-xs font-semibold text-accent border border-accent/40 rounded-lg px-3 py-1.5 hover:bg-accent/10">Ver expediente</button>
-          <button type="button" onClick={() => setView('tareas')} className="text-xs font-semibold bg-accent text-on-accent rounded-lg px-3 py-1.5 hover:bg-accent-strong flex items-center gap-1">Asignar en Tareas <ArrowRight size={13} /></button>
-          <button type="button" onClick={() => setCreated(null)} title="Cerrar" className="text-muted hover:text-text"><X size={15} /></button>
+          <button type="button" onClick={() => onOpenFile(created.brand)} className="text-sm text-accent hover:text-accent-strong flex items-center gap-1">Ver expediente <ChevronRight size={14} /></button>
+          <button type="button" onClick={() => setView('tareas')} className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-sm font-semibold hover:bg-accent-strong transition-all">
+            Asignar en Tareas <ArrowRight size={14} />
+          </button>
+          <button type="button" onClick={() => setCreated(null)} aria-label="Cerrar aviso" className="text-muted hover:text-text"><X size={15} /></button>
         </div>
       )}
 
-      <form onSubmit={submit} className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl divide-y divide-line">
-          {/* 1. Cliente */}
-          <section className="p-5 space-y-3">
-            <StepTitle n={1} title="Cliente y volumen" />
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div className="lg:col-span-8 space-y-5">
+          {/* 1 · Cliente */}
+          <GlowCard tone="violet" contentClassName="p-5">
+            <StepHeader n={1} icon={<Users size={18} className="text-violet shrink-0" />} title="Cliente y volumen" hint="La marca y la cuenta con la que el cliente verá su proyecto." />
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
               <label className="sm:col-span-5 block">
-                <span className="text-xs text-muted block mb-1">Marca *</span>
-                <input list="senda-brands" value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="Nombre de la marca" required className={input} />
+                <span className="text-[11px] text-muted-2 block mb-1">Marca *</span>
+                <input list="senda-brands" value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="Nombre de la marca" className={input} />
                 <datalist id="senda-brands">{knownBrands.map(b => <option key={b} value={b} />)}</datalist>
               </label>
               <label className="sm:col-span-4 block">
-                <span className="text-xs text-muted block mb-1">Cuenta del cliente</span>
+                <span className="text-[11px] text-muted-2 block mb-1">Cuenta del cliente</span>
                 <select value={clientId} onChange={e => setClientId(e.target.value)} className={`${input} cursor-pointer`}>
                   <option value="">Sin vincular (no lo ve)</option>
                   {clientProfiles.map(c => <option key={c.id} value={c.id}>{c.name}{c.email ? ` · ${c.email}` : ''}</option>)}
                 </select>
               </label>
               <label className="sm:col-span-3 block">
-                <span className="text-xs text-muted block mb-1">Videos *</span>
+                <span className="text-[11px] text-muted-2 block mb-1">Videos *</span>
                 <input type="number" min={1} max={200} value={videoCount}
                   onChange={e => setVideoCount(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
                   className={`${input} font-tech font-bold text-accent`} />
               </label>
             </div>
             {clientProfiles.length === 0 && (
-              <p className="text-[11px] text-muted-2 flex items-center gap-1.5">
+              <p className="text-[11px] text-muted-2 flex items-center gap-1.5 mt-2">
                 <UserCircle2 size={12} /> No hay cuentas con rol Cliente.
-                <button type="button" onClick={() => setView('administracion')} className="text-accent hover:underline">Crear una en Admin</button>
+                <button type="button" onClick={() => setView('administracion')} className="text-accent hover:text-accent-strong">Crear una en Admin</button>
               </p>
             )}
-          </section>
+          </GlowCard>
 
-          {/* 2. Entrega */}
-          <section className="p-5 space-y-3">
-            <StepTitle n={2} title="Entrega y complejidad" />
+          {/* 2 · Entrega */}
+          <GlowCard tone="amber" contentClassName="p-5">
+            <StepHeader n={2} icon={<Calendar size={18} className="text-amber shrink-0" />} title="Entrega y complejidad"
+              hint={Number.isFinite(deadlineMs(deliveryDate, deliveryTime)) && !pastDate ? countdownLabel(deadlineMs(deliveryDate, deliveryTime)) : 'Fecha límite del cliente'} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <span className="text-xs text-muted flex items-center gap-1 mb-1"><Calendar size={12} className="text-accent" /> Fecha y hora límite</span>
+                <span className="text-[11px] text-muted-2 block mb-1">Fecha y hora límite</span>
                 <div className="grid grid-cols-2 gap-2">
                   <input type="date" min={todayIso()} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className={`${input} font-tech ${pastDate ? 'border-red-500/60' : ''}`} />
                   <input type="time" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} className={`${input} font-tech`} />
@@ -354,169 +398,163 @@ function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
                 {pastDate && <p className="text-[11px] text-red-400 mt-1">La fecha ya pasó.</p>}
               </div>
               <div>
-                <span className="text-xs text-muted flex items-center gap-1 mb-1"><Layers size={12} className="text-accent" /> Complejidad</span>
-                <div className="grid grid-cols-3 gap-1.5">
+                <span className="text-[11px] text-muted-2 block mb-1">Complejidad</span>
+                <div className="grid grid-cols-3 gap-1 bg-surface-3 border border-line rounded-lg p-0.5">
                   {([['simple', 'Simple'], ['estandar', 'Estándar'], ['alta', 'Compleja']] as const).map(([c, label]) => (
                     <button key={c} type="button" onClick={() => setComplexity(c)}
-                      className={`py-2 rounded-lg text-xs font-semibold border transition-colors ${complexity === c ? 'bg-accent text-on-accent border-accent' : 'bg-surface-3 text-muted border-line hover:text-text'}`}>
+                      className={`py-1.5 rounded-md text-xs font-medium transition-colors ${complexity === c ? 'bg-surface-2 text-accent' : 'text-muted hover:text-text'}`}>
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
-          </section>
+          </GlowCard>
 
-          {/* 3. Precio */}
-          <section className="p-5 space-y-3">
-            <StepTitle n={3} title="Precio y pago al equipo" />
+          {/* 3 · Precio */}
+          <GlowCard tone="mint" contentClassName="p-5">
+            <StepHeader n={3} icon={<DollarSign size={18} className="text-mint shrink-0" />} title="Precio y pago al equipo" hint={`Margen ${money.pct}%`} />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <label className="block">
-                <span className="text-xs text-muted block mb-1">Cobro al cliente / video</span>
+                <span className="text-[11px] text-muted-2 block mb-1">Cobro al cliente / video</span>
                 <input type="number" min={0} step={0.5} value={unitPriceClient} onChange={e => setUnitPriceClient(Math.max(0, Number(e.target.value) || 0))} className={`${input} font-tech`} />
               </label>
               <label className="block">
-                <span className="text-xs text-muted block mb-1">Pago al equipo / video</span>
+                <span className="text-[11px] text-muted-2 block mb-1">Pago al equipo / video</span>
                 <input type="number" min={0} step={0.5} value={creatorPay} onChange={e => setCreatorPay(Math.max(0, Number(e.target.value) || 0))} className={`${input} font-tech text-accent`} />
               </label>
-              <div>
-                <span className="text-xs text-muted block mb-1">Se paga en 2 tramos</span>
-                <p className="bg-surface-3/60 border border-dashed border-line rounded-lg px-3 py-2 text-[11px] font-tech text-muted leading-snug">
-                  {fmtMoney(creatorPay / 2)} Aprobado Senda + {fmtMoney(creatorPay / 2)} Aprobado Cliente
-                </p>
+              <div className="bg-surface-3 border border-line rounded-lg p-3">
+                <p className="text-[11px] text-muted-2">Se paga en 2 tramos</p>
+                <p className="text-xs font-tech mt-1"><span className="text-accent">{fmtMoney(creatorPay / 2)}</span> Aprobado Senda</p>
+                <p className="text-xs font-tech"><span className="text-mint">{fmtMoney(creatorPay / 2)}</span> Aprobado Cliente</p>
               </div>
             </div>
-          </section>
+          </GlowCard>
 
-          {/* 4. Archivos */}
-          <section className="p-5 space-y-3">
-            <StepTitle n={4} title="Factura, brief y notas" />
+          {/* 4 · Archivos */}
+          <GlowCard contentClassName="p-5 space-y-3">
+            <StepHeader n={4} icon={<Receipt size={18} className="text-accent shrink-0" />} title="Factura, brief y notas" hint="Todo es opcional" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input ref={invoiceRef} type="file" accept=".pdf,image/*" className="hidden" onChange={e => { void upload('invoice', e.target.files?.[0]); e.target.value = ''; }} />
-              <FileButton
-                icon={<Receipt size={14} />} loading={uploading === 'invoice'} file={invoiceFile} tone="mint"
+              <FileSlot icon={<Receipt size={15} />} loading={uploading === 'invoice'} file={invoiceFile}
                 empty="Subir factura del pago" hint="Sin factura queda “Pago pendiente”"
-                onPick={() => invoiceRef.current?.click()} onClear={() => setInvoiceFile(null)}
-              />
+                onPick={() => invoiceRef.current?.click()} onClear={() => setInvoiceFile(null)} />
               <input ref={briefRef} type="file" accept=".pdf,.doc,.docx,image/*" className="hidden" onChange={e => { void upload('brief', e.target.files?.[0]); e.target.value = ''; }} />
-              <FileButton
-                icon={<FileText size={14} />} loading={uploading === 'brief'} file={briefFile} tone="accent"
-                empty="Adjuntar brief (opcional)" hint="El cliente también lo completa en su portal"
-                onPick={() => briefRef.current?.click()} onClear={() => setBriefFile(null)}
-              />
+              <FileSlot icon={<FileText size={15} />} loading={uploading === 'brief'} file={briefFile}
+                empty="Adjuntar brief" hint="El cliente también lo completa en su portal"
+                onPick={() => briefRef.current?.click()} onClear={() => setBriefFile(null)} />
             </div>
-            {uploadError && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} /> {uploadError}</p>}
+            {uploadError && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center gap-1.5"><AlertTriangle size={13} /> {uploadError}</p>}
             <textarea value={clientNotes} onChange={e => setClientNotes(e.target.value)} rows={2}
               placeholder="Indicaciones de estilo, formato de entrega, enlaces del cliente…" className={`${input} resize-y`} />
-          </section>
+          </GlowCard>
         </div>
 
         {/* Resumen en vivo */}
-        <aside className="lg:col-span-5 lg:sticky lg:top-4 space-y-4">
-          <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-semibold">Resumen del pedido</h3>
-              <span className="font-tech text-xs text-mint">Margen {money.pct}%</span>
+        <div className="lg:col-span-4 space-y-5 lg:sticky lg:top-20">
+          <GlowCard tone="mint" contentClassName="p-5">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+                <Wallet size={18} className="text-mint shrink-0" /> Resumen del pedido
+              </h3>
+              <span className="text-xs text-muted-2 font-tech">{videoCount} videos</span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <MoneyBox label="Cobro total" value={fmtMoney(money.gross)} />
-              <MoneyBox label="Pago al equipo" value={fmtMoney(money.team)} cls="text-accent" />
-              <MoneyBox label="Neto SENDA" value={fmtMoney(money.net)} cls="text-mint" highlight />
+            <div className="grid grid-cols-1 gap-2.5">
+              <MoneyCard icon={<Receipt size={16} />} label="Cobro al cliente" value={<NumberTicker value={money.gross} />} sub={`${fmtMoney(unitPriceClient)} por video`} tone="text" />
+              <MoneyCard icon={<Users size={16} />} label="Pago al equipo" value={<NumberTicker value={money.team} />} sub="50% Aprobado Senda + 50% Aprobado Cliente" tone="amber" />
+              <MoneyCard icon={<TrendingUp size={16} />} label="Neto SENDA" value={<NumberTicker value={money.net} />} sub={`Margen del ${money.pct}%`} tone="mint" highlight />
             </div>
+          </GlowCard>
 
-            <div className={`rounded-lg border p-3.5 space-y-2.5 ${capacity.fits ? 'bg-mint/5 border-mint/30' : 'bg-amber/5 border-amber/40'}`}>
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm font-semibold flex items-center gap-1.5">
-                  {capacity.fits
-                    ? <><CheckCircle2 size={15} className="text-mint" /> Cabe en la fecha pedida</>
-                    : <><AlertTriangle size={15} className="text-amber" /> Supera el cupo del día ({capacity.freeOnTarget} libres)</>}
-                </span>
-                <span className={`font-tech text-[11px] font-bold px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[capacity.priority]}`}>
-                  Prioridad {PRIORITY_LABEL[capacity.priority]}
-                </span>
-              </div>
-              <p className="text-xs text-muted">{capacity.reason}</p>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <MiniStat icon={<Users size={12} />} label="Personas" value={String(capacity.people)} />
-                <MiniStat icon={<Cpu size={12} />} label="Cupo diario" value={`${capacity.dailyLimit} vid`} />
-                <MiniStat icon={<Clock size={12} />} label="Ocupación" value={`${capacity.saturation}%`} />
-              </div>
-              {capacity.batches.length > 1 && (
-                <ul className="text-[11px] font-tech text-muted space-y-1 pt-1 border-t border-line/60">
-                  {capacity.batches.map((b, i) => (
-                    <li key={b.date} className="flex justify-between"><span>Tanda {i + 1} · {fmtDate(b.date)}</span><span className="text-text">{b.videos} videos</span></li>
-                  ))}
-                </ul>
-              )}
-              <p className="text-[11px] text-accent font-tech">Entrega estimada: {capacity.eta}</p>
+          <GlowCard tone={capacity.fits ? 'accent' : 'amber'} contentClassName="p-5 flex flex-col items-center">
+            <div className="self-stretch flex items-center justify-between gap-3">
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+                <Gauge size={18} className="text-accent shrink-0" /> Capacidad
+              </h3>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[capacity.priority]}`}>Prioridad {PRIORITY_LABEL[capacity.priority]}</span>
             </div>
+            <div className="pt-3">
+              <AnimatedRadialChart value={capacity.saturation} size={190} strokeWidth={13} showLabels={false} caption={`Ocupación del día · cupo ${capacity.dailyLimit} videos`} />
+            </div>
+            <p className={`self-stretch text-xs mt-2 flex items-start gap-1.5 ${capacity.fits ? 'text-mint' : 'text-amber'}`}>
+              {capacity.fits ? <CheckCircle2 size={14} className="shrink-0 mt-px" /> : <AlertTriangle size={14} className="shrink-0 mt-px" />}
+              {capacity.fits ? 'Cabe en la fecha pedida.' : `Supera el cupo del día (${capacity.freeOnTarget} libres).`}
+            </p>
+            <p className="self-stretch text-[11px] text-muted-2 mt-1">{capacity.reason}</p>
+            <div className="self-stretch mt-3 space-y-1.5">
+              <div className="flex items-center justify-between bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs">
+                <span className="text-muted">Personas sugeridas</span><span className="font-tech font-bold">{capacity.people}</span>
+              </div>
+              {capacity.batches.length > 1 && capacity.batches.map((b, i) => (
+                <div key={b.date} className="flex items-center justify-between bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs">
+                  <span className="text-muted">Tanda {i + 1} · {fmtDate(b.date)}</span><span className="font-tech font-bold">{b.videos} videos</span>
+                </div>
+              ))}
+              <p className="text-[11px] text-accent font-tech pt-1">Entrega estimada: {capacity.eta}</p>
+            </div>
+          </GlowCard>
 
+          <GlowCard contentClassName="p-5 space-y-3">
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <ClipboardCheck size={18} className="text-accent shrink-0" /> Listo para registrar
+            </h3>
             <div className="space-y-1.5 text-xs">
-              <Check ok={Boolean(brandName.trim())} label="Marca" />
-              <Check ok={Boolean(clientId)} label="Cuenta del cliente vinculada" optional />
-              <Check ok={Boolean(invoiceFile)} label="Factura del pago" optional />
+              <CheckRow ok={Boolean(brandName.trim())} label="Marca" />
+              <CheckRow ok={!pastDate} label="Fecha de entrega válida" />
+              <CheckRow ok={Boolean(clientId)} label="Cuenta del cliente vinculada" optional />
+              <CheckRow ok={Boolean(invoiceFile)} label="Factura del pago" optional />
             </div>
-
-            <button type="submit" disabled={!canSubmit}
-              className="w-full py-3 rounded-xl bg-accent text-on-accent font-display text-sm font-bold hover:bg-accent-strong transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
-              {uploading ? 'Esperando la subida…' : invoiceFile ? 'Registrar pedido pagado' : 'Registrar con pago pendiente'}
-            </button>
-          </div>
-        </aside>
-      </form>
-    </div>
-  );
-}
-
-function StepTitle({ n, title }: { n: number; title: string }) {
-  return (
-    <p className="font-semibold flex items-center gap-2.5">
-      <span className="w-6 h-6 rounded-md bg-accent-dim text-accent font-tech text-xs font-bold flex items-center justify-center">{n}</span>
-      {title}
-    </p>
-  );
-}
-
-function FileButton({ icon, loading, file, tone, empty, hint, onPick, onClear }: {
-  icon: React.ReactNode; loading: boolean; file: { name: string } | null; tone: 'mint' | 'accent';
-  empty: string; hint: string; onPick: () => void; onClear: () => void;
-}) {
-  const on = tone === 'mint' ? 'bg-mint/5 border-mint/40 text-mint' : 'bg-accent/5 border-accent/40 text-accent';
-  return (
-    <div>
-      <div className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs ${file ? on : 'bg-surface-3 border-dashed border-line text-muted'}`}>
-        {loading ? <Loader2 size={14} className="animate-spin shrink-0" /> : file ? <CheckCircle2 size={14} className="shrink-0" /> : icon}
-        <button type="button" onClick={onPick} disabled={loading} className="flex-1 min-w-0 text-left truncate font-medium hover:text-text disabled:cursor-wait">
-          {loading ? 'Subiendo…' : file ? file.name : empty}
-        </button>
-        {file && !loading && <button type="button" onClick={onClear} title="Quitar" className="text-muted-2 hover:text-red-400"><X size={13} /></button>}
-        {!file && !loading && <Upload size={13} className="shrink-0" />}
+            <LiquidMetalButton
+              onClick={submit}
+              disabled={!canSubmit}
+              loading={Boolean(uploading)}
+              loadingLabel="Esperando la subida…"
+              label={invoiceFile ? 'Registrar pedido pagado' : 'Registrar con pago pendiente'}
+              icon={PlusCircle}
+              variant={invoiceFile ? 'mint' : 'cyan'}
+              fullWidth
+            />
+          </GlowCard>
+        </div>
       </div>
-      <p className="text-[10px] text-muted-2 mt-1">{hint}</p>
     </div>
   );
 }
 
-function MoneyBox({ label, value, cls = 'text-text', highlight }: { label: string; value: string; cls?: string; highlight?: boolean }) {
+function StepHeader({ n, icon, title, hint }: { n: number; icon: ReactNode; title: string; hint?: string }) {
   return (
-    <div className={`rounded-lg border p-3 ${highlight ? 'bg-mint/5 border-mint/30' : 'bg-surface-3 border-line'}`}>
-      <p className="text-[10px] text-muted-2">{label}</p>
-      <p className={`font-tech text-base font-bold mt-0.5 truncate ${cls}`}>{value}</p>
+    <div className="flex items-center justify-between gap-3 mb-4">
+      <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+        <span className="w-6 h-6 rounded-md bg-surface-3 border border-line font-tech text-xs text-muted flex items-center justify-center">{n}</span>
+        {icon} {title}
+      </h3>
+      {hint && <span className="text-xs text-muted-2">{hint}</span>}
     </div>
   );
 }
 
-function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function FileSlot({ icon, loading, file, empty, hint, onPick, onClear }: {
+  icon: ReactNode; loading: boolean; file: { name: string } | null; empty: string; hint: string; onPick: () => void; onClear: () => void;
+}) {
   return (
-    <div className="bg-surface-2 border border-line rounded-lg py-2">
-      <p className="text-[10px] text-muted-2 flex items-center justify-center gap-1">{icon} {label}</p>
-      <p className="font-tech text-xs font-bold mt-0.5">{value}</p>
+    <div className={`rounded-lg border p-3 transition-colors ${file ? 'bg-mint-dim border-mint/30' : 'bg-surface-3 border-dashed border-line hover:border-accent/40'}`}>
+      <div className="flex items-center gap-2.5">
+        <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${file ? 'bg-mint/15 text-mint' : 'bg-surface-2 text-accent'}`}>
+          {loading ? <Loader2 size={15} className="animate-spin" /> : file ? <CheckCircle2 size={15} /> : icon}
+        </span>
+        <button type="button" onClick={onPick} disabled={loading} className="flex-1 min-w-0 text-left disabled:cursor-wait">
+          <p className={`text-sm font-medium truncate ${file ? 'text-mint' : ''}`}>{loading ? 'Subiendo…' : file ? file.name : empty}</p>
+          <p className="text-[11px] text-muted-2 truncate">{file ? 'Clic para cambiar' : hint}</p>
+        </button>
+        {file && !loading
+          ? <button type="button" onClick={onClear} aria-label="Quitar archivo" className="text-muted-2 hover:text-red-400"><X size={14} /></button>
+          : !loading && <Upload size={14} className="text-muted-2 shrink-0" />}
+      </div>
     </div>
   );
 }
 
-function Check({ ok, label, optional }: { ok: boolean; label: string; optional?: boolean }) {
+function CheckRow({ ok, label, optional }: { ok: boolean; label: string; optional?: boolean }) {
   return (
     <p className={`flex items-center gap-2 ${ok ? 'text-mint' : 'text-muted-2'}`}>
       {ok ? <CheckCircle2 size={13} /> : <span className="w-3 h-3 rounded-full border border-current" />}
@@ -525,9 +563,9 @@ function Check({ ok, label, optional }: { ok: boolean; label: string; optional?:
   );
 }
 
-// =====================================================================
-// EXPEDIENTES
-// =====================================================================
+// ---------------------------------------------------------------------------
+// Expedientes: lista de clientes (5) + detalle (7)
+// ---------------------------------------------------------------------------
 interface ClientFile {
   brand: string;
   orders: Order[];
@@ -537,13 +575,14 @@ interface ClientFile {
   pendingAmount: number;
   active: number;
   latest: string;
-  linked: boolean;
+  unlinked: number;
+  nextDeadline: number;
 }
 
-function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; onNewOrder: () => void }) {
+function ClientFiles({ search, filter, focusBrand, onClearFilter, onNewOrder }: {
+  search: string; filter: FileFilter; focusBrand: string | null; onClearFilter: () => void; onNewOrder: () => void;
+}) {
   const { orders, financeSettings } = useStore();
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<ClientFilter>('todos');
   const [selected, setSelected] = useState<string | null>(focusBrand);
 
   const files = useMemo<ClientFile[]>(() => {
@@ -552,15 +591,19 @@ function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; on
       const name = baseBrand(o.brand);
       if (!name) continue;
       const key = name.toLowerCase();
-      const f = map.get(key) || { brand: name, orders: [], videos: 0, billed: 0, net: 0, pendingAmount: 0, active: 0, latest: '', linked: false };
+      const f = map.get(key) || { brand: name, orders: [], videos: 0, billed: 0, net: 0, pendingAmount: 0, active: 0, latest: '', unlinked: 0, nextDeadline: Infinity };
       const count = Math.max(1, o.videoCount || 1);
       const eco = unitEconomics(null, o, financeSettings);
       f.orders.push(o);
       f.videos += count;
       if (isPaid(o)) f.billed += count * eco.price; else f.pendingAmount += count * eco.price;
       f.net += count * (eco.price - eco.creatorPay);
-      if (o.status !== 'finalizado') f.active += 1;
-      if (o.clientId) f.linked = true;
+      if (o.status !== 'finalizado') {
+        f.active += 1;
+        if (!o.clientId) f.unlinked += 1;
+        const dl = deadlineMs(o.deliveryDate, o.deliveryTime);
+        if (Number.isFinite(dl)) f.nextDeadline = Math.min(f.nextDeadline, dl);
+      }
       if ((o.createdAt || '') > f.latest) f.latest = o.createdAt || '';
       map.set(key, f);
     }
@@ -568,91 +611,96 @@ function ClientFiles({ focusBrand, onNewOrder }: { focusBrand: string | null; on
     return Array.from(map.values()).sort((a, b) => b.latest.localeCompare(a.latest));
   }, [orders, financeSettings]);
 
+  const q = norm(search.trim());
   const visible = files.filter(f =>
-    (!search.trim() || f.brand.toLowerCase().includes(search.trim().toLowerCase())) &&
-    (filter === 'todos' || (filter === 'activos' ? f.active > 0 : f.pendingAmount > 0))
+    (!q || norm(f.brand).includes(q)) &&
+    (filter === 'todos' || (filter === 'activos' ? f.active > 0 : filter === 'por_cobrar' ? f.pendingAmount > 0 : f.unlinked > 0))
   );
   const active = visible.find(f => f.brand.toLowerCase() === selected?.toLowerCase()) || visible[0] || null;
 
   if (files.length === 0) {
     return (
-      <div className="bg-surface-2 border border-dashed border-line rounded-xl py-16 text-center">
-        <Briefcase size={30} className="text-muted-2 mx-auto mb-3" />
-        <p className="font-display text-lg font-semibold">Aún no hay pedidos</p>
-        <p className="text-sm text-muted mt-1">Registra el primero y aquí verás su expediente, factura y avance.</p>
-        <button type="button" onClick={onNewOrder} className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold bg-accent text-on-accent rounded-lg px-4 py-2 hover:bg-accent-strong">
-          <PlusCircle size={14} /> Nuevo pedido
-        </button>
-      </div>
+      <GlowCard contentClassName="p-8">
+        <EmptyState icon={<Briefcase size={22} />} title="Aún no hay pedidos" text="Registra el primero y aquí verás su expediente, pagos, factura y avance." action={{ label: 'Nuevo pedido', onClick: onNewOrder }} />
+      </GlowCard>
+    );
+  }
+  if (visible.length === 0) {
+    return (
+      <GlowCard contentClassName="p-8">
+        <EmptyState icon={<Search size={22} />} title="Sin resultados" text="Ningún cliente coincide con la búsqueda o el filtro." action={{ label: 'Ver todos', onClick: onClearFilter }} />
+      </GlowCard>
     );
   }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      <div className="lg:col-span-4 space-y-3">
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-2" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar marca…"
-            className="w-full bg-surface-2 border border-line rounded-lg pl-8 pr-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
-        </div>
-        <div className="flex gap-1.5">
-          {([['todos', 'Todos'], ['activos', 'Activos'], ['por_cobrar', 'Por cobrar']] as [ClientFilter, string][]).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setFilter(k)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === k ? 'bg-accent text-on-accent' : 'bg-surface-2 border border-line text-muted hover:text-text'}`}>{l}</button>
-          ))}
-        </div>
-        <div className="space-y-2 lg:max-h-[calc(100vh-320px)] lg:overflow-y-auto lg:pr-1">
-          {visible.length === 0 && <p className="text-sm text-muted text-center py-8">Ningún cliente coincide.</p>}
-          {visible.map(f => {
-            const on = active?.brand === f.brand;
-            return (
-              <button key={f.brand} type="button" onClick={() => setSelected(f.brand)}
-                className={`w-full text-left p-3.5 rounded-xl border transition-colors ${on ? 'bg-accent/10 border-accent' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
-                <div className="flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-lg bg-accent-dim text-accent font-display font-bold flex items-center justify-center shrink-0">{f.brand.charAt(0).toUpperCase()}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold truncate">{f.brand}</p>
-                    <p className="text-[11px] text-muted-2 font-tech">{f.orders.length} pedido(s) · {f.videos} videos</p>
-                  </div>
-                  {f.pendingAmount > 0
-                    ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-dim text-amber shrink-0">Por cobrar</span>
-                    : !f.linked && <span title="Sin cuenta de cliente" className="text-muted-2 shrink-0"><UserCircle2 size={15} /></span>}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+      {/* Lista */}
+      <div className="lg:col-span-5 space-y-2">
+        {visible.map(f => {
+          const on = active?.brand === f.brand;
+          const late = Number.isFinite(f.nextDeadline) && f.nextDeadline < Date.now();
+          return (
+            <button
+              key={f.brand}
+              type="button"
+              onClick={() => setSelected(f.brand)}
+              className={`w-full text-left p-3.5 rounded-xl border transition-all ${on ? 'bg-accent-dim/40 border-accent shadow-[0_0_20px_-10px_rgba(53,214,228,0.8)]' : 'bg-surface-2 border-line hover:border-accent/40'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold truncate">{f.brand} <span className="text-muted-2 font-normal">· {f.orders.length} pedido{f.orders.length === 1 ? '' : 's'} · {f.videos} videos</span></p>
+                <ChevronRight size={15} className={on ? 'text-accent' : 'text-muted-2'} />
+              </div>
+              <p className="text-[11px] text-muted-2 mt-1">
+                {f.active > 0 && Number.isFinite(f.nextDeadline)
+                  ? <>Próxima entrega <span className={`font-medium ${late ? 'text-red-400' : 'text-amber'}`}>· {countdownLabel(f.nextDeadline)}</span></>
+                  : 'Sin pedidos activos'}
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <Chip ok={f.pendingAmount === 0} label={f.pendingAmount === 0 ? 'Pagos al día' : `Por cobrar ${fmtMoney(f.pendingAmount)}`} warn={f.pendingAmount > 0} />
+                <Chip ok={f.unlinked === 0} label={f.unlinked === 0 ? 'Cliente vinculado' : 'Sin cuenta de cliente'} />
+                {f.active > 0 && <Chip ok label={`${f.active} activo${f.active === 1 ? '' : 's'}`} />}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {active && <ClientDetail key={active.brand} file={active} />}
+      {/* Detalle */}
+      {active && (
+        <GlowCard className="lg:col-span-7 lg:sticky lg:top-20" contentClassName="p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-display text-xl font-bold">{active.brand}</h3>
+              <p className="text-xs text-muted mt-0.5">{active.orders.length} pedido{active.orders.length === 1 ? '' : 's'} · {active.videos} videos · {active.active} activo{active.active === 1 ? '' : 's'}</p>
+            </div>
+            <FolderOpen size={18} className="text-accent shrink-0" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <MoneyCard icon={<Receipt size={16} />} label="Pagado" value={<NumberTicker value={active.billed} />} sub="Pedidos con pago verificado" tone="text" />
+            <MoneyCard icon={<Wallet size={16} />} label="Por cobrar" value={<NumberTicker value={active.pendingAmount} />} sub={active.pendingAmount > 0 ? 'Sube el comprobante o márcalo pagado' : 'Todo al día'} tone="amber" />
+            <MoneyCard icon={<TrendingUp size={16} />} label="Neto SENDA" value={<NumberTicker value={active.net} />} sub="Cobro − pago al equipo" tone="mint" highlight />
+          </div>
+          <div className="pt-3 border-t border-line/70 space-y-3">
+            <p className="text-sm font-semibold flex items-center gap-1.5"><Layers size={15} className="text-accent" /> Pedidos</p>
+            {active.orders.map((o, i) => <OrderBlock key={o.id} order={o} number={active.orders.length - i} />)}
+          </div>
+        </GlowCard>
+      )}
     </div>
   );
 }
 
-function ClientDetail({ file }: { file: ClientFile }) {
-  return (
-    <div className="lg:col-span-8 space-y-4">
-      <div className="bg-surface-2 border border-line rounded-xl p-5 flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Expediente</p>
-          <h3 className="font-display text-2xl font-bold">{file.brand}</h3>
-          <p className="text-xs text-muted mt-1">{file.orders.length} pedido(s) · {file.videos} videos · {file.active} activo(s)</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 min-w-[300px]">
-          <MoneyBox label="Pagado" value={fmtMoney(file.billed)} />
-          <MoneyBox label="Por cobrar" value={fmtMoney(file.pendingAmount)} cls={file.pendingAmount ? 'text-amber' : 'text-muted'} />
-          <MoneyBox label="Neto SENDA" value={fmtMoney(file.net)} cls="text-mint" highlight />
-        </div>
-      </div>
-      {file.orders.map((o, i) => <OrderCard key={o.id} order={o} number={file.orders.length - i} />)}
-    </div>
-  );
+function Chip({ ok, label, warn }: { ok: boolean; label: string; warn?: boolean }) {
+  const cls = ok ? 'text-mint border-mint/30 bg-mint-dim' : warn ? 'text-amber border-amber/30 bg-amber-dim' : 'text-muted-2 border-line bg-surface-3';
+  return <span className={`text-[10px] px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
 }
 
-function OrderCard({ order, number }: { order: Order; number: number }) {
+function OrderBlock({ order, number }: { order: Order; number: number }) {
   const { orders, brands, financeSettings, updateOrder, deleteOrder, setView } = useStore();
   const [busy, setBusy] = useState<'brief' | 'invoice' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const count = Math.max(1, order.videoCount || 1);
@@ -662,7 +710,12 @@ function OrderCard({ order, number }: { order: Order; number: number }) {
   const videos = brands.flatMap(b => b.videos).filter(v => v.orderId === order.id || v.id === order.boardVideoId);
   const approved = videos.filter(v => v.qc === 'aprobado_cliente').length;
   const delivered = videos.filter(isDelivered).length;
+  const dl = deadlineMs(order.deliveryDate, order.deliveryTime);
+  const finished = order.status === 'finalizado' || approved >= count;
+  const late = !finished && Number.isFinite(dl) && dl < Date.now();
   const soleOrderOfBrand = !orders.some(o => o.id !== order.id && baseBrand(o.brand).toLowerCase() === baseBrand(order.brand).toLowerCase());
+
+  const flash = (msg: string) => { setNotice(msg); setTimeout(() => setNotice(null), 3000); };
 
   const uploadFile = async (kind: 'brief' | 'invoice', f: File | undefined) => {
     if (!f) return;
@@ -673,6 +726,7 @@ function OrderCard({ order, number }: { order: Order; number: number }) {
       updateOrder(order.id, kind === 'brief'
         ? { briefFileName: f.name, briefFileUrl: url }
         : { invoiceFileName: f.name, invoiceFileUrl: url, paymentStatus: 'completado' });
+      flash(kind === 'brief' ? 'Brief guardado.' : 'Comprobante guardado: pedido pagado.');
     } catch {
       setError('No se pudo subir el archivo. Intenta de nuevo.');
     } finally {
@@ -689,7 +743,7 @@ function OrderCard({ order, number }: { order: Order; number: number }) {
     const win = window.open('', '_blank', 'width=840,height=760');
     if (!win) { setError('El navegador bloqueó la ventana. Permite ventanas emergentes para SENDA.'); return; }
     const b = escapeHtml(order.brand);
-    win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>Factura ${code} · SENDA</title>
+    win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>Factura ${escapeHtml(code)} · SENDA</title>
 <style>
 body{font-family:Inter,-apple-system,sans-serif;background:#fff;color:#111;padding:40px;margin:0}
 .card{max-width:720px;margin:0 auto;border:1px solid #e2e8f0;border-radius:16px;padding:36px}
@@ -714,104 +768,93 @@ th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.m
     win.document.close();
   };
 
-  const statusChip = order.status === 'finalizado' ? { l: 'Finalizado', c: 'bg-mint-dim text-mint' }
-    : order.clipperId || order.status === 'asignado' ? { l: 'En producción', c: 'bg-accent-dim text-accent' }
-    : { l: 'Sin asignar', c: 'bg-amber-dim text-amber' };
+  const stage = finished ? 'Finalizado' : order.clipperId || order.status === 'asignado' ? 'En producción' : 'Sin asignar';
+  const btn = 'px-3 py-1.5 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40 transition-colors';
 
   return (
-    <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4 hover:border-accent/30 transition-colors">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+    <div className="bg-surface-3 border border-line rounded-lg p-3.5 space-y-3 hover:border-accent/40 transition-colors">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-display font-bold">Pedido #{number}</span>
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusChip.c}`}>{statusChip.l}</span>
-            {order.priority && order.priority !== 'normal' && (
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[order.priority]}`}>{PRIORITY_LABEL[order.priority]}</span>
-            )}
-          </div>
-          <p className="text-xs text-muted mt-1 font-tech">
-            Entrega {fmtDate(order.deliveryDate, order.deliveryTime)}{order.invoiceNumber ? ` · ${order.invoiceNumber}` : ''}
+          <p className="text-sm font-semibold">
+            Pedido #{number} <span className="text-muted-2 font-normal">· {count} video{count === 1 ? '' : 's'} · {fmtMoney(total)}</span>
+          </p>
+          <p className="text-[11px] text-muted-2 mt-0.5">
+            {fmtDate(order.deliveryDate, order.deliveryTime)}
+            {!finished && Number.isFinite(dl) && <span className={`ml-1.5 font-medium ${late ? 'text-red-400' : 'text-amber'}`}>· {countdownLabel(dl)}</span>}
+            {order.invoiceNumber && <span className="font-tech"> · {order.invoiceNumber}</span>}
           </p>
         </div>
-        {paid ? (
-          <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-mint-dim text-mint flex items-center gap-1.5"><CheckCircle2 size={13} /> Pagado</span>
+        {confirmDelete ? (
+          <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/40 rounded-lg px-2 py-1 shrink-0">
+            <span className="text-[11px] text-red-400 font-semibold">{soleOrderOfBrand ? '¿Borrar pedido y sus videos?' : '¿Borrar pedido?'}</span>
+            <button type="button" onClick={() => deleteOrder(order.id)} className="px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-bold hover:bg-red-600">Sí</button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className="px-1.5 py-0.5 rounded bg-surface-2 text-muted text-[11px] hover:text-text">No</button>
+          </div>
         ) : (
-          <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-dim text-amber flex items-center gap-1.5"><Lock size={13} /> Pago pendiente</span>
+          <button type="button" onClick={() => setConfirmDelete(true)} title="Eliminar pedido" className="p-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0">
+            <Trash2 size={15} />
+          </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <MoneyBox label={`${count} videos · ${fmtMoney(eco.price)} c/u`} value={fmtMoney(total)} />
-        <MoneyBox label="Neto SENDA" value={fmtMoney(total - count * eco.creatorPay)} cls="text-mint" />
-        <div className="bg-surface-3 border border-line rounded-lg p-3">
-          <p className="text-[10px] text-muted-2">Avance</p>
-          <div className="flex h-1.5 rounded-full overflow-hidden bg-surface-2 mt-2">
-            <span className="bg-mint" style={{ width: `${(approved / count) * 100}%` }} />
-            <span className="bg-accent" style={{ width: `${(Math.max(0, delivered - approved) / count) * 100}%` }} />
-          </div>
-          <p className="text-[10px] font-tech text-muted-2 mt-1.5"><span className="text-accent">{delivered}</span> entregados · <span className="text-mint">{approved}</span> aprobados de {count}</p>
-        </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Chip ok={paid} warn={!paid} label={paid ? 'Pagado' : 'Pago pendiente'} />
+        <Chip ok={finished} label={stage} />
+        <Chip ok={Boolean(order.briefConfirmedAt)} label={order.briefConfirmedAt ? 'Brief confirmado' : 'Brief sin confirmar'} />
+        {order.priority && order.priority !== 'normal' && (
+          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[order.priority]}`}>Prioridad {PRIORITY_LABEL[order.priority]}</span>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+      <div className="flex items-center gap-2">
+        <div className="flex h-1.5 flex-1 rounded-full overflow-hidden bg-surface-2">
+          <span className="bg-mint transition-all duration-500" style={{ width: `${(approved / count) * 100}%` }} />
+          <span className="bg-accent transition-all duration-500" style={{ width: `${(Math.max(0, delivered - approved) / count) * 100}%` }} />
+        </div>
+        <span className="text-[10px] font-tech text-muted-2 whitespace-nowrap"><span className="text-accent">{delivered}</span> entregados · <span className="text-mint">{approved}</span> aprobados</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <ClientAccountField order={order} />
         <DriveFolderField order={order} compact />
       </div>
 
-      {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>}
+      {notice && <p className="text-xs text-mint bg-mint-dim border border-mint/30 rounded-lg px-3 py-2 flex items-center gap-1.5 animate-fadeIn"><CheckCircle2 size={14} /> {notice}</p>}
+      {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>}
 
-      <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-line/60">
-        {order.briefFileUrl ? (
-          <a href={order.briefFileUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
-            <FileText size={13} className="text-accent" /> Brief <ExternalLink size={11} className="text-muted-2" />
-          </a>
-        ) : (
-          <label className="px-3 py-1.5 rounded-lg bg-surface-3 border border-dashed border-line text-muted hover:text-text text-xs font-medium flex items-center gap-1.5 cursor-pointer">
-            {busy === 'brief' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Subir brief
-            <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={e => { void uploadFile('brief', e.target.files?.[0]); e.target.value = ''; }} />
-          </label>
-        )}
-
-        {order.invoiceFileUrl && (
-          <a href={order.invoiceFileUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-mint/40">
-            <Receipt size={13} className="text-mint" /> Comprobante <ExternalLink size={11} className="text-muted-2" />
-          </a>
-        )}
-        <label className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer border ${paid ? 'bg-surface-3 border-line text-muted hover:text-text' : 'bg-amber-dim border-amber/40 text-amber hover:bg-amber/20'}`}>
-          {busy === 'invoice' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-          {order.invoiceFileUrl ? 'Reemplazar comprobante' : 'Subir comprobante'}
-          <input type="file" className="hidden" accept=".pdf,image/*" onChange={e => { void uploadFile('invoice', e.target.files?.[0]); e.target.value = ''; }} />
-        </label>
+      <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-line/60">
         {!paid && (
-          <button type="button" onClick={() => updateOrder(order.id, { paymentStatus: 'completado' })}
-            className="px-3 py-1.5 rounded-lg bg-mint text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:opacity-90">
+          <button type="button" onClick={() => { updateOrder(order.id, { paymentStatus: 'completado' }); flash('Pedido marcado como pagado.'); }}
+            className="px-3 py-1.5 rounded-lg bg-mint text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity">
             <CheckCircle2 size={13} /> Marcar pagado
           </button>
         )}
-
-        <button type="button" onClick={printInvoice} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+        <label className={`${btn} cursor-pointer ${busy === 'invoice' ? 'opacity-50 pointer-events-none' : ''}`}>
+          {busy === 'invoice' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} className="text-mint" />}
+          {order.invoiceFileUrl ? 'Cambiar comprobante' : 'Subir comprobante'}
+          <input type="file" className="hidden" accept=".pdf,image/*" onChange={e => { void uploadFile('invoice', e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+        {order.invoiceFileUrl && (
+          <a href={order.invoiceFileUrl} target="_blank" rel="noreferrer" className={btn}>
+            <Receipt size={13} className="text-mint" /> Comprobante <ExternalLink size={11} className="text-muted-2" />
+          </a>
+        )}
+        {order.briefFileUrl ? (
+          <a href={order.briefFileUrl} target="_blank" rel="noreferrer" className={btn}>
+            <FileText size={13} className="text-accent" /> Brief <ExternalLink size={11} className="text-muted-2" />
+          </a>
+        ) : (
+          <label className={`${btn} cursor-pointer ${busy === 'brief' ? 'opacity-50 pointer-events-none' : ''}`}>
+            {busy === 'brief' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} className="text-accent" />} Subir brief
+            <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={e => { void uploadFile('brief', e.target.files?.[0]); e.target.value = ''; }} />
+          </label>
+        )}
+        <button type="button" onClick={printInvoice} className={btn}>
           <Printer size={13} className="text-accent" /> Factura PDF
         </button>
-        <button type="button" onClick={() => setView('tareas')} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-accent text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
-          Ir a Tareas <ArrowRight size={12} />
+        <button type="button" onClick={() => setView('tareas')} className="ml-auto text-sm text-accent hover:text-accent-strong flex items-center gap-1">
+          Ver en Tareas <ChevronRight size={14} />
         </button>
-
-        <div className="ml-auto">
-          {confirmDelete ? (
-            <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/40 rounded-lg px-2.5 py-1">
-              <span className="text-[11px] text-red-400 font-semibold">
-                {soleOrderOfBrand ? '¿Borrar pedido y sus videos?' : '¿Borrar pedido?'}
-              </span>
-              <button type="button" onClick={() => deleteOrder(order.id)} className="px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-bold hover:bg-red-600">Sí, borrar</button>
-              <button type="button" onClick={() => setConfirmDelete(false)} className="px-2 py-0.5 rounded text-muted text-[11px] hover:text-text">Cancelar</button>
-            </div>
-          ) : (
-            <button type="button" onClick={() => setConfirmDelete(true)} title="Borrar pedido"
-              className="px-2.5 py-1.5 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 transition-colors">
-              <Trash2 size={13} /> Borrar
-            </button>
-          )}
-        </div>
       </div>
     </div>
   );

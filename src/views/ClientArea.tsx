@@ -4,11 +4,12 @@ import { useAuth } from '../lib/auth';
 import type { Brand, Order, OrderReference, Video } from '../types';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { AnimatedRadialChart } from '../components/ui/animated-radial-chart';
-import { AttentionTile, countdownLabel, deadlineMs, fmtDate, FollowUpRow, Modal, VideoList } from '../components/home/home-bits';
+import { AttentionTile, countdownLabel, deadlineMs, EmptyState, fmtDate, FollowUpRow, Modal, StatChip, VideoList } from '../components/home/home-bits';
+import { ClientPortal } from './ClientPortal';
 import { setNavIntent } from '../lib/navIntent';
 import {
   ArrowRight, CheckCircle2, Clock, ExternalLink, Film, Link2, Lock, MessageSquare, Palette,
-  PlayCircle, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, UserCircle2, Receipt, Download,
+  PlayCircle, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, UserCircle2, Receipt, Download, ChevronRight,
 } from 'lucide-react';
 
 const isDelivered = (v: Video) => Boolean(v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente');
@@ -265,52 +266,115 @@ export function ClientBriefs() {
   const { orders, clientViewReady, setView } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
   const sorted = useMemo(
-    () => orders.slice().sort((a, b) => Number(Boolean(a.briefConfirmedAt)) - Number(Boolean(b.briefConfirmedAt)) || (a.deliveryDate || '').localeCompare(b.deliveryDate || '')),
+    () => orders.slice().sort((a, b) => Number(Boolean(a.briefConfirmedAt) || briefLocked(a)) - Number(Boolean(b.briefConfirmedAt) || briefLocked(b)) || (a.deliveryDate || '').localeCompare(b.deliveryDate || '')),
     [orders]
   );
   const active = sorted.find(o => o.id === openId) || sorted[0] || null;
+  const pending = orders.filter(o => !o.briefConfirmedAt && !briefLocked(o)).length;
+  const confirmed = orders.filter(o => o.briefConfirmedAt && !briefLocked(o)).length;
+  const inProduction = orders.filter(briefLocked).length;
 
   return (
     <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="font-display text-2xl sm:text-3xl font-bold">Mis proyectos</h2>
-          <p className="text-sm text-muted mt-1">Elige el avatar, el estilo de edición y tus referencias. Puedes cambiarlos hasta que el proyecto entre a producción.</p>
-        </div>
-        <SyncBadge />
-      </div>
+      <ClientHeader
+        title="Mis proyectos"
+        text="Elige el avatar, el estilo de edición y tus referencias. Puedes cambiarlos hasta que el proyecto entre a producción."
+      >
+        <StatChip label="Briefs por completar" value={pending} tone="amber" onClick={pending ? () => setOpenId(sorted.find(o => !o.briefConfirmedAt && !briefLocked(o))?.id || null) : undefined} />
+        <StatChip label="Briefs confirmados" value={confirmed} tone="mint" />
+        <StatChip label="En producción" value={inProduction} tone="accent" />
+      </ClientHeader>
 
       {!clientViewReady ? (
-        <div className="bg-surface-2 border border-line rounded-2xl p-10 text-center text-sm text-muted">Cargando…</div>
+        <GlowCard contentClassName="p-10 text-center text-sm text-muted flex items-center justify-center gap-2">
+          <RefreshCw size={15} className="animate-spin text-accent" /> Cargando tus proyectos…
+        </GlowCard>
       ) : !active ? (
-        <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-16 text-center">
-          <p className="font-display text-lg font-semibold">Aún no tienes proyectos</p>
-          <button type="button" onClick={() => setView('chat')} className="mt-4 text-xs font-semibold text-accent">Escribir a SENDA →</button>
-        </div>
+        <GlowCard contentClassName="p-8">
+          <EmptyState icon={<Sparkles size={22} />} title="Aún no tienes proyectos"
+            text="Cuando el equipo SENDA vincule tu pedido a esta cuenta, aparecerá aquí para que armes tu brief."
+            action={{ label: 'Escribir a SENDA', onClick: () => setView('chat') }} />
+        </GlowCard>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <div className="lg:col-span-4 space-y-2">
+          <div className="lg:col-span-5 space-y-2">
             {sorted.map(o => {
               const locked = briefLocked(o);
-              const status = locked ? { label: 'En producción', cls: 'bg-surface-3 text-muted' }
-                : o.briefConfirmedAt ? { label: 'Brief confirmado', cls: 'bg-mint-dim text-mint' }
-                : { label: 'Brief pendiente', cls: 'bg-amber-dim text-amber' };
+              const on = active.id === o.id;
+              const dl = deadlineMs(o.deliveryDate, o.deliveryTime);
+              const late = Number.isFinite(dl) && dl < Date.now();
               return (
                 <button key={o.id} type="button" onClick={() => setOpenId(o.id)}
-                  className={`w-full text-left rounded-2xl border p-4 transition-all ${active.id === o.id ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
+                  className={`w-full text-left p-3.5 rounded-xl border transition-all ${on ? 'bg-accent-dim/40 border-accent shadow-[0_0_20px_-10px_rgba(53,214,228,0.8)]' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-display font-bold truncate">{o.brand}</p>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${status.cls}`}>{status.label}</span>
+                    <p className="text-sm font-semibold truncate">{o.brand} <span className="text-muted-2 font-normal">· {o.videoCount} video{o.videoCount === 1 ? '' : 's'}</span></p>
+                    <ChevronRight size={15} className={on ? 'text-accent' : 'text-muted-2'} />
                   </div>
-                  <p className="text-xs text-muted-2 mt-1">{o.videoCount} videos · entrega {o.deliveryDate || 'por definir'}</p>
+                  <p className="text-[11px] text-muted-2 mt-1">
+                    Entrega {fmtDate(o.deliveryDate, o.deliveryTime)}
+                    {Number.isFinite(dl) && <span className={`ml-1.5 font-medium ${late ? 'text-amber' : 'text-accent'}`}>· {late ? 'Ajustando la entrega con el equipo' : countdownLabel(dl)}</span>}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {locked ? <BriefChip tone="accent" label="En producción" />
+                      : o.briefConfirmedAt ? <BriefChip tone="mint" label="Brief confirmado" />
+                      : <BriefChip tone="amber" label="Brief pendiente" />}
+                    {o.editingStyleName && <BriefChip label={o.editingStyleName} />}
+                    {(o.references?.length || 0) > 0 && <BriefChip label={`${o.references?.length} referencia(s)`} />}
+                  </div>
                 </button>
               );
             })}
           </div>
-          <div className="lg:col-span-8">
+          <div className="lg:col-span-7 lg:sticky lg:top-20">
             <BriefEditor key={active.id} order={active} />
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function BriefChip({ label, tone }: { label: string; tone?: 'mint' | 'amber' | 'accent' }) {
+  const cls = tone === 'mint' ? 'text-mint border-mint/30 bg-mint-dim' : tone === 'amber' ? 'text-amber border-amber/30 bg-amber-dim' : tone === 'accent' ? 'text-accent border-accent/30 bg-accent-dim' : 'text-muted-2 border-line bg-surface-3';
+  return <span className={`text-[10px] px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
+}
+
+/** Encabezado común de las pantallas del cliente (mismo esqueleto que Inicio y Tareas). */
+function ClientHeader({ title, text, children }: { title: string; text: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+      <div>
+        <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> Portal de clientes SENDA
+        </p>
+        <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">{title}</h2>
+        <p className="text-muted text-sm mt-1">{text}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SyncBadge />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// REVISIÓN DE VIDEOS
+// =====================================================================
+export function ClientReview() {
+  const { brands, clientViewReady } = useStore();
+  const all = brands.flatMap(b => b.videos);
+  return (
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <ClientHeader title="Revisión de videos" text="Mira cada video, apruébalo o márcanos correcciones en el segundo exacto (1 ronda por video).">
+        <StatChip label="Por revisar" value={all.filter(toReview).length} tone="accent" />
+        <StatChip label="Aplicando tu feedback" value={all.filter(v => isDelivered(v) && v.qc === 'correcciones').length} tone="amber" />
+        <StatChip label="Aprobados" value={all.filter(v => v.qc === 'aprobado_cliente').length} tone="mint" />
+      </ClientHeader>
+      {clientViewReady ? <ClientPortal /> : (
+        <GlowCard contentClassName="p-10 text-center text-sm text-muted flex items-center justify-center gap-2">
+          <RefreshCw size={15} className="animate-spin text-accent" /> Cargando tus videos…
+        </GlowCard>
       )}
     </div>
   );
@@ -358,11 +422,11 @@ function BriefEditor({ order }: { order: Order }) {
   };
 
   return (
-    <div className="bg-surface-2 border border-line rounded-3xl overflow-hidden">
-      <div className="p-5 border-b border-line flex items-center justify-between gap-3 flex-wrap bg-gradient-to-br from-accent/5 to-transparent">
+    <GlowCard contentClassName="p-0">
+      <div className="p-5 border-b border-line flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Brief del proyecto</p>
-          <h3 className="font-display text-2xl font-bold">{order.brand}</h3>
+          <h3 className="font-display text-xl font-bold flex items-center gap-2"><Palette size={18} className="text-accent shrink-0" /> {order.brand}</h3>
+          <p className="text-xs text-muted mt-0.5">Brief del proyecto · {order.videoCount} videos · entrega {fmtDate(order.deliveryDate, order.deliveryTime)}</p>
         </div>
         <div className="flex items-center gap-1.5">
           {['Avatar', 'Estilo', 'Referencias'].map((label, i) => (
@@ -374,7 +438,7 @@ function BriefEditor({ order }: { order: Order }) {
       </div>
 
       {locked && (
-        <div className="mx-5 mt-5 flex items-start gap-2.5 bg-surface-3 border border-line rounded-xl px-4 py-3 text-xs text-muted">
+        <div className="mx-5 mt-5 flex items-start gap-2.5 bg-surface-3 border border-line rounded-lg px-4 py-3 text-xs text-muted">
           <Lock size={15} className="text-amber shrink-0 mt-0.5" />
           <span className="flex-1">Tu proyecto ya está en producción y el brief quedó fijo. Si necesitas cambiar algo, escríbenos por el chat.</span>
           <button type="button" onClick={() => setView('chat')} className="text-accent font-semibold shrink-0">Ir al chat</button>
@@ -391,7 +455,7 @@ function BriefEditor({ order }: { order: Order }) {
                 const on = avatarId === a.id;
                 return (
                   <button key={a.id} type="button" onClick={() => setAvatarId(on ? null : a.id)}
-                    className={`relative text-left rounded-2xl border overflow-hidden transition-all ${on ? 'border-accent ring-2 ring-accent/40' : 'border-line hover:border-accent/40'}`}>
+                    className={`relative text-left rounded-lg border overflow-hidden transition-all ${on ? 'border-accent shadow-[0_0_20px_-10px_rgba(53,214,228,0.8)]' : 'border-line hover:border-accent/40'}`}>
                     <div className="aspect-[4/5] bg-surface-3 flex items-center justify-center">
                       {a.imageUrl ? <img src={a.imageUrl} alt={a.name} className="w-full h-full object-cover" /> : <UserCircle2 size={36} className="text-muted-2" />}
                     </div>
@@ -406,7 +470,7 @@ function BriefEditor({ order }: { order: Order }) {
             </div>
           ) : (
             <input value={avatarName} onChange={e => setAvatarName(e.target.value)} placeholder="Describe el avatar que quieres (ej. mujer 25-30, estilo casual)"
-              className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+              className="w-full bg-surface-3 border border-line rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
           )}
         </section>
 
@@ -419,7 +483,7 @@ function BriefEditor({ order }: { order: Order }) {
                 const on = styleId === st.id;
                 return (
                   <button key={st.id} type="button" onClick={() => setStyleId(on ? null : st.id)}
-                    className={`text-left rounded-2xl border p-4 transition-all ${on ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-3/60 border-line hover:border-accent/40'}`}>
+                    className={`text-left rounded-lg border p-4 transition-all ${on ? 'bg-accent-dim/40 border-accent' : 'bg-surface-3 border-line hover:border-accent/40'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold">{st.name}</p>
                       {on ? <CheckCircle2 size={17} className="text-accent" /> : <span className="w-4 h-4 rounded-full border border-line" />}
@@ -435,7 +499,7 @@ function BriefEditor({ order }: { order: Order }) {
               })}
             </div>
           ) : (
-            <p className="text-xs text-muted-2 bg-surface-3 border border-dashed border-line rounded-xl px-4 py-3">El equipo SENDA aún no publicó estilos. Cuéntanos el estilo que buscas en las notas.</p>
+            <p className="text-xs text-muted-2 bg-surface-3 border border-dashed border-line rounded-lg px-4 py-3">El equipo SENDA aún no publicó estilos. Cuéntanos el estilo que buscas en las notas.</p>
           )}
         </section>
 
@@ -445,7 +509,7 @@ function BriefEditor({ order }: { order: Order }) {
           {refs.length > 0 && (
             <ul className="space-y-1.5">
               {refs.map(r => (
-                <li key={r.id} className="flex items-center gap-2 bg-surface-3/70 border border-line rounded-xl px-3 py-2">
+                <li key={r.id} className="flex items-center gap-2 bg-surface-3 border border-line rounded-lg px-3 py-2">
                   <Link2 size={13} className="text-accent shrink-0" />
                   <a href={r.url} target="_blank" rel="noreferrer" className="flex-1 min-w-0 text-sm truncate hover:text-accent">{r.name}<span className="text-muted-2 text-xs ml-2">{r.url}</span></a>
                   <button type="button" onClick={() => setRefs(list => list.filter(x => x.id !== r.id))} title="Quitar" className="text-muted-2 hover:text-red-400"><Trash2 size={13} /></button>
@@ -455,11 +519,11 @@ function BriefEditor({ order }: { order: Order }) {
           )}
           <div className="flex gap-2 flex-wrap">
             <input value={refName} onChange={e => setRefName(e.target.value)} placeholder="Nombre (opcional)"
-              className="w-40 bg-surface-3 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+              className="w-40 bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
             <input value={refUrl} onChange={e => setRefUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addRef(); }} placeholder="https://…"
-              className={`flex-1 min-w-[180px] bg-surface-3 border rounded-xl px-3 py-2 text-sm outline-none placeholder:text-muted-2 ${refUrl && !refUrlValid ? 'border-red-500/60' : 'border-line focus:border-accent'}`} />
+              className={`flex-1 min-w-[180px] bg-surface-3 border rounded-lg px-3 py-2 text-sm outline-none placeholder:text-muted-2 ${refUrl && !refUrlValid ? 'border-red-500/60' : 'border-line focus:border-accent'}`} />
             <button type="button" onClick={addRef} disabled={!refUrlValid}
-              className="px-3.5 rounded-xl bg-surface-3 border border-line text-accent text-sm font-semibold flex items-center gap-1 hover:border-accent/50 disabled:opacity-40">
+              className="px-3.5 rounded-lg bg-surface-3 border border-line text-accent text-sm font-semibold flex items-center gap-1 hover:border-accent/50 disabled:opacity-40">
               <Plus size={14} /> Añadir
             </button>
           </div>
@@ -469,12 +533,12 @@ function BriefEditor({ order }: { order: Order }) {
         <section className="space-y-3">
           <SectionTitle n={4} icon={StickyNote} title="Notas para el equipo" hint="Mensajes clave, ofertas, lo que NO quieres ver…" />
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Escribe aquí cualquier detalle importante"
-            className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-y" />
+            className="w-full bg-surface-3 border border-line rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-y" />
         </section>
       </fieldset>
 
       {!locked && (
-        <div className="px-5 py-4 border-t border-line bg-surface-3/40 flex items-center justify-between gap-3 flex-wrap">
+        <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-3 flex-wrap">
           <p className="text-xs">
             {saved === 'confirmed' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Brief confirmado y enviado a SENDA</span>
               : saved === 'draft' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Borrador guardado</span>
@@ -483,24 +547,24 @@ function BriefEditor({ order }: { order: Order }) {
           </p>
           <div className="flex gap-2">
             <button type="button" onClick={() => save(false)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-surface-3 border border-line text-muted hover:text-text">
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium bg-surface-3 border border-line text-muted hover:text-text">
               <Save size={13} /> Guardar borrador
             </button>
             <button type="button" onClick={() => save(true)} disabled={!complete}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-accent text-on-accent hover:bg-accent-strong disabled:opacity-40 disabled:cursor-not-allowed">
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-accent text-on-accent hover:bg-accent-strong disabled:opacity-40 disabled:cursor-not-allowed">
               <CheckCircle2 size={13} /> Confirmar brief
             </button>
           </div>
         </div>
       )}
-    </div>
+    </GlowCard>
   );
 }
 
 function SectionTitle({ n, icon: Icon, title, hint }: { n: number; icon: typeof Film; title: string; hint: string }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="w-7 h-7 rounded-lg bg-accent-dim text-accent font-tech text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
+      <span className="w-6 h-6 rounded-md bg-surface-3 border border-line font-tech text-xs text-muted flex items-center justify-center shrink-0">{n}</span>
       <div>
         <p className="font-semibold flex items-center gap-1.5"><Icon size={15} className="text-accent" /> {title}</p>
         <p className="text-xs text-muted-2">{hint}</p>
