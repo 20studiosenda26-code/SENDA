@@ -56,10 +56,13 @@ const PRIORITY_LABEL: Record<Priority, string> = { critico: 'Crítica', urgente:
 
 export function ClientsView() {
   const { orders, brands, financeSettings, setView } = useStore();
+  // Destino al abrir: pestaña y, si viene del cotizador de Capacidad, datos del pedido ("nuevo_pedido|videos|complejidad|fecha")
+  const [intent] = useState(() => takeNavIntent('clientes') || '');
   const [tab, setTab] = useState<Tab>(() => {
-    const intent = takeNavIntent('clientes');
-    return intent === 'nuevo_pedido' || intent === 'cartera' ? intent : 'portal_videos';
+    const key = intent.split('|')[0];
+    return key === 'nuevo_pedido' || key === 'cartera' ? key : 'portal_videos';
   });
+  const prefill = intent.startsWith('nuevo_pedido|') ? intent.split('|') : null;
   const [focusBrand, setFocusBrand] = useState<string | null>(null);
 
   const allVideos = useMemo(() => brands.flatMap(b => b.videos), [brands]);
@@ -142,7 +145,7 @@ export function ClientsView() {
       </div>
 
       {tab === 'portal_videos' && <ClientPortal />}
-      {tab === 'nuevo_pedido' && <NewOrderForm onOpenFile={openFile} />}
+      {tab === 'nuevo_pedido' && <NewOrderForm onOpenFile={openFile} prefill={prefill ? { videos: Number(prefill[1]) || 5, complexity: prefill[2], date: prefill[3] } : null} />}
       {tab === 'cartera' && <ClientFiles focusBrand={focusBrand} onNewOrder={() => setTab('nuevo_pedido')} />}
     </div>
   );
@@ -165,15 +168,15 @@ function StatChip({ label, value, tone, onClick }: { label: string; value: React
 // =====================================================================
 // NUEVO PEDIDO
 // =====================================================================
-function NewOrderForm({ onOpenFile }: { onOpenFile: (brand: string) => void }) {
+function NewOrderForm({ onOpenFile, prefill }: { onOpenFile: (brand: string) => void; prefill?: { videos: number; complexity: string; date: string } | null }) {
   const { orders, brands, workers, financeSettings, capacityConfig, getWorkerCapacity, addOrder, clientProfiles, setView } = useStore();
 
   const [brandName, setBrandName] = useState('');
   const [clientId, setClientId] = useState('');
-  const [videoCount, setVideoCount] = useState(5);
-  const [deliveryDate, setDeliveryDate] = useState(() => addDaysIso(todayIso(), 3));
+  const [videoCount, setVideoCount] = useState(() => prefill?.videos || 5);
+  const [deliveryDate, setDeliveryDate] = useState(() => prefill?.date || addDaysIso(todayIso(), 3));
   const [deliveryTime, setDeliveryTime] = useState('18:00');
-  const [complexity, setComplexity] = useState<'simple' | 'estandar' | 'alta'>('estandar');
+  const [complexity, setComplexity] = useState<'simple' | 'estandar' | 'alta'>(() => (prefill?.complexity === 'simple' || prefill?.complexity === 'alta' ? prefill.complexity : 'estandar'));
   const [unitPriceClient, setUnitPriceClient] = useState(() => financeSettings.clientPricePerVideo || 25);
   const [creatorPay, setCreatorPay] = useState(() => financeSettings.payPerVideo ?? 5);
   const [clientNotes, setClientNotes] = useState('');
