@@ -19,8 +19,9 @@ import {
 import { GlowCard } from '../components/ui/spotlight-card';
 import NumberTicker from '../components/ui/number-ticker';
 import { AnimatedRadialChart } from '../components/ui/animated-radial-chart';
-import { AttentionTile, countdownLabel, deadlineMs, EmptyState, fmtDate, FollowUpRow, latestFinal, Modal, VideoList, type Tone } from '../components/home/home-bits';
+import { AttentionTile, countdownLabel, deadlineMs, EmptyState, fmtDate, FollowUpRow, Modal, VideoList, type Tone } from '../components/home/home-bits';
 import type { CalendarEvent, Order, Video } from '../types';
+import { WORKER_STEP_TEXT, workerStep, type WorkerStep } from '../lib/videoFlow';
 
 export function HomeView() {
   const { role } = useStore();
@@ -29,38 +30,10 @@ export function HomeView() {
   return <WorkerHome />;
 }
 
-// ---------------------------------------------------------------------------
-// Siguiente paso de cada video, visto por la persona responsable
-// ---------------------------------------------------------------------------
-type Step =
-  | 'subir_imagen' | 'subir_clips' | 'reemplazar_clips' | 'subir_final' | 'corregir'
-  | 'revision_senda' | 'esperando_cliente' | 'listo';
-
-const STEP_TEXT: Record<Step, string> = {
-  subir_imagen: 'Sube la imagen principal',
-  subir_clips: 'Sube y envía los clips',
-  reemplazar_clips: 'Reemplaza los clips rechazados',
-  subir_final: 'Sube el video final',
-  corregir: 'Aplica las correcciones',
-  revision_senda: 'En revisión de SENDA',
-  esperando_cliente: 'Esperando aprobación del cliente',
-  listo: 'Aprobado por el cliente',
-};
-
-function nextStep(v: Video): Step {
-  if (v.qc === 'aprobado_cliente') return 'listo';
-  if (isTeamDone(v)) return 'esperando_cliente';
-  const final = latestFinal(v);
-  if (final?.status === 'rejected') return 'corregir';
-  if (v.qc === 'correcciones' && v.corrections.some(c => !c.resolved)) return 'corregir';
-  if (final?.fileUrl && (!final.status || final.status === 'pending')) return 'revision_senda';
-  if (v.clips.length > 0 && v.clips.every(c => c.status === 'approved')) return 'subir_final';
-  if (v.clips.some(c => c.status === 'rejected')) return 'reemplazar_clips';
-  if (v.mainImageStatus === 'pendiente') return 'revision_senda';
-  if (v.mainImageStatus !== 'aprobada') return 'subir_imagen';
-  if (v.sentByClipper && v.clips.some(c => c.fileUrl && (!c.status || c.status === 'pending'))) return 'revision_senda';
-  return 'subir_clips';
-}
+// Siguiente paso de cada video: fuente única en lib/videoFlow
+type Step = WorkerStep;
+const STEP_TEXT = WORKER_STEP_TEXT;
+const nextStep = workerStep;
 
 type ActionKey = 'subir_imagen' | 'clips' | 'subir_final' | 'corregir';
 

@@ -26,6 +26,9 @@ import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo } from '../lib/economics';
 import { DriveFolderField } from '../components/DriveFolderField';
 import { ClientAccountField } from '../components/ClientAccountField';
+import { WorkerPicker } from '../components/tasks/WorkerPicker';
+import { countdownLabel, deadlineMs, fmtDate, Modal } from '../components/home/home-bits';
+import { adminTurn, WORKER_STEP_TEXT, workerStep } from '../lib/videoFlow';
 
 /** Nombre(s) del responsable: uno solo si la misma persona hace clips y edición. */
 function teamNames(v?: Pick<Video, 'clipperName' | 'editorName' | 'clipperId' | 'editorId'> | null): string {
@@ -245,8 +248,8 @@ export function TasksView() {
                           </div>
 
                           <div className="flex items-center gap-2.5 shrink-0">
-                            <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>
-                              {getProcessBadgeLabel(v)}
+                            <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`} title={getProcessBadgeLabel(v)}>
+                              {WORKER_STEP_TEXT[workerStep(v)]}
                             </span>
                             <ChevronRight size={15} className="text-muted-2" />
                           </div>
@@ -1437,12 +1440,12 @@ function FinalReviewPanel({
           <button
             type="button"
             onClick={() => setFinalVideoStatus(video.id, final.id, 'approved')}
-            title="Aceptar video final"
+            title="Aprueba el video final: pasa a Aprobado Senda, se publica al cliente y se libera el 50% del pago"
             className={`flex-1 h-10 rounded-lg border flex items-center justify-center gap-1.5 text-xs font-semibold hover:-translate-y-0.5 transition-all duration-200 ${
               final.status === 'approved' ? 'bg-mint text-on-accent border-mint shadow-[0_0_15px_rgba(111,231,200,0.3)]' : 'bg-mint/10 text-mint border-mint/30 hover:bg-mint/20'
             }`}
           >
-            <Check size={16} /> {final.status === 'approved' ? 'Aceptado' : 'Aceptar'}
+            <Check size={16} /> {final.status === 'approved' ? 'Aprobado Senda' : 'Aprobar · Aprobado Senda'}
           </button>
           <button
             type="button"
@@ -1574,164 +1577,181 @@ function FinalReviewPanel({
 }
 
 // Tablero de Proyectos Iniciados del Administrador
-export function TasksBoard() {
-  const { brands, orders, setSelectedVideo, deleteBrandProject } = useStore();
-  const [filter, setFilter] = useState<'todos' | QcStatus>('todos');
+export function TasksBoard({ scope = 'activos', search = '', person = 'todos', embedded = false }: {
+  scope?: 'activos' | 'finalizados';
+  search?: string;
+  person?: string;
+  /** Dentro de la pantalla de Tareas del admin (sin márgenes propios) */
+  embedded?: boolean;
+}) {
+  const { brands, orders, workers, setSelectedVideo, deleteBrandProject, assignOrderClipper } = useStore();
   const [expandedBrandId, setExpandedBrandId] = useState<string | null>(null);
   const [confirmDeleteBrandId, setConfirmDeleteBrandId] = useState<string | null>(null);
-
-  const filterOptions: ('todos' | QcStatus)[] = ['todos', 'sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
+  const [reassign, setReassign] = useState<{ orderId: string; brand: string; current: string | null } | null>(null);
+  const [reassignTo, setReassignTo] = useState<string | null>(null);
+  const [reassigning, setReassigning] = useState(false);
 
   const brandGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return brands
       .map(b => {
         const sortedVids = [...b.videos].sort((a, bVid) => (a.videoNumber || 0) - (bVid.videoNumber || 0));
-        const filteredVids = filter === 'todos' ? sortedVids : sortedVids.filter(v => v.qc === filter);
-        const linkedOrder = orders.find(o => sortedVids.some(v => v.orderId === o.id) || `brand-${o.id}` === b.id) || orders.find(o => o.brand.trim().toLowerCase() === b.name.trim().toLowerCase());
-        return {
-          brand: b,
-          videos: filteredVids,
-          totalVideos: sortedVids.length,
-          linkedOrder,
-        };
+        const linkedOrder = orders.find(o => sortedVids.some(v => v.orderId === o.id) || `brand-${o.id}` === b.id) || null;
+        const allApproved = sortedVids.length > 0 && sortedVids.every(v => v.qc === 'aprobado_cliente');
+        const dl = deadlineMs(linkedOrder?.deliveryDate || sortedVids[0]?.date, linkedOrder?.deliveryTime);
+        return { brand: b, videos: sortedVids, linkedOrder, allApproved, dl };
       })
-      .filter(g => g.videos.length > 0);
-  }, [brands, orders, filter]);
+      .filter(g => g.videos.length > 0)
+      .filter(g => (scope === 'finalizados' ? g.allApproved : !g.allApproved))
+      .filter(g => !q || g.brand.name.toLowerCase().includes(q))
+      .filter(g => person === 'todos' || g.videos.some(v => v.clipperId === person || v.editorId === person))
+      .sort((a, b) => (Number.isFinite(a.dl) ? a.dl : Infinity) - (Number.isFinite(b.dl) ? b.dl : Infinity));
+  }, [brands, orders, scope, search, person]);
+
+  const doReassign = async () => {
+    if (!reassign || !reassignTo) return;
+    setReassigning(true);
+    try {
+      await assignOrderClipper(reassign.orderId, reassignTo);
+      setReassign(null);
+      setReassignTo(null);
+    } finally {
+      setReassigning(false);
+    }
+  };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="flex flex-wrap gap-2">
-        {filterOptions.map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`text-xs font-medium px-4 py-2 rounded-full border transition-all duration-300 ${
-              filter === f 
-                ? 'bg-accent text-on-accent border-accent shadow-[0_0_15px_rgba(53,214,228,0.3)]' 
-                : 'bg-surface-2 text-muted border-line hover:border-muted-2 hover:text-text'
-            }`}
-          >
-            {f === 'todos' ? 'Todos' : BOARD_QC_LABEL[f]}
-          </button>
-        ))}
-      </div>
-
+    <div className={embedded ? 'space-y-3' : 'p-6 max-w-6xl mx-auto space-y-3'}>
       {brandGroups.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-line rounded-2xl bg-surface-2">
-          <div className="w-16 h-16 rounded-full bg-surface-3 flex items-center justify-center mb-4">
-            <Film className="w-8 h-8 text-muted-2" />
+        <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-line rounded-2xl bg-surface-2">
+          <div className="w-14 h-14 rounded-full bg-surface-3 flex items-center justify-center mb-3">
+            <Film className="w-7 h-7 text-muted-2" />
           </div>
-          <p className="text-lg font-display font-medium text-text mb-1">Sin resultados</p>
-          <p className="text-sm text-muted">No hay videos con este filtro o estado de QC seleccionado.</p>
+          <p className="text-lg font-display font-medium text-text mb-1">{scope === 'finalizados' ? 'Aún no hay proyectos terminados' : 'Sin proyectos en producción'}</p>
+          <p className="text-sm text-muted">{search || person !== 'todos' ? 'Prueba con otra búsqueda o responsable.' : scope === 'finalizados' ? 'Aquí quedan los proyectos con todos sus videos aprobados por el cliente.' : 'Asigna un pedido desde Por asignar para empezar.'}</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {brandGroups.map(({ brand, videos, totalVideos, linkedOrder }, idx) => {
-            const isOpen = expandedBrandId === brand.id || expandedBrandId === null;
-            return (
-              <div key={brand.id} className="bg-surface-2 border border-line rounded-2xl overflow-hidden shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setExpandedBrandId(prev => (prev === brand.id ? '__closed__' : brand.id))}
-                  className="w-full flex items-center justify-between gap-4 p-5 hover:bg-surface-3/60 transition-colors text-left"
-                >
-                  <div className="flex items-center gap-4 min-w-0">
-                    <span className="w-8 h-8 rounded-xl bg-accent/10 text-accent border border-accent/30 flex items-center justify-center text-sm font-bold font-tech shrink-0">
-                      {idx + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-lg font-display font-bold text-text truncate mb-0.5">
-                        {brand.name} · <span className="text-accent font-tech text-sm">{totalVideos} videos</span>
-                      </p>
-                      <p className="text-xs text-muted truncate flex gap-2">
-                        <span>{TEAM_ROLE_SHORT}: <strong className="text-muted">{teamNames(videos[0])}</strong></span>
-                        {linkedOrder?.deliveryDate ? <span className="text-muted-2">| Entrega: {linkedOrder.deliveryDate}</span> : ''}
-                      </p>
+        brandGroups.map(({ brand, videos, linkedOrder, dl }) => {
+          const isOpen = expandedBrandId === brand.id || (expandedBrandId === null && brandGroups.length <= 3);
+          const responsibleId = videos[0]?.clipperId || videos[0]?.editorId || null;
+          const responsible = workers.find(w => w.id === responsibleId)?.name || teamNames(videos[0]);
+          const doneSenda = videos.filter(v => v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente').length;
+          const doneClient = videos.filter(v => v.qc === 'aprobado_cliente').length;
+          const late = scope === 'activos' && doneSenda < videos.length && Number.isFinite(dl) && dl < Date.now();
+          return (
+            <div key={brand.id} className="bg-surface-2 border border-line rounded-xl overflow-hidden">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setExpandedBrandId(prev => (prev === brand.id ? '__closed__' : brand.id))}
+                onKeyDown={e => { if (e.key === 'Enter') setExpandedBrandId(prev => (prev === brand.id ? '__closed__' : brand.id)); }}
+                className="w-full flex items-center justify-between gap-4 p-4 hover:bg-surface-3/60 transition-colors text-left cursor-pointer"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-display font-bold text-text truncate">
+                    {brand.name} <span className="text-muted-2 font-normal text-sm">· {videos.length} video{videos.length === 1 ? '' : 's'}</span>
+                  </p>
+                  <p className="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2">
+                    <span>{TEAM_ROLE_SHORT}: <strong className="text-text font-medium">{responsible}</strong></span>
+                    <span className="text-muted-2">·</span>
+                    <span>{fmtDate(linkedOrder?.deliveryDate || videos[0]?.date, linkedOrder?.deliveryTime)}</span>
+                    {scope === 'activos' && <span className={late ? 'text-red-400 font-medium' : 'text-amber'}>· {countdownLabel(dl)}</span>}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2 max-w-md">
+                    <div className="relative h-1.5 flex-1 bg-surface-3 rounded-full overflow-hidden">
+                      <div className="absolute inset-y-0 left-0 bg-accent/40 rounded-full" style={{ width: `${(doneSenda / videos.length) * 100}%` }} />
+                      <div className="absolute inset-y-0 left-0 bg-mint rounded-full" style={{ width: `${(doneClient / videos.length) * 100}%` }} />
                     </div>
+                    <span className="text-[10px] font-tech text-muted-2 whitespace-nowrap">{doneSenda} Senda · {doneClient} cliente</span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0" onClick={e => e.stopPropagation()}>
-                    {confirmDeleteBrandId === brand.id ? (
-                      <div className="flex items-center gap-1.5 bg-red-500/15 border border-red-500/40 rounded-xl px-2.5 py-1">
-                        <span className="text-xs text-red-300 font-semibold">¿Borrar proyecto?</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            deleteBrandProject(brand.id);
-                            setConfirmDeleteBrandId(null);
-                          }}
-                          className="px-2 py-0.5 rounded-lg bg-red-500 text-white text-xs font-bold hover:bg-red-600"
-                        >
-                          Sí, borrar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteBrandId(null)}
-                          className="px-2 py-0.5 rounded-lg bg-surface-3 text-muted text-xs hover:text-text"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteBrandId(brand.id)}
-                        title="Eliminar proyecto iniciado"
-                        className="p-2 rounded-xl text-muted hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                    <ChevronDown size={20} className={`text-muted transition-transform duration-300 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="p-4 pt-2 border-t border-line bg-surface space-y-3">
-                    {linkedOrder && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <ClientAccountField order={linkedOrder} />
-                        <DriveFolderField order={linkedOrder} compact />
-                      </div>
-                    )}
-                    {videos.map((v, vIndex) => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => setSelectedVideo(v)}
-                        className="w-full flex items-center justify-between gap-4 p-4 bg-surface-2 border border-line rounded-xl hover:border-accent/50 hover:bg-surface-3 transition-all duration-300 text-left group"
-                      >
-                        <div className="flex items-center gap-4 min-w-0">
-                          <span className="w-8 h-8 rounded-lg bg-surface border border-line font-tech text-xs font-bold text-accent flex items-center justify-center shrink-0 group-hover:bg-accent/10 transition-colors">
-                            #{v.videoNumber || vIndex + 1}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-text truncate mb-0.5">
-                              Video {v.videoNumber || vIndex + 1} <span className="text-muted-2 font-normal ml-1">· {brand.name}</span>
-                            </p>
-                            <p className="text-[11px] text-muted truncate flex gap-2">
-                              <span>Clips: {v.clips.length}</span>
-                              <span className="text-muted-2">|</span>
-                              <span>Finales: {v.finalVideos.length}</span>
-                              <span className="text-muted-2">|</span>
-                              <span>Feedback: {v.corrections.length}</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>
-                            {getProcessBadgeLabel(v)}
-                          </span>
-                          <ChevronRight size={18} className="text-muted-2 group-hover:text-accent transition-colors" />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                  {scope === 'activos' && linkedOrder && (
+                    <button
+                      type="button"
+                      onClick={() => { setReassign({ orderId: linkedOrder.id, brand: brand.name, current: responsibleId }); setReassignTo(null); }}
+                      className="text-xs font-medium text-accent border border-accent/30 rounded-lg px-2.5 py-1.5 hover:bg-accent/10 transition-colors"
+                    >
+                      Cambiar responsable
+                    </button>
+                  )}
+                  {confirmDeleteBrandId === brand.id ? (
+                    <div className="flex items-center gap-1.5 bg-red-500/15 border border-red-500/40 rounded-lg px-2 py-1">
+                      <span className="text-[11px] text-red-300 font-semibold">¿Borrar este proyecto?</span>
+                      <button type="button" onClick={() => { deleteBrandProject(brand.id); setConfirmDeleteBrandId(null); }} className="px-2 py-0.5 rounded bg-red-500 text-white text-[11px] font-bold hover:bg-red-600">Sí</button>
+                      <button type="button" onClick={() => setConfirmDeleteBrandId(null)} className="px-1.5 py-0.5 rounded bg-surface-3 text-muted text-[11px] hover:text-text">No</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmDeleteBrandId(brand.id)} title="Eliminar solo este proyecto" className="p-2 rounded-lg text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                  <ChevronDown size={18} className={`text-muted transition-transform duration-300 ${isOpen ? 'rotate-180 text-accent' : ''}`} />
+                </div>
               </div>
-            );
-          })}
-        </div>
+
+              {isOpen && (
+                <div className="p-4 pt-3 border-t border-line bg-surface/60 space-y-3">
+                  {linkedOrder && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <ClientAccountField order={linkedOrder} />
+                      <DriveFolderField order={linkedOrder} compact />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                    {videos.map((v, vIndex) => {
+                      const turn = adminTurn(v);
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => setSelectedVideo(v)}
+                          className={`w-full flex items-center justify-between gap-3 p-3 bg-surface-2 border rounded-lg hover:bg-surface-3 transition-all text-left group ${turn ? 'border-accent/50' : 'border-line hover:border-accent/40'}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="w-8 h-8 rounded-lg bg-surface border border-line font-tech text-xs font-bold text-accent flex items-center justify-center shrink-0">
+                              #{v.videoNumber || vIndex + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-text truncate">{v.name}</p>
+                              <p className="text-[11px] truncate">
+                                {turn
+                                  ? <span className="text-accent font-semibold">Te toca: {turn}</span>
+                                  : <span className="text-muted">{WORKER_STEP_TEXT[workerStep(v)]}</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${BOARD_QC_CLASSES[v.qc]}`}>{BOARD_QC_LABEL[v.qc]}</span>
+                            <ChevronRight size={16} className="text-muted-2 group-hover:text-accent transition-colors" />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      {reassign && (
+        <Modal title={`Cambiar responsable · ${reassign.brand}`} onClose={() => setReassign(null)} icon={<User size={18} className="text-accent" />}>
+          <p className="text-xs text-muted">La nueva persona recibe los videos que aún no están aprobados, con su avance actual (imagen, clips y finales se conservan), y se le notifica. Los videos ya aprobados siguen pagándose a quien los hizo.</p>
+          <WorkerPicker selected={reassignTo} onSelect={setReassignTo} excludeId={reassign.current} />
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setReassign(null)} className="text-sm text-muted hover:text-text px-3 py-2">Cancelar</button>
+            <button
+              type="button"
+              onClick={() => void doReassign()}
+              disabled={!reassignTo || reassignTo === reassign.current || reassigning}
+              className="inline-flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-semibold hover:bg-accent-strong disabled:opacity-50 transition-colors"
+            >
+              {reassigning ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Reasignar
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );
