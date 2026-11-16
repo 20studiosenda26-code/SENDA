@@ -60,13 +60,16 @@ export function TopBar({ authUser, onSignOut }: { authUser: AuthUser; onSignOut:
   const [profileOpen, setProfileOpen] = useState(false);
   const role = authUser.role;
 
+  // Cada persona ve solo sus notificaciones (antes el equipo veía las de todos)
+  const isMine = (n: { role: string; workerId?: string | null }) =>
+    n.role === role && (role === 'admin' || !n.workerId || n.workerId === authUser.id);
   const roleNotifs = notifications
-    .filter(n => n.role === role)
+    .filter(isMine)
     .sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
 
   const knownNotifIds = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const currentIds = new Set(notifications.filter(n => n.role === role).map(n => n.id));
+    const currentIds = new Set(notifications.filter(isMine).map(n => n.id));
     if (knownNotifIds.current === null) {
       knownNotifIds.current = currentIds;
       return;
