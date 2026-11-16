@@ -1200,8 +1200,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : `Video final con correcciones: "${f?.name || v.name}". ${reason || 'Revisa las correcciones marcadas en el video.'}`,
         v.clipperId
       );
+      // Aceptar el video final = Aprobado Senda: se publica al cliente y se libera el primer 50% del pago
+      if (status === 'approved' && v.qc !== 'aprobado_senda' && v.qc !== 'aprobado_cliente') {
+        setQc(videoId, 'aprobado_senda');
+      }
     }
-  }, [updateVideo, findVideo, pushNotification]);
+  }, [updateVideo, findVideo, pushNotification, setQc]);
 
   const updateCorrectionTime = useCallback((videoId: string, correctionId: string, time: number) => {
     updateVideo(videoId, v => ({
@@ -1641,9 +1645,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [markLocalWrite, selectedVideoId]);
 
   const deleteBrandProject = useCallback((brandId: string) => {
+    // Solo se borra ESTE proyecto: su carpeta y los pedidos enlazados a ella.
+    // (Antes se borraban también otros pedidos de la misma marca por coincidir el nombre.)
     const targetBrand = brandsRef.current.find(b => b.id === brandId);
-    const targetNameKey = targetBrand ? targetBrand.name.trim().toLowerCase() : null;
     const linkedOrderIds = new Set<string>();
+    if (brandId.startsWith('brand-')) linkedOrderIds.add(brandId.slice('brand-'.length));
 
     if (targetBrand) {
       targetBrand.videos.forEach(v => {
@@ -1653,7 +1659,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const nextOrders = ordersRef.current.filter(o => {
       if (linkedOrderIds.has(o.id)) return false;
-      if (targetNameKey && o.brand.trim().toLowerCase() === targetNameKey) return false;
       if (targetBrand && o.boardVideoId && targetBrand.videos.some(v => v.id === o.boardVideoId)) return false;
       return true;
     });
@@ -1662,11 +1667,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setOrders(nextOrders);
     saveState("orders", nextOrders);
 
-    const nextBrands = brandsRef.current.filter(b => {
-      if (b.id === brandId) return false;
-      if (targetNameKey && b.name.trim().toLowerCase() === targetNameKey) return false;
-      return true;
-    });
+    const nextBrands = brandsRef.current.filter(b => b.id !== brandId);
 
     brandsRef.current = nextBrands;
     setBrands(nextBrands);
@@ -1776,12 +1777,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const vidId = existingVid?.id || `${order.id}-v${i}`;
       if (i === 1) firstVideoId = vidId;
 
-      const resolvedClipperId = clipperId !== null ? clipperId : (existingVid?.clipperId || "");
-      const resolvedEditorId = editorId !== null ? editorId : (existingVid?.editorId || "");
-      const resolvedClipperName = clipper
+      // Al reasignar, los videos ya aprobados se quedan con quien los hizo (su pago no cambia de persona)
+      const keepOwner = Boolean(existingVid && (existingVid.qc === "aprobado_senda" || existingVid.qc === "aprobado_cliente" || existingVid.paid50));
+      const resolvedClipperId = keepOwner ? (existingVid?.clipperId || "") : clipperId !== null ? clipperId : (existingVid?.clipperId || "");
+      const resolvedEditorId = keepOwner ? (existingVid?.editorId || "") : editorId !== null ? editorId : (existingVid?.editorId || "");
+      const resolvedClipperName = keepOwner
+        ? (existingVid?.clipperName || "Sin asignar")
+        : clipper
         ? clipper.name
         : (resolvedClipperId ? (workersRef.current.find(w => w.id === resolvedClipperId)?.name || existingVid?.clipperName || "Sin asignar") : "Sin asignar");
-      const resolvedEditorName = editor
+      const resolvedEditorName = keepOwner
+        ? (existingVid?.editorName || "Sin asignar")
+        : editor
         ? editor.name
         : (resolvedEditorId ? (workersRef.current.find(w => w.id === resolvedEditorId)?.name || existingVid?.editorName || "Sin asignar") : "Sin asignar");
 
