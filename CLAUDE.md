@@ -4,7 +4,7 @@ Plataforma de gestión para creadores. React + Vite + TypeScript + Tailwind + Su
 Repo: github.com/20studiosenda26-code/SENDA (rama `main` = producción). Todo en ESPAÑOL (mensajes, textos, botones, commits).
 
 ## 1. Al empezar cada chat (OBLIGATORIO)
-1. Lee `docs/SECCIONES.md` (estado de cada sección). NO leas más archivos todavía.
+1. Lee `docs/SECCIONES.md` (estado) y `docs/DISENO.md` (estándar visual OBLIGATORIO). El resultado debe verse IGUAL que Inicio y Tareas.
 2. Pregunta al usuario: **"¿Qué sección trabajamos?"** mostrando solo las secciones pendientes.
 3. Trabaja esa sección para los TRES roles a la vez (Admin, Clipper · Asistente, Cliente) cuando aplique.
 4. No crees páginas nuevas si no son necesarias.
@@ -18,11 +18,12 @@ Repo: github.com/20studiosenda26-code/SENDA (rama `main` = producción). Todo en
 
 ## 3. Proceso de cada sección
 1. Revisar con `grep` la sección en los 3 roles y armar una checklist corta en `docs/SECCIONES.md` (funciones, errores, mejoras).
-2. Proponer en 5-8 líneas qué se va a mejorar (diseño + funcionamiento + ideas propias que sumen) y empezar.
-3. Rama nueva: `git switch -c actualizacion-<seccion>` desde `main` actualizado.
-4. Programar → tsc + build sin errores → marcar checklist en `docs/SECCIONES.md`.
-5. Commit + push + Pull Request con `gh` (cuerpo en español, termina con `🤖 Generated with [Claude Code](https://claude.com/claude-code)`). Unir a `main` SOLO cuando el usuario diga "únelo".
-6. Resumen final corto: qué cambió, qué corregiste, qué debe probar el usuario en la página publicada.
+2. Antes de programar, abre por partes UNA referencia de `docs/DISENO.md` (p. ej. `AdminHomePanels.tsx`) y copia su estructura: esqueleto, GlowCard, StatChip, pestañas, EmptyState.
+3. Proponer en 5-8 líneas qué se va a mejorar (diseño + funcionamiento + ideas propias que sumen) y empezar.
+4. Rama nueva: `git switch -c actualizacion-<seccion>` desde `main` actualizado.
+5. Programar → tsc + build sin errores → marcar checklist en `docs/SECCIONES.md`.
+6. Commit + push + Pull Request con `gh` (cuerpo en español, termina con `🤖 Generated with [Claude Code](https://claude.com/claude-code)`). Unir a `main` SOLO cuando el usuario diga "únelo".
+7. Resumen final corto: qué cambió, qué corregiste, qué debe probar el usuario en la página publicada.
 
 ## 4. Marca y diseño (identidad fija)
 - Oscuro (principal): `--surface #131519`, `--surface-2 #1A1D22`, `--surface-3 #22262D`. Acento cian `--accent #35D6E4` / `--accent-strong #22B4C2`. Mint `#6FE7C8` = aprobado. Amber `#FFC857` = pendiente. Rojo de Tailwind = error/riesgo.
