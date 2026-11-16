@@ -47,6 +47,7 @@ Antes de programar, abre por partes UNA referencia y copia su estructura y clase
 </GlowCard>
 ```
 - `tone`: accent (general), mint (dinero/aprobado), amber (fechas/pendiente), violet (cliente/calendario/clases), red (riesgo).
+- Si una caja ya existe y no quieres reescribirla, agrega la clase `glow-card` (mismo brillo que GlowCard, sin tocar la estructura): `className="glow-card bg-surface-2 border border-line rounded-xl p-5"`.
 - Elementos dentro de la tarjeta: `bg-surface-3 border border-line rounded-lg p-3 hover:border-accent/40 transition-colors`.
 
 ## 3. Piezas que SIEMPRE se reutilizan (no crear otras)

@@ -527,3 +527,41 @@ h1, h2, h3, .display {
 @media (prefers-reduced-motion: reduce) {
   .senda-orbit { animation: none; }
 }
+
+/* ───────────── Tarjeta con brillo (igual que GlowCard) ─────────────
+   Agrega la clase "glow-card" a cualquier tarjeta: el borde se enciende y un foco
+   de luz cian sigue al cursor. La posición la pone useGlowPointer (App.tsx). */
+.glow-card {
+  position: relative;
+  isolation: isolate;
+}
+.glow-card::before,
+.glow-card::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.glow-card::before {
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(380px circle at var(--gx, 50%) var(--gy, 50%), color-mix(in srgb, var(--accent) 11%, transparent), transparent 65%);
+}
+.glow-card::after {
+  inset: -1px;
+  padding: 1px;
+  background: radial-gradient(240px circle at var(--gx, 50%) var(--gy, 50%), color-mix(in srgb, var(--accent) 85%, transparent), transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.glow-card:hover::before,
+.glow-card:hover::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .glow-card::before, .glow-card::after { transition: none; }
+}

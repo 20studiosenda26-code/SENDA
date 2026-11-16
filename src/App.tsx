@@ -25,8 +25,10 @@ import MorphOrb from './components/ui/ai-thiking-orb-and-input';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { downloadMediaFile } from './lib/supabaseClient';
+import { useGlowPointer } from './lib/useGlowPointer';
 
 function Shell() {
+  useGlowPointer();
   const { view, setView, theme } = useStore();
   const { user, loading, signOut } = useAuth();
   const [showWelcomeOrb, setShowWelcomeOrb] = useState(false);

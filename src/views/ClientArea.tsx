@@ -81,11 +81,11 @@ export function ClientHome() {
       </div>
 
       {!clientViewReady ? (
-        <div className="bg-surface-2 border border-line rounded-2xl p-10 text-center text-sm text-muted flex items-center justify-center gap-2">
+        <div className="bg-surface-2 border border-line rounded-xl p-10 text-center text-sm text-muted flex items-center justify-center gap-2">
           <RefreshCw size={15} className="animate-spin text-accent" /> Cargando tus proyectos…
         </div>
       ) : orders.length === 0 ? (
-        <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-16 px-6 text-center">
+        <div className="bg-surface-2 border border-dashed border-line rounded-xl py-16 px-6 text-center">
           <Sparkles size={30} className="text-accent mx-auto mb-3" />
           <p className="font-display text-lg font-semibold">Aún no tienes proyectos</p>
           <p className="text-sm text-muted mt-1 max-w-md mx-auto">Cuando el equipo SENDA vincule tu pedido a esta cuenta, aparecerá aquí para que elijas avatar, estilo y referencias.</p>
@@ -281,9 +281,9 @@ export function ClientBriefs() {
       </div>
 
       {!clientViewReady ? (
-        <div className="bg-surface-2 border border-line rounded-2xl p-10 text-center text-sm text-muted">Cargando…</div>
+        <div className="bg-surface-2 border border-line rounded-xl p-10 text-center text-sm text-muted">Cargando…</div>
       ) : !active ? (
-        <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-16 text-center">
+        <div className="bg-surface-2 border border-dashed border-line rounded-xl py-16 text-center">
           <p className="font-display text-lg font-semibold">Aún no tienes proyectos</p>
           <button type="button" onClick={() => setView('chat')} className="mt-4 text-xs font-semibold text-accent">Escribir a SENDA →</button>
         </div>
@@ -297,7 +297,7 @@ export function ClientBriefs() {
                 : { label: 'Brief pendiente', cls: 'bg-amber-dim text-amber' };
               return (
                 <button key={o.id} type="button" onClick={() => setOpenId(o.id)}
-                  className={`w-full text-left rounded-2xl border p-4 transition-all ${active.id === o.id ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
+                  className={`glow-card w-full text-left rounded-xl border p-4 transition-all ${active.id === o.id ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-2 border-line hover:border-accent/40'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-display font-bold truncate">{o.brand}</p>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${status.cls}`}>{status.label}</span>
@@ -358,7 +358,7 @@ function BriefEditor({ order }: { order: Order }) {
   };
 
   return (
-    <div className="bg-surface-2 border border-line rounded-3xl overflow-hidden">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden">
       <div className="p-5 border-b border-line flex items-center justify-between gap-3 flex-wrap bg-gradient-to-br from-accent/5 to-transparent">
         <div>
           <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Brief del proyecto</p>
@@ -391,7 +391,7 @@ function BriefEditor({ order }: { order: Order }) {
                 const on = avatarId === a.id;
                 return (
                   <button key={a.id} type="button" onClick={() => setAvatarId(on ? null : a.id)}
-                    className={`relative text-left rounded-2xl border overflow-hidden transition-all ${on ? 'border-accent ring-2 ring-accent/40' : 'border-line hover:border-accent/40'}`}>
+                    className={`relative text-left rounded-xl border overflow-hidden transition-all ${on ? 'border-accent ring-2 ring-accent/40' : 'border-line hover:border-accent/40'}`}>
                     <div className="aspect-[4/5] bg-surface-3 flex items-center justify-center">
                       {a.imageUrl ? <img src={a.imageUrl} alt={a.name} className="w-full h-full object-cover" /> : <UserCircle2 size={36} className="text-muted-2" />}
                     </div>
@@ -419,7 +419,7 @@ function BriefEditor({ order }: { order: Order }) {
                 const on = styleId === st.id;
                 return (
                   <button key={st.id} type="button" onClick={() => setStyleId(on ? null : st.id)}
-                    className={`text-left rounded-2xl border p-4 transition-all ${on ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-3/60 border-line hover:border-accent/40'}`}>
+                    className={`text-left rounded-xl border p-4 transition-all ${on ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-3/60 border-line hover:border-accent/40'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold">{st.name}</p>
                       {on ? <CheckCircle2 size={17} className="text-accent" /> : <span className="w-4 h-4 rounded-full border border-line" />}
