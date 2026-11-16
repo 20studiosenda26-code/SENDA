@@ -6,7 +6,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 |---|---|---|---|---|
 | 1 | Inicio | Admin · Clipper · Cliente | `HomeView.tsx`, `AdminHomePanels.tsx`, `ClientArea.tsx` (ClientHome) | ✅ PR #3 #4 |
 | 2 | Tareas + detalle de video | Admin · Clipper | `AdminTasksPanels.tsx`, `TasksView.tsx` | ✅ PR #5 #6 |
-| 3 | Clientes / Pedidos + portal del cliente | Admin (Clientes) · Cliente (Mis proyectos, Revisión de videos) | `ClientsView.tsx`, `ClientArea.tsx` (ClientBriefs), `ClientPortal.tsx`, `lib/clientSync.ts` | ⏳ |
+| 3 | Clientes / Pedidos + portal del cliente | Admin (Clientes) · Cliente (Mis proyectos, Revisión de videos) | `ClientsView.tsx`, `ClientArea.tsx` (ClientBriefs), `ClientPortal.tsx`, `lib/clientSync.ts` | ✅ rama actualizacion-clientes-pedidos |
 | 4 | Chat + notificaciones | Admin · Clipper · Cliente | `ChatView.tsx`, `TopBar.tsx` (campana) | ⏳ |
 | 5 | Calendario (reuniones y capacitaciones) | Admin · Clipper | `CalendarView.tsx` | ⏳ |
 | 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ⏳ |
@@ -19,9 +19,19 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ⏳ |
 | 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | ⏳ |
 
+## Checklist · Sección 3 (Clientes / Pedidos) — rama `actualizacion-clientes-pedidos`
+- [x] Nuevo pedido: vincular la cuenta del cliente al crearlo (hoy no se vincula y el cliente no ve su pedido).
+- [x] Nuevo pedido: factura opcional → si falta queda "Pago pendiente" (antes bloqueaba); fecha por defecto +3 días; quedarse con aviso y botón "Asignar en Tareas".
+- [x] Folio de factura estable y consecutivo (antes aleatorio y cambiaba en cada impresión).
+- [x] Factura PDF: sin datos internos (complejidad/prioridad), estado de pago real, textos escapados.
+- [x] Expedientes: resumen arriba (clientes, pedidos activos, por cobrar, facturado), avance de videos por pedido, cuenta del cliente y carpeta Drive editables, "Marcar pagado", más recientes primero.
+- [x] Limpiar restos de "clipper/editor" en la previsualización de capacidad.
+- [x] Portal (admin y cliente): pedido sin videos aún muestra los N videos "en producción"; no se aprueba mientras se corrige el feedback.
+- [x] Cliente: facturas abren en pestaña nueva; ancho de computador (1440px).
+- [ ] Pendiente para otra etapa: procesar acciones del cliente en el servidor sin admin conectado (requiere Supabase).
+
 ## Pendientes ya detectados (asignar a su sección)
 - **3 · Clientes:** lo que hace el cliente (brief, feedback, aprobar) solo se procesa cuando un admin tiene SENDA abierta → evaluar procesarlo en el servidor (Supabase) o avisar mejor.
-- **3 · Clientes:** el formulario de nuevo pedido exige factura; revisar flujo completo y el número de factura aleatorio (`buildInvoiceCode`).
 - **4 · Chat:** las notificaciones del Clipper se borran de la campana cada 24 h (quedan en el historial del chat); revisar si se quiere así.
 - **7 · Contratos:** el admin no tiene "Contratos" en su menú lateral (`Rail.tsx`), aunque la vista tiene parte de admin.
 - **9/10/11:** quitar lo que queda de "clipping vs edición" en Capacidad (rol único).
