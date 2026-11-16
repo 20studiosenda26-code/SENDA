@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { takeNavIntent } from '../lib/navIntent';
 import { useStore } from '../store';
 import type { Brand, Correction, Video } from '../types';
 import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl } from '../lib/supabaseClient';
@@ -29,8 +30,10 @@ function sortedVideos(b: Brand) {
 /** Portal del cliente: marcas → videos entregados → revisión con feedback en la línea de tiempo. */
 export function ClientPortal() {
   const { brands, orders, role } = useStore();
-  const [brandId, setBrandId] = useState<string | null>(null);
-  const [videoId, setVideoId] = useState<string | null>(null);
+  // Desde Inicio se puede abrir directo un video: "brandId::videoId"
+  const [intent] = useState(() => (takeNavIntent('revision') || '').split('::'));
+  const [brandId, setBrandId] = useState<string | null>(intent[0] || null);
+  const [videoId, setVideoId] = useState<string | null>(intent[1] || null);
   const [filter, setFilter] = useState<Filter>('todos');
 
   const orderedBrands = useMemo(

@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import type { Brand, Order, OrderReference, Video } from '../types';
+import { GlowCard } from '../components/ui/spotlight-card';
+import { AnimatedRadialChart } from '../components/ui/animated-radial-chart';
+import { AttentionTile, countdownLabel, deadlineMs, fmtDate, FollowUpRow, Modal, VideoList } from '../components/home/home-bits';
+import { setNavIntent } from '../lib/navIntent';
 import {
   ArrowRight, CheckCircle2, Clock, ExternalLink, Film, Link2, Lock, MessageSquare, Palette,
-  PlayCircle, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, UserCircle2,
+  PlayCircle, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, UserCircle2, Receipt, Download,
 } from 'lucide-react';
 
 const isDelivered = (v: Video) => Boolean(v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente');
@@ -31,28 +35,55 @@ function SyncBadge() {
 export function ClientHome() {
   const { orders, brands, setView, clientViewReady } = useStore();
   const { user } = useAuth();
-  const allVideos = brands.flatMap(b => b.videos);
-  const pendingReview = allVideos.filter(toReview).length;
+  const [panel, setPanel] = useState<'review' | null>(null);
+  const allVideos = brands.flatMap(b => b.videos.map(v => ({ ...v, brandName: b.name, brandId: b.id })));
+  const reviewList = allVideos.filter(toReview);
   const approved = allVideos.filter(v => v.qc === 'aprobado_cliente').length;
   const inCorrection = allVideos.filter(v => isDelivered(v) && v.qc === 'correcciones').length;
-  const nextDelivery = orders
-    .filter(o => o.deliveryDate && o.status !== 'finalizado')
-    .sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate))[0];
+  const totalVideos = orders.reduce((s, o) => s + Math.max(o.videoCount || 0, brandOf(o, brands)?.videos.length || 0), 0);
+  const inProduction = Math.max(0, totalVideos - allVideos.filter(isDelivered).length);
   const briefsMissing = orders.filter(o => !o.briefConfirmedAt && !briefLocked(o));
+  const activeOrders = orders
+    .filter(o => o.status !== 'finalizado')
+    .sort((a, b) => (deadlineMs(a.deliveryDate, a.deliveryTime) || Infinity) - (deadlineMs(b.deliveryDate, b.deliveryTime) || Infinity));
+  const nextDelivery = activeOrders.find(o => o.deliveryDate) || null;
+  const invoices = orders.filter(o => o.invoiceFileUrl);
+  const progressPct = totalVideos > 0 ? (approved / totalVideos) * 100 : 0;
+
+  const openReview = (v: { id: string; brandId: string }) => {
+    setNavIntent('revision', `${v.brandId}::${v.id}`);
+    setView('revision');
+  };
+  const openReviews = () => {
+    if (reviewList.length === 1) openReview(reviewList[0]);
+    else if (reviewList.length > 1) setPanel('review');
+  };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 animate-fadeIn">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
-          <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Portal de clientes SENDA</p>
-          <h2 className="font-display text-3xl font-bold mt-1">Hola, {user?.name?.split(' ')[0] || 'bienvenido'}</h2>
-          <p className="text-sm text-muted mt-1">Aquí ves tus proyectos, revisas tus videos y nos dejas tu feedback con el segundo exacto.</p>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent">Portal de clientes SENDA</p>
+          <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Hola, {user?.name?.split(' ')[0] || 'bienvenido'}</h2>
+          <p className="text-sm text-muted mt-1">Aquí ves el avance de tus proyectos, revisas tus videos y nos dejas tu feedback con el segundo exacto.</p>
         </div>
-        <SyncBadge />
+        <div className="flex flex-wrap items-center gap-2">
+          <SyncBadge />
+          <button type="button" onClick={() => setView('chat')} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-line bg-surface-2 text-sm font-medium hover:border-accent/50 hover:bg-surface-3 transition-colors">
+            <MessageSquare size={15} className="text-accent" /> Escribir a SENDA
+          </button>
+          {reviewList.length > 0 && (
+            <button type="button" onClick={openReviews} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm font-semibold hover:bg-accent-strong transition-all hover:-translate-y-0.5 shadow-[0_0_20px_-6px_rgba(53,214,228,0.6)]">
+              <PlayCircle size={15} /> Revisar {reviewList.length} video{reviewList.length === 1 ? '' : 's'}
+            </button>
+          )}
+        </div>
       </div>
 
       {!clientViewReady ? (
-        <div className="bg-surface-2 border border-line rounded-2xl p-10 text-center text-sm text-muted">Cargando tus proyectos…</div>
+        <div className="bg-surface-2 border border-line rounded-2xl p-10 text-center text-sm text-muted flex items-center justify-center gap-2">
+          <RefreshCw size={15} className="animate-spin text-accent" /> Cargando tus proyectos…
+        </div>
       ) : orders.length === 0 ? (
         <div className="bg-surface-2 border border-dashed border-line rounded-3xl py-16 px-6 text-center">
           <Sparkles size={30} className="text-accent mx-auto mb-3" />
@@ -63,92 +94,167 @@ export function ClientHome() {
           </button>
         </div>
       ) : (
-        <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Kpi icon={Film} label="Proyectos" value={orders.length} tone="accent" />
-            <Kpi icon={PlayCircle} label="Por revisar" value={pendingReview} tone="amber" onClick={pendingReview > 0 ? () => setView('revision') : undefined} />
-            <Kpi icon={RefreshCw} label="En corrección" value={inCorrection} tone="violet" />
-            <Kpi icon={CheckCircle2} label="Aprobados" value={approved} tone="mint" />
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-8 space-y-5">
+            {/* Lo que necesitamos de ti */}
+            <GlowCard contentClassName="p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+                  <Sparkles size={18} className="text-accent shrink-0" /> Lo que necesitamos de ti
+                </h3>
+                {reviewList.length === 0 && briefsMissing.length === 0 && (
+                  <span className="text-xs text-mint flex items-center gap-1"><CheckCircle2 size={14} /> Nada pendiente</span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <AttentionTile icon={<PlayCircle size={18} />} tone="accent" count={reviewList.length} label="Videos para revisar" hint="Apruébalos o márcanos correcciones en la línea de tiempo" onClick={openReviews} />
+                <AttentionTile icon={<Palette size={18} />} tone="amber" count={briefsMissing.length} label="Briefs por completar" hint="Elige avatar, estilo de edición y referencias" onClick={() => setView('brief')} />
+              </div>
+              <div className="mt-3 pt-3 border-t border-line/60 grid grid-cols-1 md:grid-cols-2 gap-2">
+                <FollowUpRow icon={<RefreshCw size={15} />} label="Aplicando tu feedback" count={inCorrection} onClick={() => setView('revision')} />
+                <FollowUpRow icon={<Film size={15} />} label="Videos en producción" count={inProduction} onClick={() => setView('brief')} />
+              </div>
+            </GlowCard>
 
-          {(pendingReview > 0 || briefsMissing.length > 0) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {pendingReview > 0 && (
-                <button type="button" onClick={() => setView('revision')}
-                  className="text-left bg-accent/10 border border-accent/40 rounded-2xl p-4 flex items-center gap-3 hover:bg-accent/15 transition-colors">
-                  <span className="w-10 h-10 rounded-xl bg-accent text-on-accent flex items-center justify-center shrink-0"><PlayCircle size={20} /></span>
-                  <span className="flex-1">
-                    <span className="block font-semibold">Tienes {pendingReview} video(s) listos para revisar</span>
-                    <span className="block text-xs text-muted">Apruébalos o márcanos correcciones en la línea de tiempo.</span>
-                  </span>
-                  <ArrowRight size={18} className="text-accent" />
-                </button>
-              )}
-              {briefsMissing.length > 0 && (
-                <button type="button" onClick={() => setView('brief')}
-                  className="text-left bg-amber/10 border border-amber/40 rounded-2xl p-4 flex items-center gap-3 hover:bg-amber/15 transition-colors">
-                  <span className="w-10 h-10 rounded-xl bg-amber text-on-accent flex items-center justify-center shrink-0"><Palette size={20} /></span>
-                  <span className="flex-1">
-                    <span className="block font-semibold">Completa el brief de {briefsMissing.length} proyecto(s)</span>
-                    <span className="block text-xs text-muted">Elige avatar, estilo de edición y referencias.</span>
-                  </span>
-                  <ArrowRight size={18} className="text-amber" />
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="bg-surface-2 border border-line rounded-3xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-line flex items-center justify-between gap-3 flex-wrap">
-              <h3 className="font-display text-lg font-semibold">Tus proyectos</h3>
-              {nextDelivery && (
-                <span className="text-xs text-muted flex items-center gap-1.5"><Clock size={13} className="text-accent" /> Próxima entrega: <strong className="text-text">{nextDelivery.brand}</strong> · {nextDelivery.deliveryDate}</span>
-              )}
-            </div>
-            <div className="divide-y divide-line">
-              {orders.map(o => {
-                const vids = brandOf(o, brands)?.videos || [];
-                const total = Math.max(o.videoCount || 0, vids.length) || 1;
-                const done = vids.filter(v => v.qc === 'aprobado_cliente').length;
-                const delivered = vids.filter(isDelivered).length;
-                return (
-                  <div key={o.id} className="px-5 py-4 flex items-center gap-4 flex-wrap">
-                    <div className="flex-1 min-w-[200px]">
-                      <p className="font-semibold">{o.brand}</p>
-                      <p className="text-xs text-muted-2">{total} videos · entrega {o.deliveryDate || 'por definir'}</p>
-                      <div className="flex h-1.5 rounded-full overflow-hidden bg-surface-3 mt-2 max-w-sm">
-                        <span className="bg-mint" style={{ width: `${(done / total) * 100}%` }} />
-                        <span className="bg-accent" style={{ width: `${((delivered - done) / total) * 100}%` }} />
+            {/* Proyectos con su etapa */}
+            <GlowCard tone="amber" contentClassName="p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+                  <Clock size={18} className="text-amber shrink-0" /> Tus proyectos
+                  <span className="text-xs font-normal text-muted-2">{orders.length}</span>
+                </h3>
+              </div>
+              <div className="space-y-2.5">
+                {orders.map(o => {
+                  const brand = brandOf(o, brands);
+                  const vids = brand?.videos || [];
+                  const total = Math.max(o.videoCount || 0, vids.length) || 1;
+                  const done = vids.filter(v => v.qc === 'aprobado_cliente').length;
+                  const delivered = vids.filter(isDelivered).length;
+                  const toCheck = vids.filter(toReview);
+                  const stage = done >= total ? 3 : delivered > 0 ? 2 : (!o.briefConfirmedAt && !briefLocked(o)) ? 0 : 1;
+                  const dl = deadlineMs(o.deliveryDate, o.deliveryTime);
+                  const late = stage < 3 && Number.isFinite(dl) && dl < Date.now();
+                  return (
+                    <div key={o.id} className="p-4 bg-surface-3 border border-line rounded-xl">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate">{o.brand} <span className="text-muted-2 font-normal text-sm">· {total} video{total === 1 ? '' : 's'}</span></p>
+                          <p className="text-[11px] text-muted-2 mt-0.5">
+                            Entrega {fmtDate(o.deliveryDate, o.deliveryTime)}
+                            {stage < 3 && Number.isFinite(dl) && <span className={`ml-1.5 font-medium ${late ? 'text-amber' : 'text-accent'}`}>· {late ? 'Ajustando la entrega con el equipo' : countdownLabel(dl)}</span>}
+                          </p>
+                        </div>
+                        {stage === 0 ? (
+                          <button type="button" onClick={() => setView('brief')} className="text-xs font-semibold text-amber border border-amber/40 rounded-lg px-3 py-1.5 hover:bg-amber/10">Completar brief</button>
+                        ) : toCheck.length > 0 ? (
+                          <button type="button" onClick={() => openReview({ id: toCheck[0].id, brandId: brand?.id || '' })} className="text-xs font-semibold text-on-accent bg-accent rounded-lg px-3 py-1.5 hover:bg-accent-strong">Revisar {toCheck.length} video{toCheck.length === 1 ? '' : 's'}</button>
+                        ) : (
+                          <button type="button" onClick={() => setView(delivered > 0 ? 'revision' : 'brief')} className="text-xs font-semibold text-accent border border-accent/40 rounded-lg px-3 py-1.5 hover:bg-accent/10">{delivered > 0 ? 'Ver entregas' : 'Ver brief'}</button>
+                        )}
+                      </div>
+                      <StageTrack stage={stage} />
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <div className="flex h-1.5 flex-1 rounded-full overflow-hidden bg-surface-2">
+                          <span className="bg-mint transition-all duration-500" style={{ width: `${(done / total) * 100}%` }} />
+                          <span className="bg-accent transition-all duration-500" style={{ width: `${(Math.max(0, delivered - done) / total) * 100}%` }} />
+                        </div>
+                        <span className="text-[10px] font-tech text-muted-2 whitespace-nowrap"><span className="text-accent">{delivered}</span> entregados · <span className="text-mint">{done}</span> aprobados</span>
                       </div>
                     </div>
-                    <span className="text-xs font-tech text-muted-2"><span className="text-accent">{delivered}</span> entregados · <span className="text-mint">{done}</span> aprobados</span>
-                    {!o.briefConfirmedAt && !briefLocked(o) ? (
-                      <button type="button" onClick={() => setView('brief')} className="text-xs font-semibold text-amber border border-amber/40 rounded-lg px-3 py-1.5 hover:bg-amber/10">Completar brief</button>
-                    ) : delivered > done ? (
-                      <button type="button" onClick={() => setView('revision')} className="text-xs font-semibold text-accent border border-accent/40 rounded-lg px-3 py-1.5 hover:bg-accent/10">Revisar videos</button>
-                    ) : (
-                      <span className="text-xs text-muted-2">{briefLocked(o) ? 'En producción' : 'Brief confirmado'}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </GlowCard>
           </div>
-        </>
+
+          <div className="lg:col-span-4 space-y-5">
+            {/* Avance general */}
+            <GlowCard tone="mint" contentClassName="p-5 flex flex-col items-center">
+              <h3 className="font-display text-lg font-semibold self-start flex items-center gap-2">
+                <CheckCircle2 size={18} className="text-mint shrink-0" /> Avance general
+              </h3>
+              <div className="pt-4">
+                <AnimatedRadialChart value={progressPct} size={210} strokeWidth={14} showLabels={false} warnAt={101} caption={`${approved} de ${totalVideos} videos aprobados por ti`} />
+              </div>
+              {nextDelivery && (
+                <div className="w-full mt-3 flex items-center gap-3 bg-surface-3 border border-line rounded-lg px-3 py-2.5">
+                  <span className="w-8 h-8 rounded-lg bg-amber-dim text-amber flex items-center justify-center shrink-0"><Clock size={15} /></span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-muted-2">Próxima entrega</p>
+                    <p className="text-sm font-semibold truncate">{nextDelivery.brand} · {fmtDate(nextDelivery.deliveryDate, nextDelivery.deliveryTime)}</p>
+                  </div>
+                </div>
+              )}
+            </GlowCard>
+
+            {/* Facturas */}
+            <GlowCard contentClassName="p-5">
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2 mb-3">
+                <Receipt size={18} className="text-accent shrink-0" /> Tus facturas
+              </h3>
+              {invoices.length === 0 ? (
+                <p className="text-sm text-muted text-center py-4">Aún no hay facturas disponibles.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {invoices.map(o => (
+                    <li key={o.id} className="flex items-center justify-between gap-2 p-2.5 bg-surface-3 border border-line rounded-lg">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{o.brand}</p>
+                        <p className="text-[11px] text-muted-2 font-tech">{o.invoiceNumber || 'Factura'}{o.invoiceDate ? ` · ${o.invoiceDate}` : ''}</p>
+                      </div>
+                      <a href={o.invoiceFileUrl || '#'} download={o.invoiceFileName || 'factura'} className="text-xs text-accent hover:text-accent-strong flex items-center gap-1 shrink-0">
+                        <Download size={13} /> Descargar
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </GlowCard>
+
+            {/* Cómo funciona */}
+            <GlowCard tone="violet" contentClassName="p-5">
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2 mb-3">
+                <MessageSquare size={18} className="text-violet shrink-0" /> Cómo trabajamos
+              </h3>
+              <ol className="space-y-2 text-xs text-muted">
+                {['Completas el brief: avatar, estilo y referencias.', 'Producimos y te entregamos cada video aquí.', 'Lo apruebas o nos marcas correcciones en el segundo exacto (1 ronda por video).', 'Aplicamos tu feedback y te entregamos la versión final.'].map((t, i) => (
+                  <li key={i} className="flex gap-2.5"><span className="w-5 h-5 rounded-full bg-surface-3 border border-line text-[10px] font-tech text-accent flex items-center justify-center shrink-0">{i + 1}</span><span className="pt-0.5">{t}</span></li>
+                ))}
+              </ol>
+              <button type="button" onClick={() => setView('chat')} className="mt-4 w-full inline-flex items-center justify-center gap-2 text-xs font-semibold text-accent border border-accent/40 rounded-lg px-3 py-2 hover:bg-accent/10 transition-colors">
+                ¿Dudas? Escríbenos <ArrowRight size={13} />
+              </button>
+            </GlowCard>
+          </div>
+        </div>
+      )}
+
+      {panel === 'review' && (
+        <Modal title="Videos para revisar" icon={<PlayCircle size={18} className="text-accent" />} onClose={() => setPanel(null)}>
+          <VideoList
+            videos={reviewList}
+            detail={v => `${(v.clientFeedbackMaxRounds ?? 1) - (v.clientFeedbackRoundsUsed ?? 0)} ronda(s) de feedback disponible(s)`}
+            onOpen={v => { const r = reviewList.find(x => x.id === v.id); if (r) openReview(r); }}
+          />
+        </Modal>
       )}
     </div>
   );
 }
 
-function Kpi({ icon: Icon, label, value, tone, onClick }: { icon: typeof Film; label: string; value: number; tone: 'accent' | 'amber' | 'mint' | 'violet'; onClick?: () => void }) {
-  const toneCls = { accent: 'text-accent bg-accent-dim', amber: 'text-amber bg-amber-dim', mint: 'text-mint bg-mint-dim', violet: 'text-violet bg-violet-dim' }[tone];
+const STAGES = ['Brief', 'Producción', 'Revisión', 'Aprobado'];
+
+function StageTrack({ stage }: { stage: number }) {
   return (
-    <button type="button" onClick={onClick} disabled={!onClick}
-      className="text-left bg-surface-2 border border-line rounded-2xl p-4 enabled:hover:border-accent/40 transition-colors disabled:cursor-default">
-      <span className={`w-9 h-9 rounded-lg flex items-center justify-center ${toneCls}`}><Icon size={17} /></span>
-      <p className="font-display text-2xl font-bold mt-2.5">{value}</p>
-      <p className="text-xs text-muted">{label}</p>
-    </button>
+    <div className="flex items-center gap-1.5 mt-3" aria-label={`Etapa: ${STAGES[stage]}`}>
+      {STAGES.map((s, i) => (
+        <div key={s} className="flex-1 min-w-0">
+          <div className={`h-1 rounded-full ${i < stage ? 'bg-mint' : i === stage ? 'bg-accent animate-pulse' : 'bg-surface-2'}`} />
+          <p className={`text-[10px] mt-1 truncate ${i === stage ? 'text-accent font-semibold' : i < stage ? 'text-mint' : 'text-muted-2'}`}>{s}</p>
+        </div>
+      ))}
+    </div>
   );
 }
 
