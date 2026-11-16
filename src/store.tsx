@@ -180,6 +180,7 @@ interface Store {
   setQc: (videoId: string, status: QcStatus) => void;
   addClip: (videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
   replaceClip: (videoId: string, clipId: string, fileName: string, fileUrl: string) => void;
+  deleteClip: (videoId: string, clipId: string) => void;
   setClipStatus: (videoId: string, clipId: string, status: ClipStatus, reason?: string) => void;
   setClipMarkerTime: (videoId: string, clipId: string, time: number) => void;
   acceptAllClips: (videoId: string) => void;
@@ -1073,6 +1074,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateVideo, findVideo]);
 
+  // El equipo puede quitar un clip que aún no fue aprobado (por ejemplo, uno subido por error)
+  const deleteClip = useCallback((videoId: string, clipId: string) => {
+    updateVideo(videoId, v => ({ ...v, clips: v.clips.filter(c => c.id !== clipId || c.status === 'approved') }));
+  }, [updateVideo]);
+
   const replaceClip = useCallback((videoId: string, clipId: string, fileName: string, fileUrl: string) => {
     updateVideo(videoId, v => ({
       ...v,
@@ -1125,10 +1131,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const acceptAllClips = useCallback((videoId: string) => {
     const v = findVideo(videoId);
-    const clipsToApprove = v ? v.clips.filter(c => c.fileUrl && c.status !== 'approved') : [];
+    // Solo los clips pendientes de revisión: los rechazados esperan a que el equipo los reemplace
+    const isPendingReview = (c: Clip) => Boolean(c.fileUrl) && (!c.status || c.status === 'pending');
+    const clipsToApprove = v ? v.clips.filter(isPendingReview) : [];
     updateVideo(videoId, vid => ({
       ...vid,
-      clips: vid.clips.map(c => c.fileUrl ? {
+      clips: vid.clips.map(c => isPendingReview(c) ? {
         ...c, status: 'approved' as ClipStatus, rejectionReason: null, reviewedBy: 'Admin', reviewedAt: new Date().toISOString(),
       } : c),
     }));
@@ -1215,12 +1223,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [updateVideo]);
 
   const uploadBrief = useCallback((videoId: string, fileName: string, fileUrl: string) => {
+    const before = findVideo(videoId);
     updateVideo(videoId, v => ({ ...v, briefFileName: fileName, briefFileUrl: fileUrl }));
-    const v = findVideo(videoId);
-    if (v) {
-      pushNotification('clipper', 'trabajo_asignado', `Nuevo trabajo asignado: "${v.name}"`, v.clipperId);
-      pushNotification('editor', 'trabajo_asignado', `Nuevo trabajo asignado: "${v.name}"`, v.editorId);
-      pushNotification('admin', 'trabajo_asignado', `Se asignó el trabajo "${v.name}" a ${v.clipperName} y ${v.editorName}`);
+    if (before) {
+      const brand = brandsRef.current.find(b => b.videos.some(x => x.id === videoId));
+      const label = `${brand ? `${brand.name} · ` : ''}${before.name}`;
+      // Avisar como "brief actualizado" (antes decía "nuevo trabajo asignado" cada vez que se cambiaba el archivo)
+      pushNotification('clipper', 'trabajo_asignado', before.briefFileUrl ? `Se actualizó el brief de "${label}"` : `Ya está el brief de "${label}"`, before.clipperId || before.editorId);
     }
   }, [updateVideo, findVideo, pushNotification]);
 
@@ -2203,7 +2212,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     currentWorkerId, setCurrentWorkerId,
     selectedVideo, setSelectedVideo,
     selectedClassroomModuleId, setSelectedClassroomModuleId,
-    setQc, addClip, replaceClip, setClipStatus, setClipMarkerTime, acceptAllClips,
+    setQc, addClip, replaceClip, deleteClip, setClipStatus, setClipMarkerTime, acceptAllClips,
     addCorrection, updateCorrectionTime, toggleCorrectionResolved, deleteCorrection, setFinalVideoStatus, submitClientFeedbackBatch, enableExtraClientFeedbackRound,
     uploadBrief, addFinalVideo,
     uploadMainImage, setMainImageStatus, sendVideo,

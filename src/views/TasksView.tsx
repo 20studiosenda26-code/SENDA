@@ -17,13 +17,13 @@ import {
   Play, AlertCircle, CheckCircle2, Plus, X, Film, Upload,
   FileText, Download, Lock, Send, Eye, Image as ImageIcon, Video as VideoIcon,
   ThumbsUp, ThumbsDown, Check, RotateCcw, Loader2, FolderOpen,
-  Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2
+  Clock, ChevronRight, ChevronDown, User, Link2, StickyNote, Folders, Trash2, ArrowLeft, Palette, Settings2
 } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
-import { findOrderForVideo } from '../lib/economics';
+import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
 import { DriveFolderField } from '../components/DriveFolderField';
 import { ClientAccountField } from '../components/ClientAccountField';
 import { WorkerPicker } from '../components/tasks/WorkerPicker';
@@ -268,8 +268,7 @@ export function TasksView() {
 }
 
 function VideoDetail({
-  video, brandName, onClose, onSetQc, onAddClip, onReplaceClip, onSetClipStatus, onSetClipMarkerTime, onAcceptAllClips,
-  onAddCorrection, onUpdateCorrectionTime,
+  video, brandName, onClose, onSetQc, onAddClip, onReplaceClip, onSetClipStatus, onAcceptAllClips,
   onUploadBrief, onAddFinalVideo, onUploadMainImage, onSetMainImageStatus, onSendVideo, role,
 }: {
   video: Video; brandName: string; onClose: () => void; onSetQc: (id: string, s: QcStatus) => void; onAddClip: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
@@ -416,6 +415,7 @@ function VideoDetail({
       const url = await uploadSharedFile(f, `clips/${video.id}`, pct => setUploadPct(pct));
       onReplaceClip(video.id, clipId, f.name, url);
       setActiveClipId(clipId);
+      setNotifiedClips(false);
     } catch (err) {
       setActionError(uploadErrorText(err, f));
     } finally {
@@ -467,97 +467,131 @@ function VideoDetail({
     }
   };
 
+  // --- Contexto del video: pedido, fecha real, videos hermanos, pago y paso actual ---
+  const { brands: allBrands, financeSettings, deleteClip, enableExtraClientFeedbackRound, setSelectedVideo: openVideo } = useStore();
+  const order = findOrderForVideo(video, brandName, allOrders);
+  const deadline = deadlineMs(order?.deliveryDate || video.date, order?.deliveryTime);
+  const siblings = (allBrands.find(b => b.videos.some(x => x.id === video.id))?.videos || [])
+    .slice()
+    .sort((a, b) => (a.videoNumber || 0) - (b.videoNumber || 0));
+  const creatorPay = unitEconomics(video, order, financeSettings).creatorPay;
+  const earnedHere = videoEarned(video, creatorPay);
+  const stepIndex = video.qc === 'aprobado_cliente' ? 4
+    : (video.qc === 'aprobado_senda' || video.qc === 'aprobado') ? 3
+    : allClipsApproved ? 2
+    : isMainImageApproved ? 1 : 0;
+  const myStep = workerStep(video);
+  const turnText = isAdmin
+    ? adminTurn(video)
+    : (['subir_imagen', 'subir_clips', 'reemplazar_clips', 'subir_final', 'corregir'] as string[]).includes(myStep) ? WORKER_STEP_TEXT[myStep] : null;
+  const waitingText = isAdmin ? (turnText ? null : WORKER_STEP_TEXT[myStep]) : (turnText ? null : WORKER_STEP_TEXT[myStep]);
+  const roundsUsed = video.clientFeedbackRoundsUsed ?? 0;
+  const roundsMax = video.clientFeedbackMaxRounds ?? 1;
+  const pendingReviewClips = video.clips.filter(c => c.fileUrl && (!c.status || c.status === 'pending')).length;
+  const [notifiedClips, setNotifiedClips] = useState(false);
+  const [confirmDeleteClipId, setConfirmDeleteClipId] = useState<string | null>(null);
+  const [mainImageError, setMainImageError] = useState<string | null>(null);
+  const [confirmQc, setConfirmQc] = useState<QcStatus | null>(null);
+  const clipNumberTaken = Boolean(clipName) && video.clips.some(c => String(c.name).replace(/\D/g, '') === clipName);
+
+  // Escape vuelve a la lista (si no hay un panel abierto encima)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showMainImagePreview || showDriveConfigModal) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, showMainImagePreview, showDriveConfigModal]);
+
+  const decideMainImage = (status: MainImageStatus) => {
+    const note = mainImageComment.trim();
+    if (status === 'rechazada' && !note) {
+      setMainImageError('Escribe qué hay que cambiar para rechazar la imagen.');
+      return;
+    }
+    onSetMainImageStatus(video.id, status, note);
+    setMainImageComment('');
+    setMainImageError(null);
+    setShowMainImagePreview(false);
+  };
+
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent hover:bg-accent/10 transition-all duration-300">
-            <X size={18} />
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-4 animate-fadeIn">
+      {/* Encabezado */}
+      <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <button onClick={onClose} title="Volver a Tareas (Esc)" className="w-9 h-9 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-muted hover:text-text hover:border-accent hover:bg-accent/10 transition-all shrink-0 mt-0.5">
+            <ArrowLeft size={18} />
           </button>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-display text-2xl font-bold">
+              <h2 className="font-display text-2xl xl:text-3xl font-bold truncate">
                 {brandName ? `${brandName} · ${video.name}` : video.name}
               </h2>
-              <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${BOARD_QC_CLASSES[video.qc]}`}>
-                {getProcessBadgeLabel(video)}
-              </span>
+              <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${BOARD_QC_CLASSES[video.qc]}`}>{BOARD_QC_LABEL[video.qc]}</span>
             </div>
-            <p className="text-sm text-muted">{TEAM_ROLE_SHORT}: {teamNames(video)} · Entrega {video.date}</p>
+            <p className="text-sm text-muted mt-0.5 flex flex-wrap gap-x-2">
+              <span>{TEAM_ROLE_SHORT}: <span className="text-text">{teamNames(video)}</span></span>
+              <span className="text-muted-2">·</span>
+              <span>Entrega {fmtDate(order?.deliveryDate || video.date, order?.deliveryTime)}</span>
+              {stepIndex < 3 && (
+                <span className={Number.isFinite(deadline) && deadline < Date.now() ? 'text-red-400 font-medium' : 'text-amber'}>· {countdownLabel(deadline)}</span>
+              )}
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2 hover:border-muted-2 transition-colors">
-            <FileText size={16} className="text-accent shrink-0" />
-            <div className="text-xs">
-              <p className="font-medium text-text">Brief / Trabajo asignado</p>
-              <p className="text-muted truncate max-w-[160px]">{video.briefFileName || 'Sin archivo'}</p>
-            </div>
-            {isAdmin && (
-              <>
-                <input ref={briefInputRef} type="file" className="hidden" onChange={handleBriefFile} />
-                <button
-                  onClick={() => briefInputRef.current?.click()}
-                  className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1"
-                >
-                  {uploadingBrief ? <><Loader2 size={12} className="animate-spin" /> {uploadPct}%</> : <><Upload size={12} /> {video.briefFileName ? "Reemplazar" : "Subir"}</>}
-                </button>
-              </>
-            )}
-            <DownloadButton url={video.briefFileUrl} fileName={video.briefFileName} label="Descargar" />
-          </div>
-          {(isClipper || isAdmin) && (
-            <div className="flex items-center gap-3 bg-surface-2 border border-line rounded-lg px-3.5 py-2 hover:border-muted-2 transition-colors">
-              <ImageIcon size={16} className="text-violet shrink-0" />
-              <div className="text-xs min-w-[110px]">
-                <p className="font-medium text-text">Imagen principal</p>
-                <p className="text-muted truncate max-w-[150px]">{video.mainImageFileName || "Sin imagen"}</p>
-                {video.mainImageStatus && (
-                  <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded font-medium ${
-                    video.mainImageStatus === "aprobada" ? "bg-mint-dim text-mint" :
-                    video.mainImageStatus === "rechazada" ? "bg-red-500/10 text-red-400" :
-                    "bg-amber-dim text-amber"
-                  }`}>
-                    {video.mainImageStatus === "aprobada" ? "Aprobado" : video.mainImageStatus === "rechazada" ? "Rechazado" : "Pendiente de aprobación"}
-                  </span>
-                )}
-              </div>
-
-              {video.mainImageFileName && (
-                <button
-                  type="button"
-                  onClick={() => setShowMainImagePreview(true)}
-                  title="Abrir vista previa para revisar imagen"
-                  className="w-8 h-8 rounded-lg bg-surface-3 hover:bg-accent/20 border border-line hover:border-accent text-accent flex items-center justify-center transition-all shrink-0"
-                >
-                  <Eye size={15} />
-                </button>
-              )}
-
-              {isClipper && (
-                <>
-                  <input ref={mainImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleMainImageFile} />
+        <div className="flex flex-wrap items-center gap-2">
+          {!isAdmin && (
+            <span className="inline-flex items-center gap-2 bg-surface-2 border border-line rounded-lg px-3 py-2 text-xs" title="50% al Aprobado Senda + 50% al Aprobado Cliente">
+              <span className="text-muted">Vale</span> <strong className="font-tech text-text">{fmtMoney(creatorPay)}</strong>
+              <span className="text-muted-2">·</span>
+              <span className="text-muted">ganado</span> <strong className="font-tech text-mint">{fmtMoney(earnedHere)}</strong>
+            </span>
+          )}
+          {siblings.length > 1 && (
+            <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-lg p-1" aria-label="Videos del proyecto">
+              {siblings.map(sv => {
+                const active = sv.id === video.id;
+                const doneSv = sv.qc === 'aprobado_cliente' || sv.qc === 'aprobado_senda';
+                return (
                   <button
-                    onClick={() => mainImageInputRef.current?.click()}
-                    disabled={uploadingMainImage}
-                    className="text-xs bg-violet text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:shadow-[0_0_15px_rgba(127,217,232,0.4)] hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1.5 shrink-0 disabled:opacity-70"
+                    key={sv.id}
+                    type="button"
+                    onClick={() => !active && openVideo(sv)}
+                    title={`${sv.name} · ${BOARD_QC_LABEL[sv.qc]}`}
+                    className={`relative min-w-[34px] h-8 px-2 rounded-md text-xs font-tech font-bold transition-colors ${active ? 'bg-accent text-on-accent' : 'text-muted hover:text-text hover:bg-surface-3'}`}
                   >
-                    {uploadingMainImage ? (
-                      <>
-                        <Loader2 size={12} className="animate-spin" />
-                        <span className="font-tech font-bold">{uploadPct}%</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={12} /> {video.mainImageFileName ? "Reemplazar" : "Subir"}
-                      </>
-                    )}
+                    {sv.videoNumber || sv.name.replace(/\D/g, '') || '•'}
+                    {!active && <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${doneSv ? 'bg-mint' : adminTurn(sv) && isAdmin ? 'bg-accent' : 'bg-transparent'}`} />}
                   </button>
-                </>
-              )}
+                );
+              })}
             </div>
           )}
         </div>
+      </div>
+
+      {/* Barra de pasos */}
+      <div className="bg-surface-2 border border-line rounded-xl px-4 py-3">
+        <div className="grid grid-cols-5 gap-2">
+          {['Imagen principal', 'Clips', 'Video final', 'Aprobado Senda', 'Aprobado cliente'].map((label, i) => (
+            <div key={label} className="min-w-0">
+              <div className={`h-1.5 rounded-full transition-colors ${i < stepIndex ? 'bg-mint' : i === stepIndex ? 'bg-accent animate-pulse' : 'bg-surface-3'}`} />
+              <p className={`text-[11px] mt-1.5 truncate flex items-center gap-1 ${i < stepIndex ? 'text-mint' : i === stepIndex ? 'text-accent font-semibold' : 'text-muted-2'}`}>
+                {i < stepIndex ? <CheckCircle2 size={11} /> : <span className="font-tech">{i + 1}</span>} {label}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs mt-2.5 flex items-center gap-1.5">
+          {turnText ? (
+            <><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" /><span className="text-accent font-semibold">Te toca: {turnText}</span></>
+          ) : (
+            <><Clock size={12} className="text-muted-2" /><span className="text-muted">{waitingText}</span></>
+          )}
+        </p>
       </div>
 
       {actionError && (
@@ -571,8 +605,8 @@ function VideoDetail({
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Columna izquierda: Reproductor Vertical Grande + Chulito, X y Comentario */}
-        <div className="lg:col-span-6 bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+        {/* Columna izquierda: visor grande + revisión del clip o del video final */}
+        <div className="lg:col-span-7 bg-surface-2 border border-line rounded-xl p-5 space-y-4 lg:sticky lg:top-20">
           {activeMedia && (
             <div className="flex items-center justify-between gap-2 -mb-1">
               <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full ${activeFinal ? 'bg-mint-dim text-mint' : 'bg-accent-dim text-accent'}`}>
@@ -714,12 +748,88 @@ function VideoDetail({
           )}
         </div>
 
-        {/* Columna derecha: Clips generados y Video final (sin cuadro de Correcciones) */}
-        <div className="lg:col-span-6 space-y-4">
+        {/* Columna derecha: los pasos del video en orden */}
+        <div className="lg:col-span-5 space-y-4">
+          {/* Paso 1 · Imagen principal */}
+          <div className="bg-surface-2 border border-line rounded-xl p-5">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
+                <span className="w-5 h-5 rounded-md bg-surface-3 text-[11px] font-tech flex items-center justify-center text-accent">1</span>
+                <ImageIcon size={16} className="text-violet" /> Imagen principal
+              </h3>
+              {video.mainImageStatus && (
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                  video.mainImageStatus === 'aprobada' ? 'bg-mint-dim text-mint' : video.mainImageStatus === 'rechazada' ? 'bg-red-500/10 text-red-400' : 'bg-amber-dim text-amber'
+                }`}>
+                  {video.mainImageStatus === 'aprobada' ? 'Aprobada' : video.mainImageStatus === 'rechazada' ? 'Rechazada' : 'Esperando aprobación'}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => video.mainImageFileUrl && setShowMainImagePreview(true)}
+                disabled={!video.mainImageFileUrl}
+                title={video.mainImageFileUrl ? 'Ver en grande' : 'Sin imagen'}
+                className="w-28 h-36 shrink-0 rounded-lg bg-surface-3 border border-line overflow-hidden flex items-center justify-center hover:border-accent/50 transition-colors disabled:cursor-default"
+              >
+                {video.mainImageFileUrl ? (
+                  <img src={resolvedMainImgUrl || video.mainImageFileUrl} alt="Imagen principal" className="w-full h-full object-cover" />
+                ) : (
+                  <ImageIcon size={22} className="text-muted-2" />
+                )}
+              </button>
+              <div className="flex-1 min-w-0 space-y-2">
+                <p className="text-xs text-muted truncate">{video.mainImageFileName || 'Todavía no hay imagen principal.'}</p>
+                {video.mainImageComment && (
+                  <p className="text-xs text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-2.5 py-1.5">Comentario: <strong>{video.mainImageComment}</strong></p>
+                )}
+                {isClipper && (
+                  <>
+                    <input ref={mainImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleMainImageFile} />
+                    <button
+                      onClick={() => mainImageInputRef.current?.click()}
+                      disabled={uploadingMainImage}
+                      title={isMainImageApproved ? 'Reemplazarla la vuelve a revisión del admin' : undefined}
+                      className="text-xs bg-violet text-on-accent rounded-md px-3 py-1.5 font-medium hover:-translate-y-0.5 transition-all flex items-center gap-1.5 disabled:opacity-70"
+                    >
+                      {uploadingMainImage
+                        ? <><Loader2 size={12} className="animate-spin" /> <span className="font-tech font-bold">{uploadPct}%</span></>
+                        : <><Upload size={12} /> {video.mainImageFileName ? 'Reemplazar imagen' : 'Subir imagen'}</>}
+                    </button>
+                    {isMainImageApproved && <p className="text-[10px] text-muted-2">Si la reemplazas, vuelve a revisión del administrador.</p>}
+                  </>
+                )}
+                {isAdmin && video.mainImageStatus === 'pendiente' && (
+                  <div className="space-y-2">
+                    <input
+                      value={mainImageComment}
+                      onChange={e => { setMainImageComment(e.target.value); setMainImageError(null); }}
+                      placeholder="Comentario (obligatorio para rechazar)"
+                      className="w-full bg-surface-3 border border-line rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent"
+                    />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => decideMainImage('aprobada')} className="flex-1 py-1.5 rounded-lg bg-mint text-on-accent text-xs font-bold flex items-center justify-center gap-1 hover:opacity-90">
+                        <ThumbsUp size={13} /> Aprobar
+                      </button>
+                      <button type="button" onClick={() => decideMainImage('rechazada')} className="flex-1 py-1.5 rounded-lg bg-red-500/15 border border-red-500/40 text-red-300 text-xs font-bold flex items-center justify-center gap-1 hover:bg-red-500/25">
+                        <ThumbsDown size={13} /> Rechazar
+                      </button>
+                    </div>
+                    {mainImageError && <p className="text-[11px] text-red-400">{mainImageError}</p>}
+                  </div>
+                )}
+                {isAdmin && !video.mainImageFileName && <p className="text-[11px] text-muted-2">Esperando que el responsable la suba.</p>}
+              </div>
+            </div>
+          </div>
+
           <div className="bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
-                <Film size={16} className="text-accent" /> {`Clips generados (${video.name})`}
+                <span className="w-5 h-5 rounded-md bg-surface-3 text-[11px] font-tech flex items-center justify-center text-accent">2</span>
+                <Film size={16} className="text-accent" /> Clips
+                {video.clips.length > 0 && <span className="text-xs font-normal text-muted-2">{video.clips.filter(c => c.status === 'approved').length}/{video.clips.length} aprobados</span>}
               </h3>
               {isClipper && (
                 isMainImageApproved ? (
@@ -743,31 +853,16 @@ function VideoDetail({
                   </span>
                 )
               )}
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBridgeUrlDraft(getGoogleDriveBridgeUrl());
-                    setFolderUrlDraft(getGoogleDriveFolderUrl());
-                    setShowDriveConfigModal(true);
-                  }}
-                  title={getGoogleDriveBridgeUrl() ? 'Puente automático activo' : getGoogleDriveFolderUrl() ? 'Carpeta vinculada' : 'Sin configurar'}
-                  className="ml-auto mr-2 text-xs text-muted hover:text-mint bg-surface-3 border border-line hover:border-mint/40 rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1.5 transition-colors"
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? 'bg-mint' : 'bg-muted-2'}`} />
-                  {getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? 'Configurar Drive' : 'Conectar Drive'}
-                </button>
-              )}
-              {isAdmin && video.clips.some(c => c.fileUrl && c.status !== "approved") && (
+              {isAdmin && pendingReviewClips > 0 && (
                 <button onClick={() => setConfirmAcceptAll(true)} className="text-xs bg-mint-dim text-mint rounded-md px-2.5 py-1.5 font-medium hover:bg-mint/20 hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-1">
-                  <Check size={12} /> Aceptar todos los clips
+                  <Check size={12} /> Aceptar {pendingReviewClips} pendiente{pendingReviewClips === 1 ? "" : "s"}
                 </button>
               )}
             </div>
 
             {confirmAcceptAll && (
               <div className="mb-4 p-4 bg-surface-3 border border-line rounded-lg">
-                <p className="text-sm text-text mb-3">¿Aceptar todos los clips de {video.name}?</p>
+                <p className="text-sm text-text mb-3">¿Aceptar los {pendingReviewClips} clip(s) pendientes de {video.name}? Los rechazados siguen esperando reemplazo.</p>
                 <div className="flex gap-2">
                   <button onClick={() => setConfirmAcceptAll(false)} className="flex-1 bg-surface-2 border border-line text-muted rounded-md py-2 text-xs font-medium hover:text-text transition-colors">
                     Cancelar
@@ -849,14 +944,17 @@ function VideoDetail({
                   )}
                   <input type="file" accept="video/*,image/*" className="hidden" onChange={handleClipFile} disabled={uploadingNewClip} />
                 </label>
+                {clipNumberTaken && <p className="text-[11px] text-amber">Ya hay un clip #{clipName}. Elige otro número o reemplaza ese clip en la lista.</p>}
+                {!clipFileUrl && !uploadingNewClip && clipName && !clipNumberTaken && <p className="text-[11px] text-muted-2">Sube el archivo del clip para poder guardarlo.</p>}
                 <button
                   onClick={() => {
-                    if (clipName) {
-                      onAddClip(video.id, clipName, clipNote, clipFileName || undefined, clipFileUrl || undefined);
+                    if (clipName && clipFileUrl && !clipNumberTaken) {
+                      onAddClip(video.id, clipName, clipNote, clipFileName || undefined, clipFileUrl);
                       setClipName(""); setClipNote(""); setClipFileName(""); setClipFileUrl(""); setShowClipForm(false);
+                      setNotifiedClips(false);
                     }
                   }}
-                  disabled={uploadingNewClip || !clipName}
+                  disabled={uploadingNewClip || !clipName || !clipFileUrl || clipNumberTaken}
                   className="w-full bg-accent text-on-accent rounded-md py-2 text-sm font-bold disabled:opacity-50 hover:shadow-[0_0_15px_rgba(53,214,228,0.4)] transition-all duration-300"
                 >
                   {uploadingNewClip ? `Subiendo clip (${uploadPct}%)...` : "Guardar clip"}
@@ -869,12 +967,12 @@ function VideoDetail({
                 {!isMainImageApproved && isClipper ? (
                   <>
                     <Lock size={20} className="text-amber mx-auto mb-1" />
-                    <p className="text-sm font-medium text-text">Subida de clips bloqueada por Control de Calidad</p>
+                    <p className="text-sm font-medium text-text">Los clips se habilitan al aprobar la imagen principal</p>
                     <p className="text-xs text-muted max-w-md mx-auto">
                       {!video.mainImageFileName
-                        ? "Primero debes subir la Imagen principal en la barra superior para que el Administrador la revise."
+                        ? "Primero sube la Imagen principal (paso 1) para que el administrador la revise."
                         : video.mainImageStatus === "rechazada"
-                        ? `Tu Imagen principal fue rechazada${video.mainImageComment ? `: "${video.mainImageComment}"` : ""}. Sube una nueva Imagen principal arriba.`
+                        ? `Tu Imagen principal fue rechazada${video.mainImageComment ? `: "${video.mainImageComment}"` : ""}. Sube una nueva en el paso 1.`
                         : "Tu Imagen principal está pendiente de aprobación por el Administrador. Apenas la apruebe podrás subir los clips."}
                     </p>
                   </>
@@ -908,7 +1006,19 @@ function VideoDetail({
 
                       </div>
                       {isClipper && (
-                        <div onClick={e => e.stopPropagation()} className="shrink-0">
+                        <div onClick={e => e.stopPropagation()} className="shrink-0 flex items-center gap-1.5">
+                          {c.status !== 'approved' && (
+                            confirmDeleteClipId === c.id ? (
+                              <span className="flex items-center gap-1 bg-red-500/15 border border-red-500/40 rounded-md px-1.5 py-1">
+                                <button type="button" onClick={() => { deleteClip(video.id, c.id); setConfirmDeleteClipId(null); if (activeClip?.id === c.id) setPlaying(null); }} className="text-[10px] font-bold text-white bg-red-500 rounded px-1.5 py-0.5">Quitar</button>
+                                <button type="button" onClick={() => setConfirmDeleteClipId(null)} className="text-[10px] text-muted px-1">No</button>
+                              </span>
+                            ) : (
+                              <button type="button" onClick={() => setConfirmDeleteClipId(c.id)} title="Quitar este clip" className="p-1.5 rounded-md text-muted-2 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                                <Trash2 size={12} />
+                              </button>
+                            )
+                          )}
                           <input
                             ref={el => { replaceInputRefs.current[c.id] = el; }}
                             type="file"
@@ -940,28 +1050,56 @@ function VideoDetail({
               </div>
             )}
 
-            {isClipper && video.clips.length > 0 && (
-              <button
-                onClick={() => onSendVideo(video.id)}
-                disabled={video.sentByClipper}
-                className={`w-full mt-4 rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 ${
-                  video.sentByClipper
-                    ? "bg-mint-dim text-mint cursor-default"
-                    : "bg-accent text-on-accent hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-1"
-                }`}
-              >
-                {video.sentByClipper ? <><CheckCircle2 size={16} /> Clips enviados</> : <><Send size={16} /> Enviar clips de {video.name}</>}
-              </button>
-            )}
+            {isClipper && video.clips.length > 0 && (() => {
+              const canNotify = !video.sentByClipper || (pendingReviewClips > 0 && !notifiedClips && !allClipsApproved);
+              return (
+                <button
+                  onClick={() => { onSendVideo(video.id); setNotifiedClips(true); }}
+                  disabled={!canNotify}
+                  className={`w-full mt-4 rounded-lg py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all duration-300 ${
+                    !canNotify
+                      ? "bg-mint-dim text-mint cursor-default"
+                      : "bg-accent text-on-accent hover:shadow-[0_0_20px_rgba(53,214,228,0.5)] hover:-translate-y-0.5"
+                  }`}
+                >
+                  {!video.sentByClipper
+                    ? <><Send size={16} /> Enviar clips al administrador</>
+                    : canNotify
+                    ? <><Send size={16} /> Avisar al admin: {pendingReviewClips} clip(s) nuevos o reemplazados</>
+                    : allClipsApproved
+                    ? <><CheckCircle2 size={16} /> Clips aprobados</>
+                    : <><CheckCircle2 size={16} /> Clips enviados · esperando revisión</>}
+                </button>
+              );
+            })()}
           </div>
 
           {(isEditor || isAdmin) && (
             <div className="bg-surface-2 border border-line rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
-                  <VideoIcon size={16} className="text-mint" /> Video final ({video.name})
+                  <span className="w-5 h-5 rounded-md bg-surface-3 text-[11px] font-tech flex items-center justify-center text-accent">3</span>
+                  <VideoIcon size={16} className="text-mint" /> Video final
                 </h3>
                 <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBridgeUrlDraft(getGoogleDriveBridgeUrl());
+                        setFolderUrlDraft(getGoogleDriveFolderUrl());
+                        setShowDriveConfigModal(true);
+                      }}
+                      title={getGoogleDriveBridgeUrl() ? 'Puente automático activo' : getGoogleDriveFolderUrl() ? 'Carpeta vinculada' : 'Sin configurar'}
+                      className="text-xs text-muted hover:text-mint bg-surface-3 border border-line hover:border-mint/40 rounded-md px-2.5 py-1.5 font-medium flex items-center gap-1.5 transition-colors"
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${getGoogleDriveBridgeUrl() || getGoogleDriveFolderUrl() ? 'bg-mint' : 'bg-muted-2'}`} />
+                      Drive
+                    </button>
+                  )}
+                  {isAdmin && !latestFinal && (
+                    <span className="text-[11px] text-muted-2">{allClipsApproved ? 'Esperando que lo suban' : 'Se habilita al aceptar todos los clips'}</span>
+                  )}
                   {!isAdmin && (allClipsApproved ? (
                     <button onClick={() => setShowFinalForm(s => !s)} className="text-sm text-accent hover:text-text flex items-center gap-1 transition-colors">
                       {latestFinal ? <><RotateCcw size={14} /> Reemplazar</> : <><Plus size={14} /> Subir video final</>}
@@ -1093,46 +1231,121 @@ function VideoDetail({
               )}
             </div>
           )}
+
+          {/* Brief del cliente (lo necesita el responsable para producir) */}
+          <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-display text-base font-semibold text-text flex items-center gap-2">
+                <FileText size={16} className="text-accent" /> Brief del cliente
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {isAdmin && (
+                  <>
+                    <input ref={briefInputRef} type="file" className="hidden" onChange={handleBriefFile} />
+                    <button
+                      onClick={() => briefInputRef.current?.click()}
+                      className="text-xs bg-accent text-on-accent rounded-md px-2.5 py-1.5 font-medium hover:-translate-y-0.5 transition-all flex items-center gap-1"
+                    >
+                      {uploadingBrief ? <><Loader2 size={12} className="animate-spin" /> {uploadPct}%</> : <><Upload size={12} /> {video.briefFileName ? 'Reemplazar archivo' : 'Subir archivo'}</>}
+                    </button>
+                  </>
+                )}
+                <DownloadButton url={video.briefFileUrl || order?.briefFileUrl} fileName={video.briefFileName || order?.briefFileName} label="Archivo" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-surface-3 border border-line rounded-lg p-2.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
+                <p className="text-text">{order?.avatarName || <span className="text-muted-2">Sin elegir</span>}</p>
+              </div>
+              <div className="bg-surface-3 border border-line rounded-lg p-2.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><Palette size={11} /> Estilo</p>
+                <p className="text-text">{order?.editingStyleName || <span className="text-muted-2">Sin elegir</span>}</p>
+              </div>
+              <div className="bg-surface-3 border border-line rounded-lg p-2.5 col-span-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><Link2 size={11} /> Referencias</p>
+                {order?.references && order.references.length > 0 ? (
+                  <ul className="space-y-0.5">
+                    {order.references.map(r => <li key={r.id}><a href={r.url} target="_blank" rel="noreferrer" className="text-accent hover:text-accent-strong break-all">{r.name}</a></li>)}
+                  </ul>
+                ) : <p className="text-muted-2">Sin referencias</p>}
+              </div>
+              <div className="bg-surface-3 border border-line rounded-lg p-2.5 col-span-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><StickyNote size={11} /> Notas del cliente</p>
+                <p className="text-text whitespace-pre-line">{order?.clientNotes || <span className="text-muted-2">Sin notas</span>}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Última sección abajo: Estado de QC (sin botones de Aprobar Senda ni Aprobar Cliente) */}
-      <div className="bg-surface-2 border border-line rounded-xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-medium text-text">Estado de QC ({video.name})</p>
-          {!isAdmin && (
-            <span className="text-[10px] text-muted-2 flex items-center gap-1"><Lock size={10} /> Solo el administrador puede cambiarlo</span>
+      {/* Cliente: rondas de feedback (visible para todos) */}
+      {(video.publishedToClient || stepIndex >= 3 || roundsUsed > 0) && (
+        <div className="bg-surface-2 border border-line rounded-xl px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm flex items-center gap-2">
+            <Eye size={15} className="text-violet" />
+            <span className="text-muted">Revisión del cliente:</span>
+            <span className="text-text font-medium">
+              {video.qc === 'aprobado_cliente' ? 'Aprobado por el cliente' : roundsUsed >= roundsMax ? 'Usó sus rondas de feedback' : 'Puede aprobar o dejar feedback'}
+            </span>
+            <span className="font-tech text-xs text-muted-2">· ronda {Math.min(roundsUsed, roundsMax)}/{roundsMax}</span>
+          </p>
+          {isAdmin && video.qc !== 'aprobado_cliente' && roundsUsed >= roundsMax && (
+            <button
+              type="button"
+              onClick={() => enableExtraClientFeedbackRound(video.id)}
+              className="text-xs font-semibold text-violet border border-violet/40 rounded-lg px-3 py-1.5 hover:bg-violet/10 transition-colors"
+            >
+              Dar una ronda extra al cliente
+            </button>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {qcOptions.map(q => (
-            isAdmin ? (
-              <button
-                key={q}
-                onClick={() => onSetQc(video.id, q)}
-                className={`text-xs font-medium px-3.5 py-2 rounded-md border transition-all duration-300 hover:-translate-y-0.5 ${
-                  video.qc === q
-                    ? "bg-accent text-on-accent border-accent shadow-[0_0_10px_rgba(53,214,228,0.3)]"
-                    : "bg-surface-3 text-muted border-line hover:text-text hover:border-muted-2"
-                }`}
-              >
-                {qcStatusLabel(q, video)}
-              </button>
-            ) : (
-              <span
-                key={q}
-                className={`text-xs font-medium px-3.5 py-2 rounded-md border cursor-default select-none ${
-                  video.qc === q
-                    ? "bg-accent text-on-accent border-accent shadow-[0_0_10px_rgba(53,214,228,0.2)]"
-                    : "bg-surface-3 text-muted-2 border-line opacity-60"
-                }`}
-              >
-                {qcStatusLabel(q, video)}
-              </span>
-            )
-          ))}
-        </div>
-      </div>
+      )}
+
+      {/* Estado manual (solo admin, opción avanzada) */}
+      {isAdmin && (
+        <details className="bg-surface-2 border border-line rounded-xl group">
+          <summary className="cursor-pointer select-none px-5 py-3.5 text-sm text-muted hover:text-text flex items-center gap-2">
+            <Settings2 size={15} /> Estado manual (avanzado)
+            <span className="text-[11px] text-muted-2">· actual: {BOARD_QC_LABEL[video.qc]}</span>
+          </summary>
+          <div className="px-5 pb-4 space-y-3">
+            <p className="text-[11px] text-muted-2">Normalmente el estado cambia solo con cada aprobación. Úsalo solo para corregir un caso puntual.</p>
+            <div className="flex flex-wrap gap-2">
+              {qcOptions.map(q => (
+                <button
+                  key={q}
+                  onClick={() => {
+                    if (q === video.qc) return;
+                    if (q === 'aprobado_senda' || q === 'aprobado_cliente') setConfirmQc(q);
+                    else onSetQc(video.id, q);
+                  }}
+                  className={`text-xs font-medium px-3.5 py-2 rounded-md border transition-all ${
+                    video.qc === q
+                      ? "bg-accent text-on-accent border-accent"
+                      : "bg-surface-3 text-muted border-line hover:text-text hover:border-muted-2"
+                  }`}
+                >
+                  {qcStatusLabel(q, video)}
+                </button>
+              ))}
+            </div>
+            {confirmQc && (
+              <div className="flex items-center justify-between gap-3 flex-wrap bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2.5 text-xs animate-fadeIn">
+                <span className="text-amber">
+                  {confirmQc === 'aprobado_senda'
+                    ? 'Esto publica el video al cliente y libera el 50% del pago. ¿Continuar?'
+                    : 'Esto marca el video como aprobado por el cliente y libera el 100% del pago. ¿Continuar?'}
+                </span>
+                <span className="flex gap-2">
+                  <button type="button" onClick={() => setConfirmQc(null)} className="px-3 py-1 rounded-md bg-surface-3 text-muted hover:text-text">Cancelar</button>
+                  <button type="button" onClick={() => { onSetQc(video.id, confirmQc); setConfirmQc(null); }} className="px-3 py-1 rounded-md bg-amber text-on-accent font-semibold">Sí, cambiar</button>
+                </span>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
 
 
       {showDriveConfigModal && isAdmin && (
@@ -1297,28 +1510,21 @@ function VideoDetail({
                 <input
                   value={mainImageComment}
                   onChange={e => setMainImageComment(e.target.value)}
-                  placeholder="Comentarios sobre la imagen principal (opcional)..."
+                  placeholder="Comentario (obligatorio para rechazar)..."
                   className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent transition-colors"
                 />
+                {mainImageError && <p className="text-[11px] text-red-400">{mainImageError}</p>}
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      onSetMainImageStatus(video.id, "aprobada", mainImageComment.trim());
-                      setMainImageComment("");
-                      setShowMainImagePreview(false);
-                    }}
+                    onClick={() => decideMainImage("aprobada")}
                     className="flex-1 py-2.5 rounded-xl bg-mint text-on-accent text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:opacity-95 transition-opacity"
                   >
                     <ThumbsUp size={14} /> Aprobar
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      onSetMainImageStatus(video.id, "rechazada", mainImageComment.trim());
-                      setMainImageComment("");
-                      setShowMainImagePreview(false);
-                    }}
+                    onClick={() => decideMainImage("rechazada")}
                     className="flex-1 py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-display font-bold flex items-center justify-center gap-1.5 hover:bg-red-500/30 transition-colors"
                   >
                     <ThumbsDown size={14} /> Rechazar
@@ -1391,6 +1597,8 @@ function FinalReviewPanel({
   const [timeInput, setTimeInput] = useState('');
   const [corrText, setCorrText] = useState('');
   const [justAdded, setJustAdded] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
+  const [rejectHint, setRejectHint] = useState(false);
 
   const corrections = useMemo(
     () => video.corrections
@@ -1435,7 +1643,13 @@ function FinalReviewPanel({
         </p>
       )}
 
-      {isAdmin && (
+      {(video.qc === 'aprobado_senda' || video.qc === 'aprobado_cliente') && (
+        <p className="text-xs text-mint bg-mint-dim/40 border border-mint/30 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <CheckCircle2 size={13} /> {video.qc === 'aprobado_cliente' ? 'Aprobado por el cliente. Video terminado.' : 'Aprobado Senda: ya está en el portal del cliente esperando su revisión.'}
+        </p>
+      )}
+
+      {isAdmin && video.qc !== 'aprobado_senda' && video.qc !== 'aprobado_cliente' && (
         <div className="flex items-center gap-2.5">
           <button
             type="button"
@@ -1449,7 +1663,14 @@ function FinalReviewPanel({
           </button>
           <button
             type="button"
-            onClick={() => setFinalVideoStatus(video.id, final.id, 'rejected', pending > 0 ? `${pending} corrección(es) marcadas en el video` : undefined)}
+            onClick={() => {
+              const note = rejectNote.trim();
+              // Rechazar sin decir qué corregir deja al equipo sin saber qué hacer
+              if (pending === 0 && !note) { setRejectHint(true); return; }
+              const reason = [pending > 0 ? `${pending} corrección(es) marcadas en el video` : '', note].filter(Boolean).join(' · ');
+              setFinalVideoStatus(video.id, final.id, 'rejected', reason);
+              setRejectNote(''); setRejectHint(false);
+            }}
             title="Rechazar: el clipper debe subir el video corregido"
             className={`flex-1 h-10 rounded-lg border flex items-center justify-center gap-1.5 text-xs font-semibold hover:-translate-y-0.5 transition-all duration-200 ${
               final.status === 'rejected' ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
@@ -1457,6 +1678,18 @@ function FinalReviewPanel({
           >
             <X size={16} /> {final.status === 'rejected' ? 'Rechazado' : 'Rechazar'}
           </button>
+        </div>
+      )}
+
+      {isAdmin && final.status !== 'approved' && video.qc !== 'aprobado_senda' && video.qc !== 'aprobado_cliente' && (
+        <div className="space-y-1">
+          <input
+            value={rejectNote}
+            onChange={e => { setRejectNote(e.target.value); setRejectHint(false); }}
+            placeholder="Motivo general del rechazo (opcional si marcas correcciones abajo)"
+            className="w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted-2 outline-none focus:border-accent"
+          />
+          {rejectHint && <p className="text-[11px] text-red-400">Para rechazar, marca al menos una corrección en la línea de tiempo o escribe el motivo.</p>}
         </div>
       )}
 
