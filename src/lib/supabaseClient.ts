@@ -169,6 +169,23 @@ async function fetchDriveDurationWithApiKey(id: string): Promise<number | null> 
   }
 }
 
+/** Rutas para reproducir un video de Drive en el reproductor propio, en orden. Si una falla
+ *  (cuota, archivo pesado, clave aún sin cargar) se prueba la siguiente antes de usar el visor de Google. */
+export function getGoogleDriveStreamCandidates(url?: string | null): string[] {
+  const id = extractGoogleDriveId(url);
+  if (!id) return [];
+  const apiKey = getGoogleDriveApiKey();
+  const list: string[] = [];
+  if (apiKey) {
+    const k = encodeURIComponent(apiKey);
+    list.push(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${k}`);
+    list.push(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&acknowledgeAbuse=true&key=${k}`);
+  }
+  list.push(`https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`);
+  list.push(`https://drive.google.com/uc?export=download&confirm=t&id=${id}`);
+  return list;
+}
+
 export function getGoogleDriveDownloadUrl(url?: string | null): string | null {
   const id = extractGoogleDriveId(url);
   if (!id) return null;
@@ -509,6 +526,35 @@ export async function downloadMediaFile(
     // Si el servidor no permite leer el archivo (CORS), lo pedimos como adjunto sin salir de la app
     triggerHiddenFrameDownload(withSupabaseDownloadParam(resolved, name) || resolved);
     onProgress?.(100);
+  }
+}
+
+/** Fecha de última modificación de cada clave compartida (consulta liviana, sin los datos). */
+export async function loadSharedStamps(): Promise<Record<string, string> | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.from("platform_kv").select("key, updated_at");
+    if (error || !data) return null;
+    const out: Record<string, string> = {};
+    for (const row of data as { key: string; updated_at: string }[]) out[row.key] = row.updated_at;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** Carga varias claves compartidas en UNA sola consulta. Devuelve null si la consulta falló
+ *  (para no confundir un error con "no hay datos"). */
+export async function loadSharedMany(keys: string[]): Promise<Record<string, unknown> | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.from("platform_kv").select("key, value").in("key", keys);
+    if (error || !data) return null;
+    const out: Record<string, unknown> = {};
+    for (const row of data as { key: string; value: unknown }[]) out[row.key] = row.value;
+    return out;
+  } catch {
+    return null;
   }
 }
 

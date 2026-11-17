@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { takeNavIntent } from '../lib/navIntent';
 import { useStore } from '../store';
 import type { Brand, Correction, Video } from '../types';
-import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl, fetchDriveVideoDuration } from '../lib/supabaseClient';
+import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamCandidates, fetchDriveVideoDuration } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
 import { fmtDate } from '../components/home/home-bits';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
@@ -301,8 +301,11 @@ function VideoReview({
 
   // Drive se intenta reproducir en el reproductor propio (línea de tiempo enlazada); si falla, visor de Google
   const [driveFallback, setDriveFallback] = useState(false);
+  const [streamIdx, setStreamIdx] = useState(0);
+  useEffect(() => { setStreamIdx(0); setDriveFallback(false); }, [src]);
   const isDrive = Boolean(src && isGoogleDriveUrl(src) && driveFallback);
-  const playSrc = src && isGoogleDriveUrl(src) ? getGoogleDriveStreamUrl(src) || src : src;
+  const candidates = src && isGoogleDriveUrl(src) ? getGoogleDriveStreamCandidates(src) : [];
+  const playSrc = candidates.length ? candidates[streamIdx] || src : src;
   const mode = orientation === 'auto' ? (isDrive ? 'horizontal' : detected) : orientation;
   const effectiveTime = pickTime ?? Math.round(time);
   useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
@@ -397,8 +400,13 @@ function VideoReview({
             ) : (
               <video
                 ref={playerRef}
+                key={`${playSrc}-${streamIdx}`}
                 src={playSrc || undefined}
-                onError={() => { if (src && isGoogleDriveUrl(src)) setDriveFallback(true); }}
+                onError={() => {
+                  if (!src || !isGoogleDriveUrl(src)) return;
+                  if (streamIdx < candidates.length - 1) setStreamIdx(i => i + 1);
+                  else setDriveFallback(true);
+                }}
                 controls
                 playsInline
                 onLoadedMetadata={e => {
@@ -435,9 +443,6 @@ function VideoReview({
                 editable={canSend}
                 markerClass={c => (c.id.startsWith('draft-') ? 'bg-amber' : null)}
               />
-              )}
-              {isDrive && canSend && (
-                <p className="text-[10px] text-muted-2">Este video se muestra con el visor de Google Drive: pausa en el momento exacto y escribe el minuto (ej. 0:42).</p>
               )}
             </div>
           )}

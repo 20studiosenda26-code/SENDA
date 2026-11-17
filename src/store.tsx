@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
@@ -399,27 +399,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return;
     let active = true;
     (async () => {
-      const remoteSeedVer = await loadShared<string>('seed_version');
-      if (remoteSeedVer !== DATA_SEED_VERSION) {
+      // Todo en una sola consulta (antes eran ~16 seguidas y la carga inicial tardaba)
+      const KEYS = ['seed_version', 'brands', 'orders', 'notifications', 'calendarEvents', 'workerGoals', 'workerPointsOverride',
+        'financeSettings', 'financeClosings', 'appExpenses', 'payrollPayments', 'payrollAdjustments', 'capacityProtocolConfig',
+        'workerCapacities', CLIENT_CATALOG_KEY, 'classroomModules', 'lessonCompletions', 'online_heartbeats'];
+      const kv = await loadSharedMany(KEYS);
+      if (!active || !kv) return; // sin sesión o error: no se toca nada (nunca se borran datos por un fallo)
+      const get = <T,>(k: string) => (k in kv ? (kv[k] as T) : null);
+
+      if (get<string>('seed_version') !== DATA_SEED_VERSION && !Array.isArray(get('brands')) && !Array.isArray(get('orders'))) {
+        // Base nueva y vacía: se marca la versión de datos limpia
         await saveShared('brands', []);
         await saveShared('orders', []);
         await saveShared('seed_version', DATA_SEED_VERSION);
-        if (active) {
-          setBrands([]);
-          setOrders([]);
-        }
+        if (active) { setBrands([]); setOrders([]); }
       } else {
-        const [remoteBrands, remoteOrders] = await Promise.all([
-          loadShared<Brand[]>('brands'),
-          loadShared<Order[]>('orders'),
-        ]);
+        const remoteBrands = get<Brand[]>('brands');
+        const remoteOrders = get<Order[]>('orders');
         applyingRemoteRef.current = true;
-        if (active && Array.isArray(remoteBrands) && Date.now() - getLastLocalWriteAt("brands") > 8000) {
+        if (Array.isArray(remoteBrands) && Date.now() - getLastLocalWriteAt("brands") > 8000) {
           brandsRef.current = remoteBrands;
           setBrands(remoteBrands);
           saveState("brands", remoteBrands);
         }
-        if (active && Array.isArray(remoteOrders) && Date.now() - getLastLocalWriteAt("orders") > 8000) {
+        if (Array.isArray(remoteOrders) && Date.now() - getLastLocalWriteAt("orders") > 8000) {
           ordersRef.current = remoteOrders;
           setOrders(remoteOrders);
           saveState("orders", remoteOrders);
@@ -427,47 +430,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setTimeout(() => { applyingRemoteRef.current = false; }, 50);
       }
 
-      const remoteNotifications = await loadShared<NotificationItem[]>('notifications');
-      if (active && remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
-      const remoteCalendar = await loadShared<CalendarEvent[]>('calendarEvents');
-      if (active && remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
-      const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>('workerGoals');
-      if (active && remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
-      const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
-      if (active && remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
-      const remoteFinSettings = await loadShared<FinanceSettings>('financeSettings');
-      if (active && remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings(normalizeFinanceSettings(remoteFinSettings));
-      const remoteFinClosings = await loadShared<FinanceDayClosing[]>('financeClosings');
-      if (active && Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
-      const remoteAppExpenses = await loadShared<AppExpense[]>('appExpenses');
-      if (active && Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
-      const remotePayrollPayments = await loadShared<PayrollPayment[]>('payrollPayments');
-      if (active && Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
-      const remotePayrollAdj = await loadShared<Record<string, number>>('payrollAdjustments');
-      if (active && remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
-      const remoteCapConfig = await loadShared<CapacityProtocolConfig>('capacityProtocolConfig');
-      if (active && remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
-      const remoteWorkerCaps = await loadShared<Record<string, number>>('workerCapacities');
-      if (active && remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
-      const remoteCatalog = await loadShared<ClientCatalog>(CLIENT_CATALOG_KEY);
-      if (active && remoteCatalog && typeof remoteCatalog === 'object') setClientCatalog({ avatars: remoteCatalog.avatars || [], styles: remoteCatalog.styles || [] });
-      const remoteClassroom = await loadShared<ClassroomModule[]>('classroomModules');
-      if (active && Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
-      else if (active && remoteClassroom === null) {
+      const remoteNotifications = get<NotificationItem[]>('notifications');
+      if (remoteNotifications) setNotifications(applyNotificationReset(remoteNotifications));
+      const remoteCalendar = get<CalendarEvent[]>('calendarEvents');
+      if (remoteCalendar) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
+      const remoteWorkerGoals = get<Record<string, WorkerCustomGoals>>('workerGoals');
+      if (remoteWorkerGoals && typeof remoteWorkerGoals === 'object') setWorkerGoalsMap(remoteWorkerGoals);
+      const remotePointsOverride = get<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>('workerPointsOverride');
+      if (remotePointsOverride && typeof remotePointsOverride === 'object') setWorkerPointsOverride(remotePointsOverride);
+      const remoteFinSettings = get<FinanceSettings>('financeSettings');
+      if (remoteFinSettings && typeof remoteFinSettings === 'object') setFinanceSettings(normalizeFinanceSettings(remoteFinSettings));
+      const remoteFinClosings = get<FinanceDayClosing[]>('financeClosings');
+      if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
+      const remoteAppExpenses = get<AppExpense[]>('appExpenses');
+      if (Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
+      const remotePayrollPayments = get<PayrollPayment[]>('payrollPayments');
+      if (Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
+      const remotePayrollAdj = get<Record<string, number>>('payrollAdjustments');
+      if (remotePayrollAdj && typeof remotePayrollAdj === 'object') setPayrollAdjustments(remotePayrollAdj);
+      const remoteCapConfig = get<CapacityProtocolConfig>('capacityProtocolConfig');
+      if (remoteCapConfig && typeof remoteCapConfig === 'object') setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
+      const remoteWorkerCaps = get<Record<string, number>>('workerCapacities');
+      if (remoteWorkerCaps && typeof remoteWorkerCaps === 'object') setWorkerCapacities(remoteWorkerCaps);
+      const remoteCatalog = get<ClientCatalog>(CLIENT_CATALOG_KEY);
+      if (remoteCatalog && typeof remoteCatalog === 'object') setClientCatalog({ avatars: remoteCatalog.avatars || [], styles: remoteCatalog.styles || [] });
+      const remoteClassroom = get<ClassroomModule[]>('classroomModules');
+      if (Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
+      else if (remoteClassroom === null) {
         // Primera vez: subir los módulos que existían solo en este navegador para que todo el equipo los vea
         const localModules = loadState<ClassroomModule[]>('classroomModules', []);
         if (localModules.length > 0) void saveShared('classroomModules', localModules);
       }
-      const remoteCompletions = await loadShared<Record<string, string[]>>('lessonCompletions');
-      if (active && remoteCompletions && typeof remoteCompletions === 'object') setLessonCompletions(remoteCompletions);
-      const remoteHeartbeats = await loadShared<Record<string, number>>('online_heartbeats');
-      if (active && remoteHeartbeats && typeof remoteHeartbeats === 'object') {
-        setHeartbeatMap(remoteHeartbeats);
-      }
-      if (active) hydratedRef.current = true;
+      const remoteCompletions = get<Record<string, string[]>>('lessonCompletions');
+      if (remoteCompletions && typeof remoteCompletions === 'object') setLessonCompletions(remoteCompletions);
+      const remoteHeartbeats = get<Record<string, number>>('online_heartbeats');
+      if (remoteHeartbeats && typeof remoteHeartbeats === 'object') setHeartbeatMap(remoteHeartbeats);
+      hydratedRef.current = true;
     })();
     return () => { active = false; };
-  }, []);
+    // Se repite al iniciar sesión: antes la primera carga salía sin sesión y los datos llegaban tarde
+  }, [user?.id]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -499,10 +501,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const shouldLoad = (k: string) =>
           (!changedKey || changedKey === k) && (now - getLastLocalWriteAt(k) > 8000);
 
+        // Una sola consulta para todo lo que cambió (antes eran varias seguidas)
+        const wanted = ["orders", "brands", "notifications", "calendarEvents", "workerGoals", "workerPointsOverride", "financeSettings", "financeClosings", "appExpenses", "payrollPayments", "payrollAdjustments", "capacityProtocolConfig", "classroomModules", "lessonCompletions", "workerCapacities"].filter(shouldLoad);
+        if (wanted.length === 0) return;
+        const kvRemote = await loadSharedMany(wanted);
+        if (!kvRemote) return;
+        const pick = <T,>(k: string) => ((k in kvRemote ? kvRemote[k] : null) as T | null);
         applyingRemoteRef.current = true;
         try {
           if (shouldLoad("orders")) {
-            const remoteOrders = await loadShared<Order[]>("orders");
+            const remoteOrders = pick<Order[]>("orders");
             if (Array.isArray(remoteOrders) && Date.now() - getLastLocalWriteAt("orders") > 8000) {
               ordersRef.current = remoteOrders;
               setOrders(remoteOrders);
@@ -510,7 +518,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
           }
           if (shouldLoad("brands")) {
-            const remoteBrands = await loadShared<Brand[]>("brands");
+            const remoteBrands = pick<Brand[]>("brands");
             if (Array.isArray(remoteBrands) && Date.now() - getLastLocalWriteAt("brands") > 8000) {
               brandsRef.current = remoteBrands;
               setBrands(remoteBrands);
@@ -518,55 +526,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
           }
           if (shouldLoad("notifications")) {
-            const remoteNotifications = await loadShared<NotificationItem[]>("notifications");
+            const remoteNotifications = pick<NotificationItem[]>("notifications");
             if (Array.isArray(remoteNotifications)) setNotifications(applyNotificationReset(remoteNotifications));
           }
           if (shouldLoad("calendarEvents")) {
-            const remoteCalendar = await loadShared<CalendarEvent[]>("calendarEvents");
+            const remoteCalendar = pick<CalendarEvent[]>("calendarEvents");
             if (Array.isArray(remoteCalendar)) setCalendarEvents(sanitizeCalendarEvents(remoteCalendar));
           }
           if (shouldLoad("workerGoals")) {
-            const remoteWorkerGoals = await loadShared<Record<string, WorkerCustomGoals>>("workerGoals");
+            const remoteWorkerGoals = pick<Record<string, WorkerCustomGoals>>("workerGoals");
             if (remoteWorkerGoals && typeof remoteWorkerGoals === "object") setWorkerGoalsMap(remoteWorkerGoals);
           }
           if (shouldLoad("workerPointsOverride")) {
-            const remotePointsOverride = await loadShared<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>("workerPointsOverride");
+            const remotePointsOverride = pick<Record<string, { pointsToday?: number; pointsMonth?: number; dayClosedToday?: boolean }>>("workerPointsOverride");
             if (remotePointsOverride && typeof remotePointsOverride === "object") setWorkerPointsOverride(remotePointsOverride);
           }
           if (shouldLoad("financeSettings")) {
-            const remoteFinSettings = await loadShared<FinanceSettings>("financeSettings");
+            const remoteFinSettings = pick<FinanceSettings>("financeSettings");
             if (remoteFinSettings && typeof remoteFinSettings === "object") setFinanceSettings(normalizeFinanceSettings(remoteFinSettings));
           }
           if (shouldLoad("financeClosings")) {
-            const remoteFinClosings = await loadShared<FinanceDayClosing[]>("financeClosings");
+            const remoteFinClosings = pick<FinanceDayClosing[]>("financeClosings");
             if (Array.isArray(remoteFinClosings)) setFinanceClosings(remoteFinClosings);
           }
           if (shouldLoad("appExpenses")) {
-            const remoteAppExpenses = await loadShared<AppExpense[]>("appExpenses");
+            const remoteAppExpenses = pick<AppExpense[]>("appExpenses");
             if (Array.isArray(remoteAppExpenses)) setAppExpenses(remoteAppExpenses);
           }
           if (shouldLoad("payrollPayments")) {
-            const remotePayrollPayments = await loadShared<PayrollPayment[]>("payrollPayments");
+            const remotePayrollPayments = pick<PayrollPayment[]>("payrollPayments");
             if (Array.isArray(remotePayrollPayments)) setPayrollPayments(remotePayrollPayments);
           }
           if (shouldLoad("payrollAdjustments")) {
-            const remotePayrollAdj = await loadShared<Record<string, number>>("payrollAdjustments");
+            const remotePayrollAdj = pick<Record<string, number>>("payrollAdjustments");
             if (remotePayrollAdj && typeof remotePayrollAdj === "object") setPayrollAdjustments(remotePayrollAdj);
           }
           if (shouldLoad("capacityProtocolConfig")) {
-            const remoteCapConfig = await loadShared<CapacityProtocolConfig>("capacityProtocolConfig");
+            const remoteCapConfig = pick<CapacityProtocolConfig>("capacityProtocolConfig");
             if (remoteCapConfig && typeof remoteCapConfig === "object") setCapacityConfig({ ...DEFAULT_CAPACITY_CONFIG, ...remoteCapConfig });
           }
           if (shouldLoad("classroomModules")) {
-            const remoteClassroom = await loadShared<ClassroomModule[]>("classroomModules");
+            const remoteClassroom = pick<ClassroomModule[]>("classroomModules");
             if (Array.isArray(remoteClassroom)) setClassroomModules(remoteClassroom);
           }
           if (shouldLoad("lessonCompletions")) {
-            const remoteCompletions = await loadShared<Record<string, string[]>>("lessonCompletions");
+            const remoteCompletions = pick<Record<string, string[]>>("lessonCompletions");
             if (remoteCompletions && typeof remoteCompletions === "object") setLessonCompletions(remoteCompletions);
           }
           if (shouldLoad("workerCapacities")) {
-            const remoteWorkerCaps = await loadShared<Record<string, number>>("workerCapacities");
+            const remoteWorkerCaps = pick<Record<string, number>>("workerCapacities");
             if (remoteWorkerCaps && typeof remoteWorkerCaps === "object") setWorkerCapacities(remoteWorkerCaps);
           }
         } finally {
@@ -575,9 +583,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       })();
     };
     const unsub = subscribeToTable("platform_kv", handleShared);
-    // Respaldo del tiempo real: si un aviso se pierde, cada 15 s (pestaña visible) y al volver a la pestaña se sincroniza
-    const resync = () => { if (document.visibilityState === 'visible') handleShared(); };
-    const iv = setInterval(resync, 15000);
+    // Respaldo del tiempo real: si un aviso se pierde, cada 8 s (pestaña visible) y al volver a la pestaña se sincroniza
+    // Solo se descargan las claves que cambiaron desde la última revisión
+    let stamps: Record<string, string> | null = null;
+    const resync = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadSharedStamps().then(next => {
+        if (!next) return;
+        const prev = stamps;
+        stamps = next;
+        if (!prev) return;
+        Object.keys(next).forEach(k => { if (next[k] !== prev[k]) handleShared(k); });
+      });
+    };
+    resync();
+    const iv = setInterval(resync, 8000);
     window.addEventListener('focus', resync);
     document.addEventListener('visibilitychange', resync);
     return () => {
@@ -844,7 +864,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsub1 = subscribeToTable('chat_groups', () => { void loadChat(); });
     const unsub2 = subscribeToTable('chat_group_members', () => { void loadChat(); });
     const unsub3 = subscribeToTable('chat_messages', () => { void loadChat(); });
-    const chatIv = setInterval(() => { if (document.visibilityState === 'visible') void loadChat(); }, 10000);
+    const chatIv = setInterval(() => { if (document.visibilityState === 'visible') void loadChat(); }, 6000);
     return () => { unsub1(); unsub2(); unsub3(); clearInterval(chatIv); };
   }, [loadChat, user]);
 
@@ -2182,7 +2202,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!changedKey || changedKey === clientViewKey(uid) || changedKey === clientAckKey(uid) || changedKey === CLIENT_CATALOG_KEY) void load();
     });
     // Respaldo del tiempo real para el cliente
-    const clientIv = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 15000);
+    const clientIv = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 8000);
     return () => { active = false; unsub(); clearInterval(clientIv); };
   }, [isClient, user?.id]);
 

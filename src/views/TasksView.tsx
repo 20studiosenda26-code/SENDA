@@ -6,7 +6,7 @@ import {
   downloadMediaFile,
   isGoogleDriveUrl,
   getGoogleDrivePreviewUrl,
-  getGoogleDriveStreamUrl,
+  getGoogleDriveStreamCandidates,
   getGoogleDriveBridgeUrl,
   setGoogleDriveBridgeUrl,
   getGoogleDriveFolderUrl,
@@ -314,6 +314,7 @@ function VideoDetail({
   const [mediaDuration, setMediaDuration] = useState(0);
   // Drive se reproduce en el reproductor propio; si Google lo bloquea, se usa su visor (sin control de tiempo)
   const [driveFallback, setDriveFallback] = useState(false);
+  const [streamIdx, setStreamIdx] = useState(0);
   const seekTo = (t: number) => {
     const el = playerRef.current;
     if (el) { el.currentTime = t; el.pause(); }
@@ -352,6 +353,7 @@ function VideoDetail({
     let cancelled = false;
     const raw = activeMedia?.fileUrl || null;
     setDriveFallback(false);
+    setStreamIdx(0);
     if (!raw) {
       setResolvedClipUrl(null);
       setLoadingClipMedia(false);
@@ -637,10 +639,15 @@ function VideoDetail({
                 <img src={resolvedClipUrl} alt={activeMedia.name} className="w-full h-[560px] object-contain animate-fadeIn" />
               ) : (
                 <video
-                  key={`${activeMedia.id}-${resolvedClipUrl}`}
+                  key={`${activeMedia.id}-${resolvedClipUrl}-${streamIdx}`}
                   ref={playerRef}
-                  src={isGoogleDriveUrl(resolvedClipUrl) ? getGoogleDriveStreamUrl(resolvedClipUrl) || resolvedClipUrl : resolvedClipUrl}
-                  onError={() => { if (isGoogleDriveUrl(resolvedClipUrl)) setDriveFallback(true); }}
+                  src={isGoogleDriveUrl(resolvedClipUrl) ? getGoogleDriveStreamCandidates(resolvedClipUrl)[streamIdx] || resolvedClipUrl : resolvedClipUrl}
+                  onError={() => {
+                    if (!isGoogleDriveUrl(resolvedClipUrl)) return;
+                    // Prueba la siguiente ruta; el visor de Google es el último recurso
+                    if (streamIdx < getGoogleDriveStreamCandidates(resolvedClipUrl).length - 1) setStreamIdx(i => i + 1);
+                    else setDriveFallback(true);
+                  }}
                   controls
                   autoPlay={Boolean(playing)}
                   playsInline
@@ -1759,14 +1766,7 @@ function FinalReviewPanel({
             </button>
           </div>
         )}
-        {!canReadPlayerTime && (
-          <p className="text-[11px] text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-2.5 py-2 leading-snug">
-            La línea no está enlazada: Google Drive no dejó reproducir este video en el reproductor de SENDA y se muestra con su visor.
-            {isAdmin
-              ? <> Actívalo en <strong>Admin → Ajustes → Google Drive → Clave de API</strong>. Mientras tanto, escribe el minuto a mano (ej. 0:42).</>
-              : <> Verifica que el archivo esté compartido como “Cualquier persona con el enlace”.</>}
-          </p>
-        )}
+
 
         {corrections.length === 0 ? (
           <p className="text-[11px] text-muted-2 text-center py-2">
