@@ -129,11 +129,34 @@ export function getGoogleDriveStreamUrl(url?: string | null): string | null {
   return `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
 }
 
-/** Duración real (segundos) de un video de Drive usando la clave de API, si está configurada. */
+/** Dirección real (slug) de la función de Supabase de SENDA (correos y duración de videos).
+ *  En el panel se llama "send-email", pero su dirección quedó como "smooth-task". */
+export const SENDA_FUNCTION = 'smooth-task';
+
+const durationCache = new Map<string, number | null>();
+
+/** Duración real (segundos) de un video de Drive: la lee el servidor de SENDA del propio archivo
+ *  (sin clave de API). Si hay clave de API de Drive configurada, se usa como respaldo. */
 export async function fetchDriveVideoDuration(url?: string | null): Promise<number | null> {
   const id = extractGoogleDriveId(url);
+  if (!id) return null;
+  if (durationCache.has(id)) return durationCache.get(id)!;
+  let secs: number | null = null;
+  if (supabase) {
+    try {
+      const { data } = await supabase.functions.invoke(SENDA_FUNCTION, { body: { action: 'video-duration', driveId: id } });
+      const s = Number((data as { seconds?: number } | null)?.seconds);
+      if (Number.isFinite(s) && s > 0) secs = Math.round(s);
+    } catch { /* sin servidor: se intenta con la API */ }
+  }
+  if (!secs) secs = await fetchDriveDurationWithApiKey(id);
+  durationCache.set(id, secs);
+  return secs;
+}
+
+async function fetchDriveDurationWithApiKey(id: string): Promise<number | null> {
   const apiKey = getGoogleDriveApiKey();
-  if (!id || !apiKey) return null;
+  if (!apiKey) return null;
   try {
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=videoMediaMetadata(durationMillis)&key=${encodeURIComponent(apiKey)}`);
     if (!res.ok) return null;

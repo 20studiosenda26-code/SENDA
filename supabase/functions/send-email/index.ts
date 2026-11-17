@@ -28,6 +28,53 @@ function template(name: string, text: string, appUrl: string) {
   </td></tr></table></body></html>`;
 }
 
+// ---- Duración de videos MP4/MOV de Google Drive (lee el encabezado "mvhd" del archivo) ----
+const DRIVE_DL = (id: string) => `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
+
+function readMvhd(buf: Uint8Array): number | null {
+  for (let i = 4; i < buf.length - 32; i++) {
+    if (buf[i] === 0x6d && buf[i + 1] === 0x76 && buf[i + 2] === 0x68 && buf[i + 3] === 0x64) { // "mvhd"
+      const dv = new DataView(buf.buffer, buf.byteOffset + i + 4);
+      const version = dv.getUint8(0);
+      let timescale: number, duration: number;
+      if (version === 1) {
+        if (i + 4 + 32 > buf.length) return null;
+        timescale = dv.getUint32(20);
+        duration = Number(dv.getBigUint64(24));
+      } else {
+        timescale = dv.getUint32(12);
+        duration = dv.getUint32(16);
+      }
+      if (timescale > 0 && duration > 0) return duration / timescale;
+    }
+  }
+  return null;
+}
+
+async function fetchRange(id: string, range: string): Promise<{ bytes: Uint8Array; total: number } | null> {
+  const res = await fetch(DRIVE_DL(id), { headers: { Range: `bytes=${range}` }, redirect: "follow" });
+  if (!res.ok && res.status !== 206) return null;
+  const type = res.headers.get("content-type") || "";
+  if (type.includes("text/html")) { await res.body?.cancel(); return null; } // no es público o no es un archivo
+  const total = Number((res.headers.get("content-range") || "").split("/")[1]) || Number(res.headers.get("content-length")) || 0;
+  return { bytes: new Uint8Array(await res.arrayBuffer()), total };
+}
+
+async function driveVideoDuration(id: string): Promise<number | null> {
+  const head = await fetchRange(id, "0-1048575");
+  if (!head) return null;
+  const fromHead = readMvhd(head.bytes);
+  if (fromHead) return Math.round(fromHead);
+  // El índice ("moov") suele ir al final en videos exportados: se leen los últimos 4 MB
+  if (head.total > head.bytes.length) {
+    const start = Math.max(0, head.total - 4 * 1024 * 1024);
+    const tail = await fetchRange(id, `${start}-${head.total - 1}`);
+    const fromTail = tail ? readMvhd(tail.bytes) : null;
+    if (fromTail) return Math.round(fromTail);
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -38,7 +85,17 @@ Deno.serve(async (req) => {
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return new Response(JSON.stringify({ error: "Sin sesión" }), { status: 401, headers: cors });
 
-    const { workerId, text } = await req.json();
+    const body = await req.json();
+
+    // Duración real de un video de Drive (la línea de tiempo del feedback la necesita)
+    if (body?.action === "video-duration") {
+      const id = String(body.driveId || "");
+      if (!/^[\w-]{10,}$/.test(id)) return new Response(JSON.stringify({ error: "Id inválido" }), { status: 400, headers: cors });
+      const seconds = await driveVideoDuration(id);
+      return new Response(JSON.stringify({ seconds }), { headers: { ...cors, "Content-Type": "application/json" } });
+    }
+
+    const { workerId, text } = body;
     if (!workerId || !text || String(text).length > 500) {
       return new Response(JSON.stringify({ error: "Datos inválidos" }), { status: 400, headers: cors });
     }
