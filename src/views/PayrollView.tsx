@@ -28,7 +28,8 @@ function getWeekendCycle(offsetWeeks: number) {
   const sunday = new Date(saturday);
   sunday.setDate(saturday.getDate() + 1);
 
-  const satIso = saturday.toISOString().slice(0, 10);
+  // Fecha local (toISOString usa UTC y puede cambiar de día)
+  const satIso = `${saturday.getFullYear()}-${String(saturday.getMonth() + 1).padStart(2, '0')}-${String(saturday.getDate()).padStart(2, '0')}`;
   const weekKey = `wk-${satIso}`;
 
   const satLabel = saturday.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
@@ -41,8 +42,9 @@ function getWeekendCycle(offsetWeeks: number) {
 export function PayrollView() {
   const {
     workers, brands, orders, financeSettings,
-    payrollPayments, recordPayrollPayment, startAdminDm, sendChatGroupMessage,
+    payrollPayments, recordPayrollPayment, revertPayrollPayment, startAdminDm, sendChatGroupMessage,
   } = useStore();
+  const [confirmUndoId, setConfirmUndoId] = useState<string | null>(null);
 
   const [weekOffset, setWeekOffset] = useState<number>(0);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
@@ -180,9 +182,16 @@ export function PayrollView() {
   const strokeDashoffset = circumference - (totals.remainingPct / 100) * circumference;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div>
+        <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+        </p>
+        <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Nóminas</h2>
+        <p className="text-sm text-muted mt-1">Paga al equipo cada fin de semana: $5 por video, 50% al Aprobado Senda y 50% al Aprobado Cliente. Cada tramo se paga una sola vez.</p>
+      </div>
       {/* BARRA SUPERIOR COMPACTA: Medidor Radial en Vivo + Total Pagos por Hacer + Selector Clippers/Editores + Corte */}
-      <div className="bg-surface-2 border border-line rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-5 flex-wrap relative overflow-hidden">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 sm:p-5 flex items-center justify-between gap-5 flex-wrap relative overflow-hidden">
         {/* Pulso ambiental sutil */}
         <div
           className="absolute -left-10 top-1/2 -translate-y-1/2 w-56 h-56 rounded-full pointer-events-none blur-3xl opacity-20"
@@ -276,7 +285,7 @@ export function PayrollView() {
       {/* WORKSPACE EN 2 COLUMNAS: Izquierda = Lista de Empleados | Derecha = Terminal de Pago + Informe PDF Pre-cargado */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Columna Izquierda (4 cols): Lista de Clippers o Editores */}
-        <div className="lg:col-span-4 bg-surface-2 border border-line rounded-2xl p-3 space-y-2">
+        <div className="glow-card lg:col-span-4 bg-surface-2 border border-line rounded-xl p-3 space-y-2">
           <div className="px-2 py-1.5 flex items-center justify-between text-xs text-muted border-b border-line/60">
             <span className="font-semibold">
               Equipo ({currentList.length})
@@ -337,7 +346,7 @@ export function PayrollView() {
         {/* Columna Derecha (8 cols): Mesa de Dispersión + Cuenta Bancaria Detallada + Informe PDF Pre-cargado */}
         <div className="lg:col-span-8">
           {!selectedRow ? (
-            <div className="bg-surface-2 border border-line rounded-2xl p-12 text-center text-sm text-muted">
+            <div className="bg-surface-2 border border-line rounded-xl p-12 text-center text-sm text-muted">
               Selecciona un empleado a la izquierda
             </div>
           ) : (() => {
@@ -348,11 +357,11 @@ export function PayrollView() {
             const isPaying = payingWorkerId === w.id;
 
             return (
-              <div className="bg-surface-2 border border-line rounded-2xl p-5 sm:p-6 space-y-5">
+              <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 sm:p-6 space-y-5">
                 {/* Cabecera del empleado seleccionado */}
                 <div className="flex items-center justify-between gap-4 flex-wrap pb-4 border-b border-line">
                   <div className="flex items-center gap-3.5">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-display text-lg font-bold ${
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-lg font-bold ${
                       selectedRow.isPaid ? 'bg-mint text-on-accent' : 'bg-accent-dim text-accent border border-accent/30'
                     }`}>
                       {selectedRow.isPaid ? <CheckCircle2 size={22} /> : w.name.charAt(0).toUpperCase()}
@@ -546,6 +555,19 @@ export function PayrollView() {
                         </div>
                       </div>
 
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {confirmUndoId === selectedRow.latestPayment.id ? (
+                          <span className="flex items-center gap-1.5 text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-2 py-1">
+                            <span className="text-red-300">¿Deshacer este pago? Vuelve a quedar por pagar.</span>
+                            <button type="button" onClick={() => { revertPayrollPayment(selectedRow.latestPayment!.id); setConfirmUndoId(null); }} className="font-bold text-white bg-red-500 rounded px-2 py-0.5">Sí</button>
+                            <button type="button" onClick={() => setConfirmUndoId(null)} className="text-muted px-1">No</button>
+                          </span>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmUndoId(selectedRow.latestPayment!.id)} title="Si registraste este pago por error" className="text-xs text-muted hover:text-red-400 border border-line rounded-lg px-3 py-1.5">
+                            Deshacer pago
+                          </button>
+                        )}
+                      </div>
                       {selectedRow.latestPayment.receiptFileUrl && (
                         <div className="flex items-center gap-2">
                           <button
@@ -607,6 +629,9 @@ export function PayrollView() {
                         </button>
                       </div>
 
+                      {!w.bankInfo && selectedRow.pendingAmount > 0 && (
+                        <span className="text-[11px] text-amber">Sin datos bancarios: pídele que los complete en su Perfil antes de transferir.</span>
+                      )}
                       <button
                         type="button"
                         onClick={() => void handleConfirmPayment(selectedRow)}
@@ -633,7 +658,7 @@ export function PayrollView() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="bg-surface-2 border border-line rounded-2xl max-w-xl w-full p-5 space-y-4"
+            className="bg-surface-2 border border-line rounded-xl max-w-xl w-full p-5 space-y-4"
           >
             <div className="flex items-center justify-between">
               <div>
