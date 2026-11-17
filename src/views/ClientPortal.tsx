@@ -276,11 +276,13 @@ function VideoReview({
   const [toast, setToast] = useState<string | null>(null);
   // Duración real (automática): reproductor > la guardada por el equipo > Drive (con clave de API)
   const [driveDur, setDriveDur] = useState(0);
+  const [driveTried, setDriveTried] = useState(false);
   useEffect(() => {
     let off = false;
     setDriveDur(0);
     if (final?.fileUrl && isGoogleDriveUrl(final.fileUrl) && !video.durationKnown) {
-      void fetchDriveVideoDuration(final.fileUrl).then(s => { if (!off && s) setDriveDur(s); });
+      setDriveTried(false);
+      void fetchDriveVideoDuration(final.fileUrl).then(s => { if (off) return; if (s) setDriveDur(s); setDriveTried(true); });
     }
     return () => { off = true; };
   }, [final?.fileUrl, video.durationKnown]);
@@ -421,7 +423,7 @@ function VideoReview({
                 </span>
               </p>
               {!realDuration ? (
-                <p className="text-xs text-muted">Calculando la duración del video… Mientras tanto, pausa en el momento exacto y escribe el minuto abajo (ej. 0:12).</p>
+                <p className="text-xs text-muted">{driveTried ? 'No se pudo leer la duración de este video. Pausa en el momento exacto y escribe el minuto abajo (ej. 0:12).' : 'Calculando la duración del video…'}</p>
               ) : (
               <CorrectionTimeline
                 duration={realDuration}

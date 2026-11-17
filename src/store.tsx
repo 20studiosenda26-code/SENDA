@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
@@ -70,10 +70,6 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
     emailNotifications: !!p.email_notifications,
   };
 }
-
-// Nombre interno (slug) de la función de correo en Supabase. En el panel se llama
-// "send-email", pero su dirección real quedó como "smooth-task".
-const EMAIL_FUNCTION = 'smooth-task';
 
 const STORAGE_PREFIX = 'senda_platform_';
 const DATA_SEED_VERSION = 'senda_v5_clean_data';
@@ -839,31 +835,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [loadChat, user]);
 
+  // Cliente y equipo: su conversación con el admin se crea sola en la base (función ensure_my_admin_dm)
+  const ownDmTriedRef = useRef(false);
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !user || role === 'admin') return;
-    (async () => {
-      const already = chatGroups.some(g => g.isDm && g.memberIds.includes(user.id));
-      if (already) return;
-      const { data: existing } = await supabase!
-        .from('chat_groups')
-        .select('id, chat_group_members!inner(user_id)')
-        .eq('is_dm', true)
-        .eq('chat_group_members.user_id', user.id)
-        .maybeSingle();
-      if (existing) return;
-      const { data: newGroup } = await supabase!
-        .from('chat_groups')
-        .insert({ name: `Admin · ${user.name}`, is_dm: true, created_by: user.id })
-        .select('id')
-        .single();
-      if (newGroup) {
-        const { data: admins } = await supabase!.from('profiles').select('id').eq('role', 'admin');
-        const rows = [{ group_id: newGroup.id, user_id: user.id }, ...((admins || []).map((a: { id: string }) => ({ group_id: newGroup.id, user_id: a.id })))];
-        await supabase!.from('chat_group_members').upsert(rows);
-        void loadChat();
-      }
+    if (!isSupabaseConfigured || !supabase || !user || role === 'admin' || ownDmTriedRef.current) return;
+    ownDmTriedRef.current = true;
+    void (async () => {
+      const { data, error } = await supabase!.rpc('ensure_my_admin_dm');
+      if (!error && data) void loadChat();
     })();
-  }, [user, role, chatGroups, loadChat]);
+  }, [user, role, loadChat]);
 
   const loadNotificationsArchive = useCallback(async () => {
     if (!supabase) return;
@@ -931,7 +912,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Envío real (función "send-email"): el servidor revisa el Perfil actualizado de la
       // persona (correo + aviso activado), así no depende de datos viejos en esta pestaña.
       if (isSupabaseConfigured && supabase) {
-        void supabase.functions.invoke(EMAIL_FUNCTION, { body: { workerId, text } }).catch(() => {});
+        void supabase.functions.invoke(SENDA_FUNCTION, { body: { workerId, text } }).catch(() => {});
       }
     }
   }, []);
