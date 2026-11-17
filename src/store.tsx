@@ -208,7 +208,8 @@ interface Store {
   addCalendarEvent: (e: Omit<CalendarEvent, 'id'>) => void;
   updateCalendarEvent: (id: string, patch: Partial<Omit<CalendarEvent, 'id'>>) => void;
   deleteCalendarEvent: (id: string) => void;
-  updateWorkerProfile: (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => void;
+  /** Guarda en Supabase; devuelve null si quedó guardado o el motivo del error. */
+  updateWorkerProfile: (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => Promise<string | null>;
   contracts: Contract[];
   contractSignedUploads: ContractSignedUpload[];
   uploadContract: (title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => void;
@@ -1456,7 +1457,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCalendarEvents(prev => prev.filter(e => e.id !== id));
   }, []);
 
-  const updateWorkerProfile = useCallback((workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => {
+  const updateWorkerProfile = useCallback(async (workerId: string, fields: Partial<Pick<Worker, 'phone' | 'email' | 'bankInfo' | 'country' | 'emailNotifications'>>) => {
     setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...fields } : w));
     if (isSupabaseConfigured && supabase) {
       const dbFields: Record<string, unknown> = {};
@@ -1465,8 +1466,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (fields.bankInfo !== undefined) dbFields.bank_info = fields.bankInfo;
       if (fields.country !== undefined) dbFields.country = fields.country;
       if (fields.emailNotifications !== undefined) dbFields.email_notifications = fields.emailNotifications;
-      void supabase.from('profiles').update(dbFields).eq('id', workerId);
+      const { data, error } = await supabase.from('profiles').update(dbFields).eq('id', workerId).select('id');
+      if (error) return error.message;
+      // Sin error pero sin filas = la base no dejó modificar ese perfil (permisos)
+      if (!data || data.length === 0) return 'No tienes permiso para modificar este perfil.';
     }
+    return null;
   }, []);
 
   const uploadContract = useCallback((title: string, role: 'clipper' | 'editor', workerId: string | null, fileName: string, fileUrl: string) => {
