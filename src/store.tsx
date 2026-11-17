@@ -609,7 +609,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return;
     void loadWorkersFromProfiles();
     const unsub = subscribeToTable('profiles', () => { void loadWorkersFromProfiles(); });
-    return unsub;
+    // Respaldo por si el tiempo real no está activo: al volver a la pestaña y cada minuto
+    // se releen los perfiles (datos bancarios, correo, etc. que cambió otra persona).
+    const onFocus = () => { if (document.visibilityState === 'visible') void loadWorkersFromProfiles(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    const iv = setInterval(onFocus, 60 * 1000);
+    return () => {
+      unsub();
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+      clearInterval(iv);
+    };
   }, [loadWorkersFromProfiles, user?.id]);
 
   useEffect(() => {
