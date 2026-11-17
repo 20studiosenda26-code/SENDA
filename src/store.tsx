@@ -71,6 +71,10 @@ function workerFromProfileRow(p: Record<string, unknown>): Worker {
   };
 }
 
+// Nombre interno (slug) de la función de correo en Supabase. En el panel se llama
+// "send-email", pero su dirección real quedó como "smooth-task".
+const EMAIL_FUNCTION = 'smooth-task';
+
 const STORAGE_PREFIX = 'senda_platform_';
 const DATA_SEED_VERSION = 'senda_v5_clean_data';
 
@@ -910,7 +914,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Envío real (función "send-email"): el servidor revisa el Perfil actualizado de la
       // persona (correo + aviso activado), así no depende de datos viejos en esta pestaña.
       if (isSupabaseConfigured && supabase) {
-        void supabase.functions.invoke('send-email', { body: { workerId, text } }).catch(() => {});
+        void supabase.functions.invoke(EMAIL_FUNCTION, { body: { workerId, text } }).catch(() => {});
       }
     }
   }, []);
