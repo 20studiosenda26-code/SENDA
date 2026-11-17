@@ -27,7 +27,7 @@ const CATEGORY_LABEL: Record<NotificationCategory, string> = {
 export function ChatView() {
   const {
     role, chatGroups, chatMessages, workers, adminProfiles, createChatGroup, sendChatGroupMessage, startAdminDm,
-    deleteChatGroup, notificationsArchive,
+    deleteChatGroup, notificationsArchive, clientProfiles,
   } = useStore();
   const { user } = useAuth();
   const isAdmin = role === 'admin';
@@ -45,6 +45,12 @@ export function ChatView() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<{ name: string; url: string } | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  // Personas con las que el admin puede abrir un privado: equipo y clientes
+  const dmPeople = [
+    ...workers.map(w => ({ id: w.id, name: w.name, tag: TEAM_ROLE_SHORT })),
+    ...clientProfiles.map(c => ({ id: c.id, name: c.name || c.email, tag: 'Cliente' })),
+  ];
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,18 +82,31 @@ export function ChatView() {
     const f = e.target.files?.[0];
     if (!f) return;
     setUploadingFile(true);
-    const url = await uploadSharedFile(f, 'chat-attachments');
-    setAttachedFile({ name: f.name, url });
-    setUploadingFile(false);
+    setChatError(null);
+    try {
+      const url = await uploadSharedFile(f, 'chat-attachments');
+      setAttachedFile({ name: f.name, url });
+    } catch {
+      setChatError('No se pudo adjuntar el archivo. Inténtalo de nuevo.');
+    } finally {
+      setUploadingFile(false);
+      e.target.value = '';
+    }
   };
 
   const handleSend = async () => {
     if (!activeGroup || (!input.trim() && !attachedFile)) return;
     setSending(true);
-    await sendChatGroupMessage(activeGroup.id, input.trim(), attachedFile?.name, attachedFile?.url);
-    setInput('');
-    setAttachedFile(null);
-    setSending(false);
+    setChatError(null);
+    try {
+      await sendChatGroupMessage(activeGroup.id, input.trim(), attachedFile?.name, attachedFile?.url);
+      setInput('');
+      setAttachedFile(null);
+    } catch {
+      setChatError('No se pudo enviar el mensaje. Revisa tu conexión.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const toggleMember = (id: string) => {
@@ -135,10 +154,11 @@ export function ChatView() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto h-[calc(100vh-4rem)]">
-      <div className="flex gap-4 h-full">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto h-[calc(100vh-4rem)] animate-fadeIn flex flex-col gap-3">
+      {chatError && <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-lg px-3 py-2 shrink-0">{chatError}</p>}
+      <div className="flex gap-4 flex-1 min-h-0">
         {/* Sidebar */}
-        <div className="w-72 shrink-0 bg-surface-2 border border-line rounded-xl p-3 overflow-y-auto flex flex-col">
+        <div className="glow-card w-72 xl:w-80 shrink-0 bg-surface-2 border border-line rounded-xl p-3 overflow-y-auto flex flex-col">
           <div className="relative mb-3">
             <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-2" />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="w-full bg-surface-3 border border-line rounded-lg pl-8 pr-3 py-2 text-sm outline-none focus:border-accent" />
@@ -158,13 +178,13 @@ export function ChatView() {
           {showNewDm && isAdmin && (
             <div className="mb-3 p-2.5 bg-surface-3 border border-line rounded-lg space-y-1 max-h-48 overflow-y-auto">
               <p className="text-[10px] text-muted-2 px-1 mb-1">Elige con quién chatear en privado</p>
-              {workers.filter(w => !chatGroups.some(g => g.isDm && g.memberIds.includes(w.id))).map(w => (
-                <button key={w.id} onClick={() => handleCreateDm(w.id)} className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-2 flex items-center justify-between">
-                  <span>{w.name}</span>
-                  <span className="text-[10px] text-muted-2">{TEAM_ROLE_SHORT}</span>
+              {dmPeople.filter(p => !chatGroups.some(g => g.isDm && g.memberIds.includes(p.id))).map(p => (
+                <button key={p.id} onClick={() => handleCreateDm(p.id)} className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-2 flex items-center justify-between">
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-[10px] text-muted-2 shrink-0">{p.tag}</span>
                 </button>
               ))}
-              {workers.filter(w => !chatGroups.some(g => g.isDm && g.memberIds.includes(w.id))).length === 0 && (
+              {dmPeople.filter(p => !chatGroups.some(g => g.isDm && g.memberIds.includes(p.id))).length === 0 && (
                 <p className="text-xs text-muted-2 px-1 py-2">Ya tienes un privado con todos</p>
               )}
             </div>

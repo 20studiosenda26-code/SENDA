@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { uploadSharedFile, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useState, useMemo, useRef } from 'react';
+import { EmptyState } from '../components/home/home-bits';
 import { FileText, Download, Upload, Trash2, Plus, X, CheckCircle2, Loader2, UserRound } from 'lucide-react';
 
 export function ContractsView() {
@@ -39,41 +40,50 @@ function WorkerContracts({
     [contracts, role, workerId]
   );
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const handleUpload = async (contractId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setUploadingId(contractId);
-    const url = await uploadSharedFile(f, 'contracts-signed');
-    onUploadSigned(contractId, f.name, url);
-    setUploadingId(null);
+    setUploadError(null);
+    try {
+      const url = await uploadSharedFile(f, 'contracts-signed');
+      onUploadSigned(contractId, f.name, url);
+    } catch {
+      setUploadError('No se pudo subir el archivo. Revisa tu conexión e inténtalo de nuevo.');
+    } finally {
+      setUploadingId(null);
+      e.target.value = '';
+    }
   };
+  const pending = myContracts.filter(c => !signedUploads.some(s => s.contractId === c.id && s.workerId === workerId)).length;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
-      <div className="bg-surface-2 border border-line rounded-xl p-5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-accent-dim flex items-center justify-center">
-            <FileText size={20} className="text-accent" />
-          </div>
-          <div>
-            <h2 className="font-display text-lg font-semibold">Mis Contratos</h2>
-            <p className="text-sm text-muted">Contratos · Clipper / Asistente de edición</p>
-          </div>
+    <div className="px-6 xl:px-8 py-6 max-w-[1100px] mx-auto space-y-5 animate-fadeIn">
+      <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+          </p>
+          <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Mis contratos</h2>
+          <p className="text-muted text-sm mt-1">Descarga cada contrato, fírmalo y sube la versión firmada. El admin recibe el aviso.</p>
+        </div>
+        <div className={`rounded-xl border px-4 py-3 text-sm ${pending ? 'border-amber/30 bg-amber/10 text-amber' : 'border-mint/30 bg-mint-dim text-mint'}`}>
+          {pending ? `${pending} contrato(s) por firmar` : myContracts.length ? 'Todo firmado ✓' : 'Sin contratos'}
         </div>
       </div>
+      {uploadError && <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-lg px-3 py-2">{uploadError}</p>}
 
       {myContracts.length === 0 && (
-        <div className="bg-surface-2 border border-line rounded-xl p-8 text-center text-sm text-muted">
-          Todavía no hay contratos disponibles para ti.
-        </div>
+        <EmptyState icon={<FileText size={20} />} title="Sin contratos por ahora" text="Cuando el admin suba un contrato para ti, aparecerá aquí y te llegará un aviso." />
       )}
 
       {myContracts.map(c => {
         const mySigned = signedUploads.find(s => s.contractId === c.id && s.workerId === workerId);
         return (
-          <div key={c.id} className="bg-surface-2 border border-line rounded-xl p-5 hover:border-accent/30 transition-colors">
+          <div key={c.id} className={`glow-card bg-surface-2 border rounded-xl p-5 hover:border-accent/30 transition-colors ${mySigned ? 'border-line' : 'border-amber/30'}`}>
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-lg bg-surface-3 flex items-center justify-center shrink-0">
@@ -131,6 +141,7 @@ function AdminContracts() {
   const [fileName, setFileName] = useState('');
   const [fileUrl, setFileUrl] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const ordered = useMemo(() => {
     const clipperContracts = contracts.filter(c => c.role === 'clipper');
@@ -142,10 +153,25 @@ function AdminContracts() {
     const f = e.target.files?.[0];
     if (!f) return;
     setUploading(true);
-    const url = await uploadSharedFile(f, 'contracts-templates');
-    setFileName(f.name);
-    setFileUrl(url);
-    setUploading(false);
+    setFormError(null);
+    try {
+      const url = await uploadSharedFile(f, 'contracts-templates');
+      setFileName(f.name);
+      setFileUrl(url);
+    } catch {
+      setFormError('No se pudo subir el archivo. Inténtalo de nuevo.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const team = workers.filter(w => w.role === 'clipper' || w.role === 'editor');
+  const expectedFor = (c: { workerId: string | null }) => (c.workerId ? team.filter(w => w.id === c.workerId) : team);
+  const totalPending = contracts.reduce((n, c) => n + expectedFor(c).filter(w => !contractSignedUploads.some(s => s.contractId === c.id && s.workerId === w.id)).length, 0);
+  const totalSigned = contractSignedUploads.filter(s => contracts.some(c => c.id === s.contractId)).length;
+  const removeContract = (id: string, t: string) => {
+    if (window.confirm(`¿Eliminar el contrato "${t}"? También se pierde el registro de firmas.`)) deleteContract(id);
   };
 
   const handleSubmit = () => {
@@ -157,26 +183,29 @@ function AdminContracts() {
   const workerName = (id: string) => workers.find(w => w.id === id)?.name || 'Desconocido';
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
-      <div className="bg-surface-2 border border-line rounded-xl p-5 flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-accent-dim flex items-center justify-center">
-            <FileText size={20} className="text-accent" />
-          </div>
-          <div>
-            <h2 className="font-display text-lg font-semibold">Contratos</h2>
-            <p className="text-sm text-muted">Sube, titula o elimina cualquier contrato del equipo</p>
-          </div>
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo
+          </p>
+          <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Contratos</h2>
+          <p className="text-muted text-sm mt-1">Sube contratos para todo el equipo o para una persona y revisa quién ya firmó.</p>
         </div>
-        <button onClick={() => setShowForm(s => !s)} className="flex items-center gap-1.5 bg-accent text-on-accent rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent-strong transition-colors">
-          <Plus size={16} /> Subir contrato
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="rounded-xl border border-line bg-surface-2 px-4 py-2 text-center"><p className="font-tech text-xl font-bold">{contracts.length}</p><p className="text-[11px] text-muted-2">contratos</p></div>
+          <div className="rounded-xl border border-mint/30 bg-mint-dim px-4 py-2 text-center"><p className="font-tech text-xl font-bold text-mint">{totalSigned}</p><p className="text-[11px] text-muted-2">firmados</p></div>
+          <div className={`rounded-xl border px-4 py-2 text-center ${totalPending ? 'border-amber/30 bg-amber/10' : 'border-line bg-surface-2'}`}><p className={`font-tech text-xl font-bold ${totalPending ? 'text-amber' : ''}`}>{totalPending}</p><p className="text-[11px] text-muted-2">por firmar</p></div>
+          <button onClick={() => setShowForm(s => !s)} className="flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-accent-strong transition-colors shadow-[0_0_20px_rgba(53,214,228,0.25)]">
+            <Plus size={16} /> Subir contrato
+          </button>
+        </div>
       </div>
 
       {showForm && (
-        <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-3">
+        <div className="glow-card bg-surface-2 border border-accent/30 rounded-xl p-5 space-y-3 animate-fadeIn">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Nuevo contrato</h3>
+            <h3 className="font-display font-semibold flex items-center gap-2"><FileText size={16} className="text-accent" /> Nuevo contrato</h3>
             <button onClick={() => setShowForm(false)}><X size={16} className="text-muted" /></button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -196,6 +225,8 @@ function AdminContracts() {
               <input type="file" className="hidden" onChange={handleFile} disabled={uploading} />
             </label>
           </div>
+          {formError && <p className="text-xs text-red-400">{formError}</p>}
+          <p className="text-[11px] text-muted-2">Al guardar, {targetWorker ? 'esa persona recibe' : 'todo el equipo recibe'} un aviso para descargarlo y subirlo firmado.</p>
           <LiquidMetalButton
                 onClick={handleSubmit}
                 disabled={!title.trim() || !fileUrl}
@@ -209,15 +240,14 @@ function AdminContracts() {
       )}
 
       {ordered.length === 0 && (
-        <div className="bg-surface-2 border border-line rounded-xl p-8 text-center text-sm text-muted">
-          Aún no has subido ningún contrato.
-        </div>
+        <EmptyState icon={<FileText size={20} />} title="Aún no hay contratos" text="Sube el primer contrato: puede ser una plantilla para todo el equipo o uno para una persona." action={{ label: 'Subir contrato', onClick: () => setShowForm(true) }} />
       )}
 
       {ordered.map(c => {
         const signatures = contractSignedUploads.filter(s => s.contractId === c.id);
+        const missing = expectedFor(c).filter(w => !signatures.some(s => s.workerId === w.id));
         return (
-          <div key={c.id} className="bg-surface-2 border border-line rounded-xl p-5">
+          <div key={c.id} className="glow-card bg-surface-2 border border-line rounded-xl p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-lg bg-surface-3 flex items-center justify-center shrink-0">
@@ -238,7 +268,7 @@ function AdminContracts() {
                 <a href={c.fileUrl} download={c.fileName} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-accent transition-colors" title="Descargar">
                   <Download size={16} />
                 </a>
-                <button onClick={() => deleteContract(c.id)} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-red-400 transition-colors" title="Eliminar">
+                <button onClick={() => removeContract(c.id, c.title)} className="w-9 h-9 rounded-lg bg-surface-3 border border-line flex items-center justify-center text-muted hover:text-red-400 transition-colors" title="Eliminar">
                   <Trash2 size={16} />
                 </button>
               </div>
@@ -257,6 +287,9 @@ function AdminContracts() {
                     </div>
                   ))}
                 </div>
+              )}
+              {missing.length > 0 && (
+                <p className="text-xs text-amber mt-2">Falta firmar: {missing.map(w => w.name).join(', ')}</p>
               )}
             </div>
           </div>
