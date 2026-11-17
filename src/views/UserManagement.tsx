@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import { useStore } from '../store';
 import { supabase, loadShared, saveShared } from '../lib/supabaseClient';
 import {
-  UserPlus, X, Users, Shield, Loader2, AlertCircle, CheckCircle2,
+  UserPlus, X, Users, Shield, AlertCircle, CheckCircle2,
   ChevronDown, Search, Mail, Copy, Check,
 } from 'lucide-react';
 import type { Role } from '../types';
@@ -134,7 +134,7 @@ export function UserManagement() {
   };
 
   return (
-    <div className="bg-surface-2 border border-line rounded-xl overflow-hidden transition-all">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden transition-all">
       <div className="p-4 sm:px-5 flex items-center justify-between gap-3 flex-wrap">
         <button
           type="button"

@@ -132,7 +132,7 @@ export function SettingsPanel() {
   const marginInvalid = tab === 'finanzas' && margin < 0;
 
   return (
-    <section className="bg-surface-2 border border-line rounded-xl overflow-hidden">
+    <section className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden">
       <div className="p-4 sm:p-5 border-b border-line flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-accent-dim border border-accent/30 text-accent flex items-center justify-center">

@@ -9,7 +9,7 @@ import {
   parseBankInfo, serializeBankInfo, openWorkerPayrollReportPdf, fmtMoneyClean,
 } from '../lib/payrollPdf';
 import { fmtMoney, PAY_SPLIT, workerEarnedItems, workerEarningsSummary } from '../lib/economics';
-import type { PayrollReportItem, Order } from '../types';
+import type { PayrollReportItem } from '../types';
 import { isAssignedTo } from '../lib/roles';
 
 export function ProfileView() {
@@ -66,7 +66,7 @@ export function ProfileView() {
   if (!worker) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
-        <div className="bg-surface-2 border border-line rounded-xl p-6 text-center text-sm text-muted">
+        <div className="glow-card bg-surface-2 border border-line rounded-xl p-6 text-center text-sm text-muted">
           Cargando tu perfil…
         </div>
       </div>
@@ -90,8 +90,13 @@ export function ProfileView() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-5">
-      <div className="bg-surface-2 border border-line rounded-xl p-6">
+    <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+      <div>
+        <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo</p>
+        <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Mi perfil</h2>
+        <p className="text-sm text-muted mt-1">Tus ganancias, pagos con comprobante y tus datos para recibir la nómina.</p>
+      </div>
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-6">
         <div className="flex items-center gap-5 flex-wrap">
           <div className="w-16 h-16 rounded-2xl bg-accent-dim flex items-center justify-center">
             <span className="font-display text-2xl font-bold text-accent">{worker.name.charAt(0)}</span>
@@ -127,7 +132,7 @@ export function ProfileView() {
       </div>
 
       {/* Mis Pagos, Comprobantes e Informe PDF Automático (Sincronizado con Nóminas Admin) */}
-      <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-mint-dim text-mint flex items-center justify-center">
@@ -217,7 +222,7 @@ export function ProfileView() {
 
       {/* Información personal + Datos Bancarios Detallados (Banco, Número de cuenta, Titular) */}
       {role !== 'admin' && (
-        <div className="bg-surface-2 border border-line rounded-xl p-5 space-y-4">
+        <div className="glow-card bg-surface-2 border border-line rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-display text-base font-semibold flex items-center gap-2">
               <Landmark size={16} className="text-accent" /> Información personal y Cuenta Bancaria
@@ -268,7 +273,7 @@ export function ProfileView() {
         </div>
       )}
 
-      <div className="bg-surface-2 border border-line rounded-xl p-5">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5">
         <h3 className="font-display text-base font-semibold mb-1">Cómo vas</h3>
         <p className="text-xs text-muted mb-4">Total ganado: <strong className="text-text">{fmtMoney(earnings.earnedTotal)}</strong> · Pagado: <strong className="text-mint">{fmtMoney(earnings.paidTotal)}</strong></p>
         <div className="space-y-3">
@@ -293,7 +298,7 @@ export function ProfileView() {
         </div>
       </div>
 
-      <div className="bg-surface-2 border border-line rounded-xl p-5">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5">
         <h3 className="font-display text-base font-semibold mb-4 flex items-center gap-2">
           <BellRing size={16} className="text-accent" /> Notificaciones por correo
         </h3>
@@ -328,7 +333,7 @@ export function ProfileView() {
         </button>
       </div>
 
-      <div className="bg-surface-2 border border-line rounded-xl p-5">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-5">
         <h3 className="font-display text-base font-semibold mb-3">Videos completados · Aprobado Cliente ({completed.length})</h3>
         {completed.length === 0 ? (
           <p className="text-sm text-muted text-center py-4">Aún no hay videos completados</p>
@@ -357,7 +362,7 @@ function MiniStat({ icon: Icon, label, value, color }: { icon: typeof Wallet; la
     violet: 'text-violet bg-violet-dim',
   };
   return (
-    <div className="bg-surface-2 border border-line rounded-xl p-4">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl p-4">
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-2 ${map[color]}`}>
         <Icon size={18} />
       </div>
