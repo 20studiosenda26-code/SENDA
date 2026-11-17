@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import {
   TrendingUp, CheckCircle2, Hourglass, Clapperboard, DollarSign,
   Phone, Mail, Landmark, Globe2, BellRing, FileText, Download, Wallet, Building2, CreditCard, UserCheck,
+  Loader2,
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -27,7 +28,21 @@ export function ProfileView() {
   const [accountHolder, setAccountHolder] = useState('');
   const [accountType, setAccountType] = useState('Ahorros');
   const [emailNotifOn, setEmailNotifOn] = useState(false);
-  const [savedProfileToast, setSavedProfileToast] = useState(false);
+  const [saving, setSaving] = useState<'' | 'datos' | 'correo'>('');
+  const [saveMsg, setSaveMsg] = useState<{ where: 'datos' | 'correo'; ok: boolean; text: string } | null>(null);
+
+  const save = async (where: 'datos' | 'correo', fields: Parameters<typeof updateWorkerProfile>[1]) => {
+    if (!worker) return;
+    if (fields.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email.trim())) {
+      setSaveMsg({ where, ok: false, text: 'Escribe un correo válido.' });
+      return;
+    }
+    setSaving(where);
+    const err = await updateWorkerProfile(worker.id, { ...fields, ...(fields.email !== undefined ? { email: fields.email.trim() } : {}) });
+    setSaving('');
+    setSaveMsg(err ? { where, ok: false, text: `No se guardó: ${err}` } : { where, ok: true, text: 'Guardado' });
+    if (!err) setTimeout(() => setSaveMsg(m => (m?.where === where ? null : m)), 2400);
+  };
 
   useEffect(() => {
     if (worker) {
@@ -84,9 +99,7 @@ export function ProfileView() {
       accountHolder: accountHolder || worker.name,
       accountType: accountType || 'Ahorros',
     });
-    updateWorkerProfile(worker.id, { phone, email, country, bankInfo: serializedBank });
-    setSavedProfileToast(true);
-    setTimeout(() => setSavedProfileToast(false), 2400);
+    void save('datos', { phone, email, country, bankInfo: serializedBank });
   };
 
   return (
@@ -227,9 +240,9 @@ export function ProfileView() {
             <h3 className="font-display text-base font-semibold flex items-center gap-2">
               <Landmark size={16} className="text-accent" /> Información personal y Cuenta Bancaria
             </h3>
-            {savedProfileToast && (
-              <span className="text-xs text-mint flex items-center gap-1">
-                <CheckCircle2 size={13} /> Guardado en Nóminas
+            {saveMsg?.where === 'datos' && (
+              <span className={`text-xs flex items-center gap-1 ${saveMsg.ok ? 'text-mint' : 'text-red-400'}`}>
+                {saveMsg.ok && <CheckCircle2 size={13} />} {saveMsg.ok ? 'Guardado en Nóminas' : saveMsg.text}
               </span>
             )}
           </div>
@@ -325,12 +338,20 @@ export function ProfileView() {
             Recibir notificaciones de Senda al correo
           </button>
         </div>
-        <button
-          onClick={() => updateWorkerProfile(worker.id, { email, emailNotifications: emailNotifOn })}
-          className="mt-3 bg-accent text-on-accent rounded-md px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors"
-        >
-          Guardar preferencia
-        </button>
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => void save('correo', { email, emailNotifications: emailNotifOn })}
+            disabled={saving === 'correo'}
+            className="bg-accent text-on-accent rounded-md px-4 py-2 text-sm font-medium hover:bg-accent-strong transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving === 'correo' && <Loader2 size={14} className="animate-spin" />} Guardar preferencia
+          </button>
+          {saveMsg?.where === 'correo' && (
+            <span className={`text-xs flex items-center gap-1 ${saveMsg.ok ? 'text-mint' : 'text-red-400'}`}>
+              {saveMsg.ok && <CheckCircle2 size={13} />} {saveMsg.text}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="glow-card bg-surface-2 border border-line rounded-xl p-5">
