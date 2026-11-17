@@ -1,4 +1,3 @@
-import { WelcomeAudio } from "./components/WelcomeAudio";
 import { StoreProvider, useStore } from './store';
 import { AuthProvider, useAuth } from './lib/auth';
 import { Rail } from './components/Rail';
@@ -123,7 +122,12 @@ function Shell() {
       case 'capacidad': return user.role === 'admin' ? <CapacityView /> : <HomeView />;
       case 'administracion':
         return (
-          <div className="p-6 max-w-6xl mx-auto space-y-5">
+          <div className="px-6 xl:px-8 py-6 max-w-[1440px] mx-auto space-y-5 animate-fadeIn">
+            <div>
+              <p className="text-[11px] font-tech uppercase tracking-[0.18em] text-accent flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-mint animate-pulse" /> En vivo</p>
+              <h2 className="font-display text-3xl xl:text-4xl font-bold mt-1">Administración</h2>
+              <p className="text-sm text-muted mt-1">Usuarios, equipo, ganancias y ajustes de la plataforma.</p>
+            </div>
             <UserManagement />
             <AdminView />
             <SettingsPanel />

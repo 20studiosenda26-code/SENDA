@@ -11,13 +11,13 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 5 | Calendario (reuniones y capacitaciones) | Admin · Clipper | `CalendarView.tsx` | ⏳ |
 | 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ⏳ |
 | 7 | Contratos | Admin · Clipper | `ContractsView.tsx` | ⏳ |
-| 8 | Perfil | Clipper | `ProfileView.tsx` | 🔶 (ganancias hechas; falta diseño) |
+| 8 | Perfil | Clipper | `ProfileView.tsx` | ✅ diseño + ganancias |
 | 9 | Finanzas | Admin | `FinancesView.tsx` | ✅ diseño + arreglos (fechas locales, fecha real de aprobación, pagos por persona, centavos, PDF seguro, por cobrar) |
 | 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | ✅ diseño, deshacer pago, aviso sin datos bancarios, ciclo en hora local |
 | 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ✅ conectado (cotizador → nuevo pedido, reasignar 1 vez, hora local, rol único) |
-| 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ⏳ |
-| 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ⏳ |
-| 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | ⏳ |
+| 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ✅ diseño unificado |
+| 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ✅ correos reales listos (falta configurar Resend, ver abajo); Contratos visible para admin |
+| 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | 🔶 limpieza hecha; falta revisar en celular |
 
 ## Checklist · Sección 3 (Clientes / Pedidos) — rama `actualizacion-clientes-pedidos`
 - [x] Nuevo pedido: vincular la cuenta del cliente al crearlo (hoy no se vincula y el cliente no ve su pedido).
@@ -29,6 +29,11 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 - [x] Portal (admin y cliente): pedido sin videos aún muestra los N videos "en producción"; no se aprueba mientras se corrige el feedback.
 - [x] Cliente: facturas abren en pestaña nueva; ancho de computador (1440px).
 - [ ] Pendiente para otra etapa: procesar acciones del cliente en el servidor sin admin conectado (requiere Supabase).
+
+## Activar correos reales (una vez)
+1. Crear cuenta en resend.com, verificar el dominio y crear una API key.
+2. Terminal: `supabase secrets set RESEND_API_KEY=... MAIL_FROM="SENDA <notificaciones@tudominio.com>" APP_URL=https://tu-senda.com` y `supabase functions deploy send-email`.
+3. Cada persona activa "Recibir notificaciones al correo" en su Perfil.
 
 ## Pendientes ya detectados (asignar a su sección)
 - **3 · Clientes:** lo que hace el cliente (brief, feedback, aprobar) solo se procesa cuando un admin tiene SENDA abierta → evaluar procesarlo en el servidor (Supabase) o avisar mejor.

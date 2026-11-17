@@ -43,7 +43,7 @@ export function AdminView() {
         <KpiCard icon={Clock} label="En progreso" value={inProgress.length} color="amber" />
       </div>
 
-      <div className="bg-surface-2 border border-line rounded-xl p-4 sm:p-5">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2 mb-3">
           <h3 className="font-display text-base sm:text-lg font-semibold flex items-center gap-2">
             <Wifi size={17} className="text-mint" /> En línea ahora
@@ -84,7 +84,7 @@ export function AdminView() {
         )}
       </div>
 
-      <div className="bg-surface-2 border border-line rounded-xl p-4 sm:p-5 space-y-4">
+      <div className="glow-card bg-surface-2 border border-line rounded-xl p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h3 className="font-display text-lg font-semibold">Equipo y ganancias</h3>
@@ -168,7 +168,7 @@ function KpiCard({ icon: Icon, label, value, color }: { icon: typeof Users; labe
     violet: 'text-violet bg-violet-dim',
   };
   return (
-    <div className="bg-surface-2 border border-line rounded-xl p-4">
+    <div className="glow-card bg-surface-2 border border-line rounded-xl p-4">
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${map[color]}`}>
         <Icon size={20} />
       </div>
