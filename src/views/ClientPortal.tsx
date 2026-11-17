@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { takeNavIntent } from '../lib/navIntent';
 import { useStore } from '../store';
 import type { Brand, Correction, Video } from '../types';
-import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamCandidates, fetchDriveVideoDuration } from '../lib/supabaseClient';
+import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, fetchDriveVideoDuration } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
 import { fmtDate } from '../components/home/home-bits';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { useDriveVideo } from '../lib/useDriveVideo';
 import {
   ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Film, FolderOpen, Lock, Maximize2,
   MessageSquare, Monitor, Play, Plus, Send, Smartphone, Sparkles, Trash2, Unlock, X,
@@ -300,12 +301,9 @@ function VideoReview({
   }, [final?.fileUrl]);
 
   // Drive se intenta reproducir en el reproductor propio (línea de tiempo enlazada); si falla, visor de Google
-  const [driveFallback, setDriveFallback] = useState(false);
-  const [streamIdx, setStreamIdx] = useState(0);
-  useEffect(() => { setStreamIdx(0); setDriveFallback(false); }, [src]);
-  const isDrive = Boolean(src && isGoogleDriveUrl(src) && driveFallback);
-  const candidates = src && isGoogleDriveUrl(src) ? getGoogleDriveStreamCandidates(src) : [];
-  const playSrc = candidates.length ? candidates[streamIdx] || src : src;
+  const drive = useDriveVideo(src);
+  const isDrive = Boolean(src && isGoogleDriveUrl(src) && drive.failed);
+  const playSrc = drive.src;
   const mode = orientation === 'auto' ? (isDrive ? 'horizontal' : detected) : orientation;
   const effectiveTime = pickTime ?? Math.round(time);
   useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
@@ -387,7 +385,7 @@ function VideoReview({
                 <p className="text-sm font-semibold text-text">Este video aún está en producción</p>
                 <p className="text-xs text-muted max-w-md">Aparecerá aquí en cuanto el administrador lo marque como “Aprobado Senda” en Tareas.</p>
               </div>
-            ) : !src ? (
+            ) : !src || drive.loading ? (
               <div className="aspect-video w-full flex items-center justify-center bg-surface-3 text-xs text-muted">Cargando video…</div>
             ) : isDrive ? (
               <iframe
@@ -400,18 +398,14 @@ function VideoReview({
             ) : (
               <video
                 ref={playerRef}
-                key={`${playSrc}-${streamIdx}`}
+                key={`${playSrc}`}
                 src={playSrc || undefined}
-                onError={() => {
-                  if (!src || !isGoogleDriveUrl(src)) return;
-                  if (streamIdx < candidates.length - 1) setStreamIdx(i => i + 1);
-                  else setDriveFallback(true);
-                }}
+                onError={drive.onError}
                 controls
                 playsInline
                 onLoadedMetadata={e => {
                   const el = e.currentTarget;
-                  setDuration(el.duration || 0);
+                  setDuration(Number.isFinite(el.duration) ? el.duration : 0);
                   setDetected(el.videoHeight > el.videoWidth ? 'vertical' : 'horizontal');
                 }}
                 onTimeUpdate={e => setTime(e.currentTarget.currentTime)}
