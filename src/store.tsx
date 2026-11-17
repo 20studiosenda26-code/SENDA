@@ -905,10 +905,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           workerId, to: w.email!, subject: 'Notificación de SENDA', body: text,
           t: new Date().toISOString(),
         }, ...prev]);
-        // Envío real (función de Supabase "send-email"); si no está desplegada, no rompe nada
-        if (isSupabaseConfigured && supabase) {
-          void supabase.functions.invoke('send-email', { body: { workerId, text } }).catch(() => {});
-        }
+      }
+      // Envío real (función "send-email"): el servidor revisa el Perfil actualizado de la
+      // persona (correo + aviso activado), así no depende de datos viejos en esta pestaña.
+      if (isSupabaseConfigured && supabase) {
+        void supabase.functions.invoke('send-email', { body: { workerId, text } }).catch(() => {});
       }
     }
   }, []);
