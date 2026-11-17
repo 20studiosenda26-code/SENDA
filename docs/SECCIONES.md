@@ -7,16 +7,16 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 1 | Inicio | Admin · Clipper · Cliente | `HomeView.tsx`, `AdminHomePanels.tsx`, `ClientArea.tsx` (ClientHome) | ✅ PR #3 #4 |
 | 2 | Tareas + detalle de video | Admin · Clipper | `AdminTasksPanels.tsx`, `TasksView.tsx` | ✅ PR #5 #6 |
 | 3 | Clientes / Pedidos + portal del cliente | Admin (Clientes) · Cliente (Mis proyectos, Revisión de videos) | `ClientsView.tsx`, `ClientArea.tsx` (ClientBriefs), `ClientPortal.tsx`, `lib/clientSync.ts` | ✅ rama actualizacion-clientes-pedidos |
-| 4 | Chat + notificaciones | Admin · Clipper · Cliente | `ChatView.tsx`, `TopBar.tsx` (campana) | ⏳ |
-| 5 | Calendario (reuniones y capacitaciones) | Admin · Clipper | `CalendarView.tsx` | ⏳ |
-| 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ⏳ |
-| 7 | Contratos | Admin · Clipper | `ContractsView.tsx` | ⏳ |
+| 4 | Chat + notificaciones | Admin · Clipper · Cliente | `ChatView.tsx`, `TopBar.tsx` (campana) | ✅ privados también con clientes, aviso por mensaje, errores visibles |
+| 5 | Calendario (reuniones y capacitaciones) | Admin · Clipper | `CalendarView.tsx` | ✅ rediseño, hora y tipo, entregas de pedidos, próximos 15 días, aviso al equipo |
+| 6 | Classroom (capacitaciones) | Admin · Clipper | `ClassroomView.tsx` | ✅ rediseño, progreso del equipo (admin), siguiente clase, aviso de clase nueva |
+| 7 | Contratos | Admin · Clipper | `ContractsView.tsx` | ✅ rediseño, quién falta por firmar, avisos al subir y al firmar |
 | 8 | Perfil | Clipper | `ProfileView.tsx` | ✅ diseño + ganancias |
 | 9 | Finanzas | Admin | `FinancesView.tsx` | ✅ diseño + arreglos (fechas locales, fecha real de aprobación, pagos por persona, centavos, PDF seguro, por cobrar) |
 | 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | ✅ diseño, deshacer pago, aviso sin datos bancarios, ciclo en hora local |
 | 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ✅ conectado (cotizador → nuevo pedido, reasignar 1 vez, hora local, rol único) |
 | 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ✅ diseño unificado |
-| 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ✅ correos reales listos (falta configurar Resend, ver abajo); Contratos visible para admin |
+| 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ✅ correos reales funcionando (función `smooth-task`; sin dominio propio solo llegan al correo dueño de Resend) |
 | 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | 🔶 limpieza hecha; falta revisar en celular |
 
 ## Checklist · Sección 3 (Clientes / Pedidos) — rama `actualizacion-clientes-pedidos`

@@ -129,6 +129,8 @@ export interface CalendarEvent {
   year: number;
   label: string;
   color: string;
+  /** Hora local HH:MM (opcional) */
+  time?: string;
   link?: string;
   note?: string;
 }

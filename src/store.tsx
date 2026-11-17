@@ -311,6 +311,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [classroomModules, setClassroomModules] = useState<ClassroomModule[]>(() => loadState('classroomModules', CLASSROOM_MODULES));
   const [lessonCompletions, setLessonCompletions] = useState<Record<string, string[]>>(() => loadState('lessonCompletions', {} as Record<string, string[]>));
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const contractsRef = useRef<Contract[]>([]);
+  useEffect(() => { contractsRef.current = contracts; }, [contracts]);
   const [contractSignedUploads, setContractSignedUploads] = useState<ContractSignedUpload[]>([]);
   const [chatGroups, setChatGroups] = useState<ChatGroup[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
@@ -1451,7 +1453,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addCalendarEvent = useCallback((e: Omit<CalendarEvent, 'id'>) => {
     setCalendarEvents(prev => [...prev, { ...e, id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }]);
-  }, []);
+    // Avisa a todo el equipo (campana + correo si lo tienen activado)
+    const when = new Date(e.year, e.month, e.day).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+    const text = `Nuevo en el calendario: "${e.label}" · ${when}${e.time ? ` a las ${e.time}` : ''}`;
+    workersRef.current.forEach(w => pushNotification('clipper', 'mensaje', text, w.id));
+  }, [pushNotification]);
 
   const updateCalendarEvent = useCallback((id: string, patch: Partial<Omit<CalendarEvent, 'id'>>) => {
     setCalendarEvents(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
@@ -1483,7 +1489,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void supabase.from('contracts').insert({
       title, role, worker_id: workerId, file_name: fileName, file_url: fileUrl, uploaded_by: user?.id || null,
     }).then(() => loadContracts());
-  }, [user, loadContracts]);
+    const targets = workerId ? [workerId] : workersRef.current.map(w => w.id);
+    targets.forEach(id => pushNotification('clipper', 'mensaje', `Tienes un contrato nuevo para firmar: "${title}". Descárgalo en Contratos y sube la versión firmada.`, id));
+  }, [user, loadContracts, pushNotification]);
 
   const deleteContract = useCallback((contractId: string) => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -1495,7 +1503,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void supabase.from('contract_signed_uploads').upsert({
       contract_id: contractId, worker_id: user.id, file_name: fileName, file_url: fileUrl, uploaded_at: new Date().toISOString(),
     }, { onConflict: 'contract_id,worker_id' }).then(() => loadContracts());
-  }, [user, loadContracts]);
+    const who = workersRef.current.find(w => w.id === user.id)?.name || 'Una persona del equipo';
+    const c = contractsRef.current.find(x => x.id === contractId);
+    pushNotification('admin', 'sistema', `${who} subió su contrato firmado${c ? `: "${c.title}"` : ''}`);
+  }, [user, loadContracts, pushNotification]);
 
   const createChatGroup = useCallback(async (name: string, memberIds: string[]) => {
     if (!isSupabaseConfigured || !supabase || !user) return;
@@ -1512,7 +1523,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       group_id: groupId, sender_id: user.id, text, file_name: fileName || null, file_url: fileUrl || null,
     });
     void loadChat();
-  }, [user, loadChat]);
+    // Aviso a quienes reciben (equipo: campana + correo; admin: campana)
+    const g = chatGroups.find(x => x.id === groupId);
+    const sender = user.name || 'Alguien';
+    const preview = text ? (text.length > 80 ? `${text.slice(0, 80)}…` : text) : 'te envió un archivo';
+    const where = g && !g.isDm ? ` en "${g.name}"` : '';
+    (g?.memberIds || []).filter(id => id !== user.id).forEach(id => {
+      if (workersRef.current.some(w => w.id === id)) pushNotification('clipper', 'mensaje', `Mensaje de ${sender}${where}: ${preview}`, id);
+    });
+    if (role !== 'admin') pushNotification('admin', 'mensaje', `Mensaje de ${sender}${where}: ${preview}`);
+  }, [user, loadChat, chatGroups, pushNotification, role]);
 
   const ensureOwnAdminDm = useCallback(async (): Promise<string | null> => {
     if (!isSupabaseConfigured || !supabase || !user) return null;
@@ -1524,9 +1544,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured || !supabase || !user) return null;
     const existing = chatGroups.find(g => g.isDm && g.memberIds.includes(workerId));
     if (existing) return existing.id;
-    const targetWorker = workersRef.current.find(w => w.id === workerId);
+    const targetName = workersRef.current.find(w => w.id === workerId)?.name
+      || clientProfiles.find(c => c.id === workerId)?.name || 'Usuario';
     const { data: newGroup } = await supabase.from('chat_groups').insert({
-      name: `Admin · ${targetWorker?.name || 'Usuario'}`, is_dm: true, created_by: user.id,
+      name: `Admin · ${targetName}`, is_dm: true, created_by: user.id,
     }).select('id').single();
     if (!newGroup) return null;
     await supabase.from('chat_group_members').upsert([
@@ -1535,7 +1556,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ]);
     void loadChat();
     return newGroup.id as string;
-  }, [user, chatGroups, loadChat]);
+  }, [user, chatGroups, loadChat, clientProfiles]);
 
   const deleteChatGroup = useCallback(async (groupId: string) => {
     if (!isSupabaseConfigured || !supabase || !user || role !== 'admin') return;
@@ -1560,7 +1581,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...m,
       lessons: [...m.lessons, { id: `lesson-${Date.now()}`, title, videoUrl: videoUrl || null, fileName: fileName || null }],
     } : m));
-  }, []);
+    // Avisa al equipo de la clase nueva
+    workersRef.current.forEach(w => pushNotification('clipper', 'mensaje', `Nueva clase en Classroom: "${title}"`, w.id));
+  }, [pushNotification]);
 
   const deleteClassroomLesson = useCallback((moduleId: string, lessonId: string) => {
     setClassroomModules(prev => prev.map(m => m.id === moduleId ? {
