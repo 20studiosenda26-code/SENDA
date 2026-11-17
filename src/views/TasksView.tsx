@@ -6,7 +6,6 @@ import {
   downloadMediaFile,
   isGoogleDriveUrl,
   getGoogleDrivePreviewUrl,
-  getGoogleDriveStreamCandidates,
   getGoogleDriveBridgeUrl,
   setGoogleDriveBridgeUrl,
   getGoogleDriveFolderUrl,
@@ -22,6 +21,7 @@ import {
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
 import { DriveFolderField } from '../components/DriveFolderField';
@@ -313,8 +313,6 @@ function VideoDetail({
   const [mediaTime, setMediaTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
   // Drive se reproduce en el reproductor propio; si Google lo bloquea, se usa su visor (sin control de tiempo)
-  const [driveFallback, setDriveFallback] = useState(false);
-  const [streamIdx, setStreamIdx] = useState(0);
   const seekTo = (t: number) => {
     const el = playerRef.current;
     if (el) { el.currentTime = t; el.pause(); }
@@ -348,12 +346,12 @@ function VideoDetail({
   const [resolvedClipUrl, setResolvedClipUrl] = useState<string | null>(null);
   const [loadingClipMedia, setLoadingClipMedia] = useState(false);
   const [resolvedMainImgUrl, setResolvedMainImgUrl] = useState<string | null>(null);
+  // Videos de Drive: se descargan una vez y se reproducen desde SENDA (línea de tiempo siempre enlazada)
+  const drive = useDriveVideo(activeMedia && !isImageFile(activeMedia.fileName) ? resolvedClipUrl : null);
 
   useEffect(() => {
     let cancelled = false;
     const raw = activeMedia?.fileUrl || null;
-    setDriveFallback(false);
-    setStreamIdx(0);
     if (!raw) {
       setResolvedClipUrl(null);
       setLoadingClipMedia(false);
@@ -620,13 +618,13 @@ function VideoDetail({
             </div>
           )}
           <div className="relative w-full min-h-[520px] max-h-[640px] bg-surface-3 border border-line rounded-xl flex items-center justify-center overflow-hidden mx-auto">
-            {loadingClipMedia ? (
+            {loadingClipMedia || drive.loading ? (
               <div className="text-center p-6 space-y-2">
                 <Loader2 size={32} className="text-accent animate-spin mx-auto" />
                 <p className="text-xs text-muted">Cargando archivo en alta calidad...</p>
               </div>
             ) : activeMedia?.fileUrl && resolvedClipUrl ? (
-              isGoogleDriveUrl(resolvedClipUrl) && driveFallback ? (
+              isGoogleDriveUrl(resolvedClipUrl) && drive.failed && !isImageFile(activeMedia.fileName) ? (
                 <iframe
                   key={`gdrive-${activeMedia.id}-${resolvedClipUrl}`}
                   src={getGoogleDrivePreviewUrl(resolvedClipUrl) || resolvedClipUrl}
@@ -639,21 +637,16 @@ function VideoDetail({
                 <img src={resolvedClipUrl} alt={activeMedia.name} className="w-full h-[560px] object-contain animate-fadeIn" />
               ) : (
                 <video
-                  key={`${activeMedia.id}-${resolvedClipUrl}-${streamIdx}`}
+                  key={`${activeMedia.id}-${drive.src}`}
                   ref={playerRef}
-                  src={isGoogleDriveUrl(resolvedClipUrl) ? getGoogleDriveStreamCandidates(resolvedClipUrl)[streamIdx] || resolvedClipUrl : resolvedClipUrl}
-                  onError={() => {
-                    if (!isGoogleDriveUrl(resolvedClipUrl)) return;
-                    // Prueba la siguiente ruta; el visor de Google es el último recurso
-                    if (streamIdx < getGoogleDriveStreamCandidates(resolvedClipUrl).length - 1) setStreamIdx(i => i + 1);
-                    else setDriveFallback(true);
-                  }}
+                  src={drive.src || undefined}
+                  onError={drive.onError}
                   controls
                   autoPlay={Boolean(playing)}
                   playsInline
                   onLoadedMetadata={e => {
-                    const d = e.currentTarget.duration || 0;
-                    setMediaDuration(d);
+                    const d = e.currentTarget.duration;
+                    setMediaDuration(Number.isFinite(d) ? d : 0);
                     setMediaTime(0);
                     // Se guarda sola la duración real del video final (la usan admin y cliente)
                     if (activeFinal && d > 0 && Number.isFinite(d)) setVideoDuration(video.id, d);
@@ -685,7 +678,7 @@ function VideoDetail({
               canResolve={!isAdmin}
               duration={mediaDuration || (video.durationKnown ? video.durationSeconds : 0) || Math.max(60, ...video.corrections.map(c => c.time + 5))}
               currentTime={mediaTime}
-              canReadPlayerTime={Boolean(resolvedClipUrl && !(isGoogleDriveUrl(resolvedClipUrl) && driveFallback))}
+              canReadPlayerTime={Boolean(resolvedClipUrl && !(isGoogleDriveUrl(resolvedClipUrl) && drive.failed))}
               onSeek={seekTo}
             />
           )}
