@@ -471,7 +471,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    const unsub = subscribeToTable("platform_kv", (changedKey?: string) => {
+    const handleShared = (changedKey?: string) => {
       void (async () => {
         // Si lo que cambió fue el latido de presencia online, solo actualizamos presencia y NO tocamos pedidos ni tareas
         if (changedKey === "online_heartbeats") {
@@ -573,9 +573,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setTimeout(() => { applyingRemoteRef.current = false; }, 80);
         }
       })();
-    });
-    return unsub;
-  }, [refreshOnlineHeartbeats]);
+    };
+    const unsub = subscribeToTable("platform_kv", handleShared);
+    // Respaldo del tiempo real: si un aviso se pierde, cada 15 s (pestaña visible) y al volver a la pestaña se sincroniza
+    const resync = () => { if (document.visibilityState === 'visible') handleShared(); };
+    const iv = setInterval(resync, 15000);
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', resync);
+    return () => {
+      unsub();
+      clearInterval(iv);
+      window.removeEventListener('focus', resync);
+      document.removeEventListener('visibilitychange', resync);
+    };
+    // Se vuelve a suscribir al iniciar sesión: antes de entrar la base no envía los cambios
+  }, [refreshOnlineHeartbeats, user?.id]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -832,7 +844,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsub1 = subscribeToTable('chat_groups', () => { void loadChat(); });
     const unsub2 = subscribeToTable('chat_group_members', () => { void loadChat(); });
     const unsub3 = subscribeToTable('chat_messages', () => { void loadChat(); });
-    return () => { unsub1(); unsub2(); unsub3(); };
+    const chatIv = setInterval(() => { if (document.visibilityState === 'visible') void loadChat(); }, 10000);
+    return () => { unsub1(); unsub2(); unsub3(); clearInterval(chatIv); };
   }, [loadChat, user]);
 
   // Al iniciar sesión se trae la configuración de Drive del admin (clave de API, carpeta)
@@ -2168,7 +2181,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsub = subscribeToTable('platform_kv', (changedKey?: string) => {
       if (!changedKey || changedKey === clientViewKey(uid) || changedKey === clientAckKey(uid) || changedKey === CLIENT_CATALOG_KEY) void load();
     });
-    return () => { active = false; unsub(); };
+    // Respaldo del tiempo real para el cliente
+    const clientIv = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 15000);
+    return () => { active = false; unsub(); clearInterval(clientIv); };
   }, [isClient, user?.id]);
 
   const enqueueClientAction = useCallback((action: ClientAction) => {
