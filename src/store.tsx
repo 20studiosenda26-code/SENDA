@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
@@ -834,6 +834,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const unsub3 = subscribeToTable('chat_messages', () => { void loadChat(); });
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [loadChat, user]);
+
+  // Al iniciar sesión se trae la configuración de Drive del admin (clave de API, carpeta)
+  const [, setDriveSynced] = useState(0);
+  useEffect(() => {
+    if (!user?.id) return;
+    void syncGdriveConfig().then(() => setDriveSynced(n => n + 1));
+  }, [user?.id]);
 
   // Cliente y equipo: su conversación con el admin se crea sola en la base (función ensure_my_admin_dm)
   const ownDmTriedRef = useRef(false);
