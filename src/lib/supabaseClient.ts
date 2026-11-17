@@ -70,24 +70,25 @@ export function setGoogleDriveFolderUrl(url: string): void {
   saveGdriveConfig();
 }
 
-// Sincronizar configuración de Google Drive guardada por el Admin para que todos los Clippers y Editores la usen automáticamente
-if (supabase && typeof window !== "undefined") {
-  void (async () => {
-    try {
-      const { data } = await supabase
-        .from("platform_kv")
-        .select("value")
-        .eq("key", "gdrive_config")
-        .maybeSingle();
-      const val = data?.value as { bridgeUrl?: string; folderUrl?: string; apiKey?: string } | undefined;
-      if (val?.bridgeUrl) window.localStorage.setItem(GDRIVE_BRIDGE_STORAGE_KEY, val.bridgeUrl);
-      if (val?.folderUrl) window.localStorage.setItem(GDRIVE_FOLDER_STORAGE_KEY, val.folderUrl);
-      if (val?.apiKey) window.localStorage.setItem(GDRIVE_APIKEY_STORAGE_KEY, val.apiKey);
-    } catch {
-      // Ignorar
-    }
-  })();
+// Sincronizar configuración de Google Drive guardada por el Admin para que todos los Clippers la usen automáticamente.
+// Se llama al cargar y otra vez al iniciar sesión (antes de iniciar sesión la base no deja leerla).
+export async function syncGdriveConfig(): Promise<void> {
+  if (!supabase || typeof window === "undefined") return;
+  try {
+    const { data } = await supabase
+      .from("platform_kv")
+      .select("value")
+      .eq("key", "gdrive_config")
+      .maybeSingle();
+    const val = data?.value as { bridgeUrl?: string; folderUrl?: string; apiKey?: string } | undefined;
+    if (val?.bridgeUrl) window.localStorage.setItem(GDRIVE_BRIDGE_STORAGE_KEY, val.bridgeUrl);
+    if (val?.folderUrl) window.localStorage.setItem(GDRIVE_FOLDER_STORAGE_KEY, val.folderUrl);
+    if (val?.apiKey) window.localStorage.setItem(GDRIVE_APIKEY_STORAGE_KEY, val.apiKey);
+  } catch {
+    // Ignorar
+  }
 }
+void syncGdriveConfig();
 
 // Extrae el ID de archivo de cualquier enlace de Google Drive
 export function extractGoogleDriveId(url?: string | null): string | null {
