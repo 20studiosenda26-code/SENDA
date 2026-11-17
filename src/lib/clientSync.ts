@@ -68,6 +68,7 @@ function sanitizeVideo(v: Video): Video {
     editorQc: 'pendiente',
     duration: v.duration,
     durationSeconds: v.durationSeconds,
+    durationKnown: v.durationKnown,
     tierSnapshot: null,
     date: v.date,
     clips: [],

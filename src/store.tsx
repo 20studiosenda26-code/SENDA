@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
@@ -197,6 +197,8 @@ interface Store {
   enableExtraClientFeedbackRound: (videoId: string) => void;
   uploadBrief: (videoId: string, fileName: string, fileUrl: string) => void;
   addFinalVideo: (videoId: string, name: string, note: string, fileName?: string, fileUrl?: string) => void;
+  /** Guarda la duración real del video final (se calcula sola al reproducirlo o desde Drive) */
+  setVideoDuration: (videoId: string, seconds: number) => void;
   uploadMainImage: (videoId: string, fileName: string, fileUrl: string) => void;
   setMainImageStatus: (videoId: string, status: MainImageStatus, comment: string) => void;
   sendVideo: (videoId: string) => void;
@@ -316,6 +318,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [contractSignedUploads, setContractSignedUploads] = useState<ContractSignedUpload[]>([]);
   const [chatGroups, setChatGroups] = useState<ChatGroup[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatLoaded, setChatLoaded] = useState(false);
   const [adminProfiles, setAdminProfiles] = useState<AdminProfile[]>([]);
   const [notificationsArchive, setNotificationsArchive] = useState<NotificationItem[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadState('orders', INITIAL_ORDERS));
@@ -814,6 +817,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         createdBy: (g.created_by as string) || null, createdAt: g.created_at as string,
         memberIds: byGroup[g.id as string] || [],
       })));
+      setChatLoaded(true);
     }
     const { data: msgs } = await supabase.from('chat_messages').select('*, profiles(name)').order('created_at', { ascending: true });
     if (msgs) {
@@ -1283,6 +1287,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         : { id: `final-${Date.now()}`, name, note, fileName: fileName || null, fileUrl: fileUrl || null, status: 'pending', version: 1, previousVersions: [] };
       return {
         ...v,
+        // Video nuevo: la duración se vuelve a calcular
+        durationKnown: false,
         // Subir o reemplazar el final lo pone en revisión (también tras correcciones)
         qc: v.qc === 'pendiente' || v.qc === 'sin_iniciar' || v.qc === 'correcciones' ? 'revision' : v.qc,
         finalVideos: [nextFinal],
@@ -1294,6 +1300,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         : `${prev.clipperName} subió el video final de "${prev.name}" para revisión`);
     }
   }, [updateVideo, findVideo, pushNotification]);
+
+  const setVideoDuration = useCallback((videoId: string, seconds: number) => {
+    const secs = Math.round(seconds);
+    if (!(secs > 0)) return;
+    const v = findVideo(videoId);
+    if (!v || (v.durationKnown && v.durationSeconds === secs)) return;
+    updateVideo(videoId, x => ({
+      ...x, durationSeconds: secs, durationKnown: true,
+      duration: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`,
+    }));
+  }, [findVideo, updateVideo]);
+
+  // Si el final es de Drive y hay clave de API, la duración se lee sola desde Drive
+  const durationTriedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (role !== 'admin') return; // solo el admin escribe en los datos compartidos
+    brands.forEach(b => b.videos.forEach(v => {
+      const f = v.finalVideos[v.finalVideos.length - 1];
+      const key = `${v.id}|${f?.fileUrl || ''}`;
+      if (!v.durationKnown && f?.fileUrl && isGoogleDriveUrl(f.fileUrl) && !durationTriedRef.current.has(key)) {
+        durationTriedRef.current.add(key);
+        void fetchDriveVideoDuration(f.fileUrl).then(secs => { if (secs) setVideoDuration(v.id, secs); });
+      }
+    }));
+  }, [brands, role, setVideoDuration]);
 
   const uploadMainImage = useCallback((videoId: string, fileName: string, fileUrl: string) => {
     updateVideo(videoId, v => ({
@@ -1568,6 +1599,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void loadChat();
     return newGroup.id as string;
   }, [user, chatGroups, loadChat, clientProfiles]);
+
+  // Cada cliente tiene desde el inicio su conversación con el admin (no hay que crearla a mano)
+  const dmCreatedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (role !== 'admin' || !chatLoaded || clientProfiles.length === 0) return;
+    const missing = clientProfiles.filter(c =>
+      !dmCreatedRef.current.has(c.id) && !chatGroups.some(g => g.isDm && g.memberIds.includes(c.id)));
+    if (missing.length === 0) return;
+    missing.forEach(c => dmCreatedRef.current.add(c.id));
+    void (async () => { for (const c of missing) await startAdminDm(c.id); })();
+  }, [role, chatLoaded, clientProfiles, chatGroups, startAdminDm]);
 
   const deleteChatGroup = useCallback(async (groupId: string) => {
     if (!isSupabaseConfigured || !supabase || !user || role !== 'admin') return;
@@ -2266,6 +2308,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     uploadMainImage, setMainImageStatus, sendVideo,
     sendChat, closeDay, toggleDayClosed, updateWorkerPointsAndGoals, getWorkerGoals,
     togglePaid50, approveFinal, toggleOnline,
+    setVideoDuration,
     calendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent, updateWorkerProfile,
     classroomModules, addClassroomModule, deleteClassroomModule, addClassroomLesson, deleteClassroomLesson,
     lessonCompletions, markLessonComplete,

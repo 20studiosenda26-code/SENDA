@@ -278,6 +278,7 @@ function VideoDetail({
   onAddFinalVideo: (id: string, name: string, note: string, fileName?: string, fileUrl?: string) => void; onUploadMainImage: (id: string, fileName: string, fileUrl: string) => void;
   onSetMainImageStatus: (id: string, status: MainImageStatus, comment: string) => void; onSendVideo: (id: string) => void; role: string;
 }) {
+  const { setVideoDuration } = useStore();
   const [showClipForm, setShowClipForm] = useState(false);
   const [showFinalForm, setShowFinalForm] = useState(false);
   const [clipName, setClipName] = useState('');
@@ -643,7 +644,13 @@ function VideoDetail({
                   controls
                   autoPlay={Boolean(playing)}
                   playsInline
-                  onLoadedMetadata={e => { setMediaDuration(e.currentTarget.duration || 0); setMediaTime(0); }}
+                  onLoadedMetadata={e => {
+                    const d = e.currentTarget.duration || 0;
+                    setMediaDuration(d);
+                    setMediaTime(0);
+                    // Se guarda sola la duración real del video final (la usan admin y cliente)
+                    if (activeFinal && d > 0 && Number.isFinite(d)) setVideoDuration(video.id, d);
+                  }}
                   onTimeUpdate={e => setMediaTime(e.currentTarget.currentTime)}
                   className="w-full h-[560px] object-contain bg-black animate-fadeIn"
                 />
@@ -669,7 +676,7 @@ function VideoDetail({
               final={activeFinal}
               isAdmin={isAdmin}
               canResolve={!isAdmin}
-              duration={mediaDuration || video.durationSeconds || 60}
+              duration={mediaDuration || (video.durationKnown ? video.durationSeconds : 0) || Math.max(60, ...video.corrections.map(c => c.time + 5))}
               currentTime={mediaTime}
               canReadPlayerTime={Boolean(resolvedClipUrl && !(isGoogleDriveUrl(resolvedClipUrl) && driveFallback))}
               onSeek={seekTo}
@@ -1155,6 +1162,7 @@ function VideoDetail({
                     </div>
                     <p className="text-[10px] text-muted-2">En Drive: clic derecho al video → Compartir → “Cualquier persona con el enlace” → Copiar enlace.</p>
                   </div>
+
 
                   {uploadErrorMsg && (
                     <p className="text-xs text-amber bg-amber-dim/40 border border-amber/40 rounded-md px-3 py-2">{uploadErrorMsg}</p>

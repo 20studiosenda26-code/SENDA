@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { takeNavIntent } from '../lib/navIntent';
 import { useStore } from '../store';
 import type { Brand, Correction, Video } from '../types';
-import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl } from '../lib/supabaseClient';
+import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, getGoogleDriveStreamUrl, fetchDriveVideoDuration } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
+import { fmtDate } from '../components/home/home-bits';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
 import {
   ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Film, FolderOpen, Lock, Maximize2,
@@ -110,7 +111,7 @@ export function ClientPortal() {
           brand={brand}
           videos={videos}
           driveUrl={order?.driveFolderUrl || null}
-          deliveryLabel={order?.deliveryDate ? `${order.deliveryDate}${order.deliveryTime ? ` · ${order.deliveryTime}` : ''}` : null}
+          deliveryLabel={order?.deliveryDate ? fmtDate(order.deliveryDate, order.deliveryTime) : null}
           plannedCount={order?.videoCount || 0}
           filter={filter}
           onFilter={setFilter}
@@ -273,6 +274,17 @@ function VideoReview({
   const [text, setText] = useState('');
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Duración real (automática): reproductor > la guardada por el equipo > Drive (con clave de API)
+  const [driveDur, setDriveDur] = useState(0);
+  useEffect(() => {
+    let off = false;
+    setDriveDur(0);
+    if (final?.fileUrl && isGoogleDriveUrl(final.fileUrl) && !video.durationKnown) {
+      void fetchDriveVideoDuration(final.fileUrl).then(s => { if (!off && s) setDriveDur(s); });
+    }
+    return () => { off = true; };
+  }, [final?.fileUrl, video.durationKnown]);
+  const realDuration = duration || (video.durationKnown ? video.durationSeconds : 0) || driveDur;
 
   const idx = videos.findIndex(v => v.id === video.id);
   const prev = videos.slice(0, idx).reverse().find(isDelivered);
@@ -301,7 +313,8 @@ function VideoReview({
   };
   const addDraft = () => {
     if (!text.trim()) return;
-    const t = parseTime(timeInput) ?? effectiveTime;
+    const raw = parseTime(timeInput) ?? effectiveTime;
+    const t = realDuration ? Math.min(raw, realDuration) : raw;
     setDrafts(d => [...d, { time: t, text: text.trim() }].sort((a, b) => a.time - b.time));
     setText('');
     setPickTime(null);
@@ -407,8 +420,11 @@ function VideoReview({
                   <span className="flex items-center gap-1"><span className="w-1.5 h-3 rounded-full bg-mint" /> Corregido</span>
                 </span>
               </p>
+              {!realDuration ? (
+                <p className="text-xs text-muted">Calculando la duración del video… Mientras tanto, pausa en el momento exacto y escribe el minuto abajo (ej. 0:12).</p>
+              ) : (
               <CorrectionTimeline
-                duration={duration || video.durationSeconds || 60}
+                duration={realDuration}
                 currentTime={time}
                 corrections={markers}
                 pickTime={canSend ? pickTime : null}
@@ -417,6 +433,7 @@ function VideoReview({
                 editable={canSend}
                 markerClass={c => (c.id.startsWith('draft-') ? 'bg-amber' : null)}
               />
+              )}
               {isDrive && canSend && (
                 <p className="text-[10px] text-muted-2">Este video se muestra con el visor de Google Drive: pausa en el momento exacto y escribe el minuto (ej. 0:42).</p>
               )}

@@ -62,6 +62,8 @@ export interface Video {
   editorQc: EditorQcStatus;
   duration: string | null;
   durationSeconds: number;
+  /** true cuando durationSeconds es la duración real del video final (no un valor por defecto) */
+  durationKnown?: boolean;
   tierSnapshot: Tier | null;
   date: string;
   clips: Clip[];

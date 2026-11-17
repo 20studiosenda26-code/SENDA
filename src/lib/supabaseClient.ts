@@ -129,6 +129,22 @@ export function getGoogleDriveStreamUrl(url?: string | null): string | null {
   return `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
 }
 
+/** Duración real (segundos) de un video de Drive usando la clave de API, si está configurada. */
+export async function fetchDriveVideoDuration(url?: string | null): Promise<number | null> {
+  const id = extractGoogleDriveId(url);
+  const apiKey = getGoogleDriveApiKey();
+  if (!id || !apiKey) return null;
+  try {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=videoMediaMetadata(durationMillis)&key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok) return null;
+    const data = await res.json() as { videoMediaMetadata?: { durationMillis?: string } };
+    const ms = Number(data.videoMediaMetadata?.durationMillis);
+    return Number.isFinite(ms) && ms > 0 ? Math.round(ms / 1000) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getGoogleDriveDownloadUrl(url?: string | null): string | null {
   const id = extractGoogleDriveId(url);
   if (!id) return null;

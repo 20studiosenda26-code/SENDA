@@ -62,6 +62,14 @@ export function ChatView() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [chatGroups, isAdmin, user, search]);
 
+  // El cliente entra directo a su conversación con SENDA
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (role !== 'cliente' || autoOpenedRef.current || activeId !== 'notif') return;
+    const dm = myGroups.find(g => g.isDm) || myGroups[0];
+    if (dm) { autoOpenedRef.current = true; setActiveId(dm.id); }
+  }, [role, myGroups, activeId]);
+
   const activeGroup = activeId === 'notif' ? null : chatGroups.find(g => g.id === activeId) || null;
   const activeMessages = useMemo(
     () => (activeGroup ? chatMessages.filter(m => m.groupId === activeGroup.id).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) : []),
@@ -354,7 +362,7 @@ export function ChatView() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-2">
-              {isAdmin ? 'Selecciona una conversación o crea un grupo/privado nuevo' : 'Aún no tienes conversaciones. El admin te agregará a un grupo o te escribirá en privado.'}
+              {isAdmin ? 'Selecciona una conversación o crea un grupo/privado nuevo' : (role === 'cliente' ? 'Tu conversación con el equipo de SENDA aparecerá aquí en cuanto el equipo se conecte.' : 'Aún no tienes conversaciones. El admin te agregará a un grupo o te escribirá en privado.')}
             </div>
           )}
         </div>
