@@ -13,7 +13,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 7 | Contratos | Admin · Clipper | `ContractsView.tsx` | ⏳ |
 | 8 | Perfil | Clipper | `ProfileView.tsx` | 🔶 (ganancias hechas; falta diseño) |
 | 9 | Finanzas | Admin | `FinancesView.tsx` | ✅ diseño + arreglos (fechas locales, fecha real de aprobación, pagos por persona, centavos, PDF seguro, por cobrar) |
-| 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | 🔶 (tramos 50/50 hechos; falta diseño) |
+| 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | ✅ diseño, deshacer pago, aviso sin datos bancarios, ciclo en hora local |
 | 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ✅ conectado (cotizador → nuevo pedido, reasignar 1 vez, hora local, rol único) |
 | 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ⏳ |
 | 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ⏳ |
