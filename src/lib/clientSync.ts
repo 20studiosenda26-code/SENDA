@@ -48,12 +48,31 @@ function sanitizeOrder(o: Order): Order {
   };
 }
 
+/** El enlace de video final que ve el cliente. Única fórmula: la usan la copia del cliente y la verificación del admin. */
+export function clientShownUrl(v: Video): string | null {
+  const approved = v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente';
+  const final = v.finalVideos[v.finalVideos.length - 1];
+  if (!final) return null;
+  // Si el equipo está corrigiendo tras el feedback, el cliente sigue viendo la versión que ya revisó
+  return (approved ? final.fileUrl : final.previousVersions?.[final.previousVersions.length - 1]?.fileUrl || final.fileUrl) ?? null;
+}
+
+/** Huella corta de una copia del cliente: sirve para comprobar que lo guardado es lo que se quiso guardar. */
+export function viewFingerprint(view: ClientView): string {
+  const parts: string[] = [];
+  for (const b of view.brands || []) {
+    for (const v of b.videos || []) {
+      parts.push(`${v.id}|${v.qc}|${v.finalVideos?.[0]?.fileUrl || ''}|${(v.corrections || []).length}|${v.clientFeedbackRoundsUsed ?? 0}`);
+    }
+  }
+  return parts.sort().join('~');
+}
+
 function sanitizeVideo(v: Video): Video {
   const delivered = isDelivered(v);
   const approved = v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente';
   const final = v.finalVideos[v.finalVideos.length - 1];
-  // Si el equipo está corrigiendo tras el feedback, el cliente sigue viendo la versión que ya revisó
-  const shownUrl = approved ? final?.fileUrl : final?.previousVersions?.[final.previousVersions.length - 1]?.fileUrl || final?.fileUrl;
+  const shownUrl = clientShownUrl(v);
   return {
     id: v.id,
     name: v.name,

@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { saveSharedNow, loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
-import { applyClientActions, buildClientView, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
+import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView } from './types';
 
 export interface AdminProfile { id: string; name: string; }
@@ -157,6 +157,8 @@ interface Store {
   workers: Worker[];
   registeredUsersCount: number;
   refreshProfiles: () => Promise<void>;
+  /** Vuelve a copiar al visor de cada cliente lo que se le ha publicado */
+  resyncClientView: () => void;
   notifications: NotificationItem[];
   deleteNotification: (id: string) => void;
   clearNotifications: (role: Role) => void;
@@ -2229,6 +2231,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // --- Lado administrador: publica la copia limpia de cada cliente y procesa sus bandejas ---
   const publishedViewsRef = useRef<Record<string, string>>({});
+  const [publishTick, setPublishTick] = useState(0);
+  /** Vuelve a copiar al cliente todo lo publicado (botón "Sincronizar ahora"). */
+  const resyncClientView = useCallback(() => {
+    publishedViewsRef.current = {};
+    setPublishTick(n => n + 1);
+  }, []);
   useEffect(() => {
     if (role !== 'admin' || !isSupabaseConfigured) return;
     const t = setTimeout(() => {
@@ -2238,11 +2246,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const sig = JSON.stringify({ o: view.orders, b: view.brands });
         if (publishedViewsRef.current[cid] === sig) continue;
         publishedViewsRef.current[cid] = sig;
-        void saveShared(clientViewKey(cid), view);
+        // Se guarda, se vuelve a leer y se compara; si no quedó igual, se reintenta (hasta 3 veces)
+        void (async () => {
+          const want = viewFingerprint(view);
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const ok = await saveSharedNow(clientViewKey(cid), view);
+            await new Promise(r => setTimeout(r, 1200));
+            const remote = await loadShared<ClientView>(clientViewKey(cid));
+            if (ok && remote && viewFingerprint(remote) === want) return;
+          }
+          publishedViewsRef.current[cid] = ''; // no se pudo: se reintenta en el próximo cambio
+        })();
       }
     }, 900);
     return () => clearTimeout(t);
-  }, [role, orders, brands]);
+  }, [role, orders, brands, publishTick]);
 
   const processingInboxRef = useRef<Set<string>>(new Set());
   const processClientInbox = useCallback(async (clientId: string) => {
@@ -2319,7 +2337,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const store: Store = {
     role, theme, toggleTheme, view, setView,
-    brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles,
+    brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles, resyncClientView,
     notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,
