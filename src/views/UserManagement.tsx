@@ -120,6 +120,13 @@ export function UserManagement() {
     let partial = false;
     if (error && /admin_delete_user|function|schema cache/i.test(error.message)) {
       // Sin la función de Supabase: se borra el perfil (desaparece de SENDA y ya no puede usar la plataforma)
+      // Primero se sueltan sus referencias (chats, mensajes y contratos) para que la base permita borrarlo
+      await supabase.from('chat_messages').delete().eq('sender_id', target.id);
+      await supabase.from('chat_groups').delete().eq('created_by', target.id).eq('is_dm', true);
+      if (currentUser?.id) {
+        await supabase.from('chat_groups').update({ created_by: currentUser.id }).eq('created_by', target.id);
+        await supabase.from('contracts').update({ uploaded_by: currentUser.id }).eq('uploaded_by', target.id);
+      }
       const { data, error: delErr } = await supabase.from('profiles').delete().eq('id', target.id).select('id');
       if (!delErr && data && data.length > 0) { error = null; partial = true; }
       else error = delErr || { message: 'no tienes permiso para borrar este usuario' } as typeof error;
