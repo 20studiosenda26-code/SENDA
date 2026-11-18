@@ -21,6 +21,7 @@ import {
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { TimeField } from '../components/TimeField';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
@@ -1602,7 +1603,6 @@ function FinalReviewPanel({
 }) {
   const { setFinalVideoStatus, addCorrection, toggleCorrectionResolved, deleteCorrection } = useStore();
   const [pickTime, setPickTime] = useState<number | null>(null);
-  const [timeInput, setTimeInput] = useState('');
   const [corrText, setCorrText] = useState('');
   const [justAdded, setJustAdded] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
@@ -1617,13 +1617,12 @@ function FinalReviewPanel({
   const pending = corrections.filter(c => !c.resolved).length;
   const effectiveTime = pickTime ?? Math.round(currentTime);
 
-  useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
   useEffect(() => { setPickTime(null); }, [final.id]);
 
   const submitCorrection = () => {
     const text = corrText.trim();
     if (!text) return;
-    const t = parseTime(timeInput) ?? effectiveTime;
+    const t = effectiveTime;
     addCorrection(video.id, t, text, final.id);
     setCorrText('');
     setPickTime(null);
@@ -1723,15 +1722,11 @@ function FinalReviewPanel({
 
         {isAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1 bg-surface-2 border border-line rounded-lg pl-2 focus-within:border-amber transition-colors">
-              <Clock size={12} className="text-amber" />
-              <input
-                value={timeInput}
-                onChange={e => { setTimeInput(e.target.value); const t = parseTime(e.target.value); if (t !== null) setPickTime(t); }}
-                className="w-14 bg-transparent py-2 text-xs font-tech font-bold text-amber outline-none"
-                title="Minuto:segundo de la corrección"
-              />
-            </div>
+            <TimeField
+              value={effectiveTime}
+              max={duration}
+              onChange={t => { setPickTime(t); onSeek(t); }}
+            />
             {canReadPlayerTime && (
               <button
                 type="button"
