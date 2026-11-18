@@ -116,19 +116,23 @@ export function UserManagement() {
     setDeleting(true);
     setDeleteMsg(null);
     const target = toDelete;
-    const { error } = await supabase.rpc('admin_delete_user', { target: target.id });
+    let { error } = await supabase.rpc('admin_delete_user', { target: target.id });
+    let partial = false;
+    if (error && /admin_delete_user|function|schema cache/i.test(error.message)) {
+      // Sin la función de Supabase: se borra el perfil (desaparece de SENDA y ya no puede usar la plataforma)
+      const { data, error: delErr } = await supabase.from('profiles').delete().eq('id', target.id).select('id');
+      if (!delErr && data && data.length > 0) { error = null; partial = true; }
+      else error = delErr || { message: 'no tienes permiso para borrar este usuario' } as typeof error;
+    }
     if (error) {
-      const missing = /admin_delete_user|function|schema cache/i.test(error.message);
-      setDeleteMsg({ ok: false, text: missing
-        ? 'Falta activar el borrado en Supabase: ejecuta el archivo 0007_admin_delete_user.sql en el editor SQL y vuelve a intentarlo.'
-        : `No se pudo borrar: ${error.message}` });
+      setDeleteMsg({ ok: false, text: `No se pudo borrar: ${error.message}` });
       setDeleting(false);
       return;
     }
     if (target.role !== 'cliente' && target.role !== 'admin') await releaseWorkerWork(target.id);
     await refreshProfiles();
     setUsers(prev => prev.filter(x => x.id !== target.id));
-    setDeleteMsg({ ok: true, text: `"${target.name}" fue borrado.${target.role !== 'cliente' && target.role !== 'admin' ? ' Sus videos sin terminar quedaron sin asignar.' : ''}` });
+    setDeleteMsg({ ok: true, text: `"${target.name}" fue borrado${partial ? ' de SENDA' : ''}.${target.role !== 'cliente' && target.role !== 'admin' ? ' Sus videos sin terminar quedaron sin asignar.' : ''}` });
     setToDelete(null);
     setDeleting(false);
     setTimeout(() => setDeleteMsg(null), 6000);
