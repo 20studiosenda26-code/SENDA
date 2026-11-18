@@ -20,10 +20,11 @@ import {
 } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
-import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { CorrectionTimeline, fmtTime } from '../components/CorrectionTimeline';
 import { TimeField } from '../components/TimeField';
 import { MediaIdentity } from '../components/MediaIdentity';
 import { ClientMirror } from '../components/ClientMirror';
+import { findAvatar } from '../lib/avatarGallery';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
@@ -1282,7 +1283,7 @@ function VideoDetail({
                 const sc = order?.scriptsService ? (order.scripts || [])[idx] : undefined;
                 const ch = sc ? (order?.scriptChoices || []).find(c => c.scriptId === sc.id) : undefined;
                 const avatarId = sc ? ch?.avatarId : order?.avatarId;
-                const av = avatarId ? clientCatalog.avatars.find(a => a.id === avatarId) : null;
+                const av = findAvatar(avatarId, clientCatalog.avatars, sc ? ch?.avatarImageUrl : order?.avatarImageUrl, sc ? ch?.avatarName : order?.avatarName);
                 const customText = sc ? ch?.avatarCustomText : order?.avatarCustomText;
                 const refUrl = sc ? ch?.avatarRefUrl : order?.avatarRefUrl;
                 const avName = sc ? ch?.avatarName : order?.avatarName;
@@ -1298,7 +1299,7 @@ function VideoDetail({
                     )}
                     <div className="bg-surface-3 border border-line rounded-lg p-2.5 flex gap-2.5">
                       {(av?.imageUrl || refUrl) && (
-                        <a href={av?.imageUrl || refUrl || '#'} target="_blank" rel="noreferrer" className="w-12 aspect-[9/16] rounded-md overflow-hidden border border-line shrink-0 bg-surface-2">
+                        <a href={av?.imageUrl || refUrl || '#'} target="_blank" rel="noreferrer" className="w-14 aspect-[3/4] rounded-md overflow-hidden border border-line shrink-0 bg-surface-2">
                           <img src={av?.imageUrl || refUrl || ''} alt="Avatar" className="w-full h-full object-cover" />
                         </a>
                       )}

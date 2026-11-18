@@ -32,7 +32,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
 
   // Elección única (proyecto sin guiones)
   const [single, setSingle] = useState<Choice>({
-    avatar: { avatarId: order.avatarId ?? null, avatarName: order.avatarName ?? null, customText: order.avatarCustomText ?? null, refUrl: order.avatarRefUrl ?? null },
+    avatar: { avatarId: order.avatarId ?? null, avatarName: order.avatarName ?? null, imageUrl: order.avatarImageUrl ?? null, customText: order.avatarCustomText ?? null, refUrl: order.avatarRefUrl ?? null },
     style: { styleId: order.editingStyleId ?? null, styleName: order.editingStyleName ?? null },
   });
   // Elección por guión/video
@@ -40,7 +40,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
     const m: Record<string, Choice> = {};
     for (const c of order.scriptChoices || []) {
       m[c.scriptId] = {
-        avatar: { avatarId: c.avatarId ?? null, avatarName: c.avatarName ?? null, customText: c.avatarCustomText ?? null, refUrl: c.avatarRefUrl ?? null },
+        avatar: { avatarId: c.avatarId ?? null, avatarName: c.avatarName ?? null, imageUrl: c.avatarImageUrl ?? null, customText: c.avatarCustomText ?? null, refUrl: c.avatarRefUrl ?? null },
         style: { styleId: c.styleId ?? null, styleName: c.styleName ?? null },
       };
     }
@@ -81,7 +81,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       const choices: ScriptChoice[] = scripts.map(s => {
         const c = choiceOf(s.id);
         return {
-          scriptId: s.id, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null,
+          scriptId: s.id, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
           avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
           styleId: c.style.styleId ?? null, styleName: c.style.styleName ?? null,
         };
@@ -92,6 +92,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       ...base,
       avatarId: single.avatar.avatarId ?? null,
       avatarName: single.avatar.avatarName || single.avatar.customText || null,
+      avatarImageUrl: single.avatar.imageUrl ?? null,
       avatarCustomText: single.avatar.customText ?? null,
       avatarRefUrl: single.avatar.refUrl ?? null,
       editingStyleId: single.style.styleId ?? null,

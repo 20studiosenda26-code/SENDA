@@ -18,7 +18,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ✅ diseño unificado |
 | 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ✅ correos reales funcionando (función `smooth-task`; sin dominio propio solo llegan al correo dueño de Resend) |
 | 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | 🔶 limpieza hecha; falta revisar en celular |
-| 15 | Brief, galería de avatares, estilos por categoría y servicio de guiones | Admin · Cliente · Clipper | `components/brief/*`, `lib/pdfTemplate.ts`, `ClientCatalogEditor.tsx`, `ClientsView.tsx` (OrderCard) | ✅ brief en PDF con plantilla SENDA, admin entra como cliente; pendiente: subir las imágenes 9:16 de la galería y migrar otros PDFs (factura, nómina) a la plantilla |
+| 15 | Brief, galería de avatares, estilos por categoría y servicio de guiones | Admin · Cliente · Clipper | `components/brief/*`, `lib/pdfTemplate.ts`, `ClientCatalogEditor.tsx`, `ClientsView.tsx` (OrderCard) | ✅ brief en PDF con plantilla SENDA, admin entra como cliente; galería de 72 avatares en `public/avatars` (filtros, vista grande; lista en `src/data/avatars.ts`, se regenera con `node scripts/gen-avatars.mjs`); pendiente: migrar otros PDFs (factura, nómina) a la plantilla |
 
 ## Checklist · Sección 3 (Clientes / Pedidos) — rama `actualizacion-clientes-pedidos`
 - [x] Nuevo pedido: vincular la cuenta del cliente al crearlo (hoy no se vincula y el cliente no ve su pedido).
