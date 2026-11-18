@@ -8,6 +8,7 @@ import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView, OrderScript } from './types';
 import { buildBriefPdf, buildScriptsPdf, pdfFileName } from './lib/pdfTemplate';
+import { allScripts, scriptHash, REVIEW_LABEL } from './lib/scripts';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -2290,6 +2291,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyOrderPatchRef.current(a.orderId, a.patch);
           // Al confirmar, el brief se vuelve un PDF con la plantilla de SENDA y queda en el proyecto
           if (a.patch.briefConfirmedAt) void generateBriefRef.current(a.orderId, a.patch);
+          // Avisos al admin: el cliente revisó un guión o aportó uno propio
+          const cur = ordersRef.current.find(o => o.id === a.orderId);
+          if (cur && a.patch.scriptReviews) {
+            const list = allScripts(cur);
+            for (const r of a.patch.scriptReviews) {
+              const old = (cur.scriptReviews || []).find(x => x.scriptId === r.scriptId);
+              if (old && old.status === r.status && old.feedback === r.feedback) continue;
+              const idx = list.findIndex(s => s.id === r.scriptId);
+              pushNotification('admin', 'sistema', `El cliente marcó el Guión ${idx + 1} de "${cur.brand}" como: ${REVIEW_LABEL[r.status]}${r.feedback ? ` · "${r.feedback.slice(0, 80)}"` : ''}`);
+            }
+          }
+          if (cur && a.patch.clientScripts && a.patch.clientScripts.length > (cur.clientScripts || []).length) {
+            pushNotification('admin', 'sistema', `El cliente agregó un guión propio en "${cur.brand}"`);
+          }
           pushNotification('admin', 'sistema', `El cliente actualizó el brief de "${ordersRef.current.find(o => o.id === a.orderId)?.brand || 'su proyecto'}"`);
         } else if (a.type === 'feedback') {
           submitFeedbackRef.current(a.videoId, a.items);
@@ -2358,7 +2373,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const blob = await buildScriptsPdf(next);
       const name = pdfFileName('Guiones', base.brand);
       const url = await uploadSharedFile(new File([blob], name, { type: 'application/pdf' }), `guiones/${orderId}`);
-      updateOrder(orderId, { scriptsService: true, scripts: clean, scriptsPublishedAt: next.scriptsPublishedAt, scriptsPdfName: name, scriptsPdfUrl: url });
+      // Si SENDA cambió un guión, la revisión que el cliente le hizo deja de valer; las demás se conservan
+      const reviews = (base.scriptReviews || []).filter(r => {
+        const s = clean.find(x => x.id === r.scriptId);
+        return Boolean(s) && (!r.hash || r.hash === scriptHash(s!));
+      });
+      updateOrder(orderId, { scriptsService: true, scripts: clean, scriptsPublishedAt: next.scriptsPublishedAt, scriptsPdfName: name, scriptsPdfUrl: url, scriptReviews: reviews });
       void notifyClientByChat(base.clientId, `Ya están listos los guiones de "${base.brand}". Entra a Mis proyectos para revisarlos y elegir el avatar y el estilo de edición de cada uno.`);
       return true;
     } catch {
@@ -2409,6 +2429,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       avatarRefUrl: patch.avatarRefUrl,
       avatarImageUrl: patch.avatarImageUrl,
       scriptChoices: patch.scriptChoices,
+      scriptReviews: patch.scriptReviews,
+      clientScripts: patch.clientScripts,
       editingStyleId: patch.editingStyleId,
       editingStyleName: patch.editingStyleName,
       clientNotes: patch.clientNotes,

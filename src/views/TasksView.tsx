@@ -25,6 +25,8 @@ import { TimeField } from '../components/TimeField';
 import { MediaIdentity } from '../components/MediaIdentity';
 import { ClientMirror } from '../components/ClientMirror';
 import { findAvatar } from '../lib/avatarGallery';
+import { allScripts } from '../lib/scripts';
+import { findStyle } from '../lib/styleCatalog';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
@@ -1280,7 +1282,7 @@ function VideoDetail({
               {(() => {
                 // Con servicio de guiones: el guión N, su avatar y su estilo son los del video N
                 const idx = (video.videoNumber || 1) - 1;
-                const sc = order?.scriptsService ? (order.scripts || [])[idx] : undefined;
+                const sc = order ? allScripts(order)[idx] : undefined;
                 const ch = sc ? (order?.scriptChoices || []).find(c => c.scriptId === sc.id) : undefined;
                 const avatarId = sc ? ch?.avatarId : order?.avatarId;
                 const av = findAvatar(avatarId, clientCatalog.avatars, sc ? ch?.avatarImageUrl : order?.avatarImageUrl, sc ? ch?.avatarName : order?.avatarName);
@@ -1288,13 +1290,14 @@ function VideoDetail({
                 const refUrl = sc ? ch?.avatarRefUrl : order?.avatarRefUrl;
                 const avName = sc ? ch?.avatarName : order?.avatarName;
                 const styleName = sc ? ch?.styleName : order?.editingStyleName;
-                const styleDesc = clientCatalog.styles.find(s => s.id === (sc ? ch?.styleId : order?.editingStyleId))?.description;
+                const styleDesc = findStyle(sc ? ch?.styleId : order?.editingStyleId, clientCatalog.styles)?.description;
                 return (
                   <>
                     {sc && (
                       <details className="bg-surface-3 border border-line rounded-lg p-2.5 col-span-2" open>
                         <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-muted-2 font-tech">Guión {idx + 1} · {sc.title}</summary>
-                        <p className="text-text whitespace-pre-line mt-2 leading-relaxed">{sc.text}</p>
+                        {sc.text && <p className="text-text whitespace-pre-line mt-2 leading-relaxed">{sc.text}</p>}
+                        {sc.fileUrl && <a href={sc.fileUrl} target="_blank" rel="noreferrer" className="text-accent text-xs font-semibold mt-2 inline-block">Abrir guión en PDF ({sc.fileName || 'archivo'})</a>}
                       </details>
                     )}
                     <div className="bg-surface-3 border border-line rounded-lg p-2.5 flex gap-2.5">

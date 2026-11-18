@@ -1,21 +1,30 @@
 import { useEffect, useState } from 'react';
 import {
-  CheckCircle2, Download, FileText, Link2, Loader2, Lock, Palette, Plus, RotateCcw, Save, ScrollText, ShieldCheck, StickyNote, Trash2, UserCircle2,
+  CheckCircle2, Download, FileText, Link2, Loader2, Lock, MessageSquare, Palette, Plus, RotateCcw, Save, ScrollText, ShieldCheck,
+  StickyNote, ThumbsDown, ThumbsUp, Trash2, Upload, UserCircle2,
 } from 'lucide-react';
 import { useStore } from '../../store';
-import type { Order, OrderReference, ScriptChoice } from '../../types';
+import { uploadSharedFile } from '../../lib/supabaseClient';
+import type { Order, OrderReference, OrderScript, ScriptChoice, ScriptReview } from '../../types';
 import { AvatarPicker, StylePicker, avatarChosen, type AvatarChoice, type StyleChoice } from './BriefPickers';
+import { allScripts, reviewOf, scriptHash, REVIEW_LABEL } from '../../lib/scripts';
+import { AGENCY_STYLE_ID, AGENCY_STYLE_NAME } from '../../lib/styleCatalog';
 
 /** El brief queda fijo para el cliente cuando el proyecto ya está en producción Y él ya lo confirmó.
  *  Si entró a producción sin brief confirmado, el cliente todavía puede completarlo. */
 export const briefLocked = (o: Order) => Boolean(o.clipperId) && Boolean(o.briefConfirmedAt);
 
-function SectionTitle({ n, icon: Icon, title, hint }: { n: number; icon: typeof FileText; title: string; hint: string }) {
+function SectionTitle({ n, icon: Icon, title, hint, badge }: { n: number; icon: typeof FileText; title: string; hint: string; badge: 'obligatorio' | 'opcional' }) {
   return (
     <div className="flex items-start gap-3">
       <span className="w-7 h-7 rounded-lg bg-accent-dim text-accent font-tech text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
       <div>
-        <p className="font-semibold flex items-center gap-1.5"><Icon size={15} className="text-accent" /> {title}</p>
+        <p className="font-semibold flex items-center gap-1.5 flex-wrap">
+          <Icon size={15} className="text-accent" /> {title}
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badge === 'obligatorio' ? 'bg-amber-dim text-amber' : 'bg-surface-3 text-muted-2'}`}>
+            {badge === 'obligatorio' ? 'Obligatorio' : 'Opcional'}
+          </span>
+        </p>
         <p className="text-xs text-muted-2">{hint}</p>
       </div>
     </div>
@@ -24,13 +33,78 @@ function SectionTitle({ n, icon: Icon, title, hint }: { n: number; icon: typeof 
 
 type Choice = { avatar: AvatarChoice; style: StyleChoice };
 const emptyChoice = (): Choice => ({ avatar: {}, style: {} });
+const withAgencyStyle = (s: StyleChoice): StyleChoice => (s.styleId ? s : { styleId: AGENCY_STYLE_ID, styleName: AGENCY_STYLE_NAME });
+
+const STATUS_STYLE: Record<ScriptReview['status'], string> = {
+  approved: 'bg-mint-dim text-mint border-mint/30',
+  rejected: 'bg-red-500/10 text-red-400 border-red-500/30',
+  feedback: 'bg-amber-dim text-amber border-amber/30',
+};
+
+/** Aprobar, rechazar o dejar feedback sobre un guión */
+function ReviewBar({ order, script, readOnly, onSave }: { order: Order; script: OrderScript; readOnly?: boolean; onSave: (r: ScriptReview) => void }) {
+  const current = reviewOf(order, script);
+  const [mode, setMode] = useState<'rejected' | 'feedback' | null>(null);
+  const [text, setText] = useState('');
+  useEffect(() => { setMode(null); setText(''); }, [script.id]);
+
+  const save = (status: ScriptReview['status'], feedback?: string) => {
+    onSave({ scriptId: script.id, status, feedback: feedback?.trim() || null, at: new Date().toISOString(), hash: scriptHash(script) });
+    setMode(null); setText('');
+  };
+
+  return (
+    <div className="px-4 pb-4 space-y-2.5">
+      {current && (
+        <div className={`text-xs border rounded-lg px-3 py-2 ${STATUS_STYLE[current.status]}`}>
+          <p className="font-semibold flex items-center gap-1.5">
+            {current.status === 'approved' ? <ThumbsUp size={13} /> : current.status === 'rejected' ? <ThumbsDown size={13} /> : <MessageSquare size={13} />}
+            {REVIEW_LABEL[current.status]} · {current.at.slice(0, 10)}
+          </p>
+          {current.feedback && <p className="mt-1 text-text/90 whitespace-pre-wrap">{current.feedback}</p>}
+        </div>
+      )}
+      {!readOnly && (
+        <>
+          <div className="flex gap-2 flex-wrap">
+            <button type="button" onClick={() => save('approved')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors ${current?.status === 'approved' ? 'bg-mint text-on-accent border-mint' : 'bg-mint-dim text-mint border-mint/30 hover:bg-mint/20'}`}>
+              <ThumbsUp size={13} /> Aprobar
+            </button>
+            <button type="button" onClick={() => setMode(m => (m === 'rejected' ? null : 'rejected'))}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors ${current?.status === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'}`}>
+              <ThumbsDown size={13} /> Rechazar
+            </button>
+            <button type="button" onClick={() => setMode(m => (m === 'feedback' ? null : 'feedback'))}
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 border bg-surface-3 border-line text-muted hover:text-text hover:border-accent/40 transition-colors">
+              <MessageSquare size={13} /> Dejar feedback
+            </button>
+          </div>
+          {mode && (
+            <div className="space-y-2 animate-fadeIn">
+              <textarea value={text} onChange={e => setText(e.target.value)} rows={3} autoFocus
+                placeholder={mode === 'rejected' ? '¿Qué no te convence? (opcional, pero nos ayuda a mejorarlo)' : 'Escribe qué cambiarías o qué te gustaría ajustar'}
+                className="w-full bg-surface-3 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-none" />
+              <button type="button" onClick={() => save(mode, text)} disabled={mode === 'feedback' && !text.trim()}
+                className="px-4 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong disabled:opacity-40">
+                {mode === 'rejected' ? 'Enviar rechazo' : 'Enviar feedback'}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Brief del proyecto. Lo usa el cliente (Mis proyectos) y el admin al "entrar como cliente" (asAdmin). */
 export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?: boolean; onDone?: () => void }) {
   const { updateOrder, setView, saveBriefAsAdmin, resetBrief } = useStore();
   const locked = !asAdmin && briefLocked(order);
-  const scripts = order.scriptsService ? (order.scripts || []) : [];
+  const scripts = allScripts(order);
   const scriptMode = scripts.length > 0;
+  const agencyScripts = scripts.filter(s => s.source !== 'cliente');
+  const ownScripts = scripts.filter(s => s.source === 'cliente');
 
   // Elección única (proyecto sin guiones)
   const [single, setSingle] = useState<Choice>({
@@ -56,21 +130,52 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   const [busy, setBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // Guiones propios
+  const [ownTab, setOwnTab] = useState<'escribir' | 'pdf'>('escribir');
+  const [ownTitle, setOwnTitle] = useState('');
+  const [ownText, setOwnText] = useState('');
+  const [ownUploading, setOwnUploading] = useState(false);
+  const [ownErr, setOwnErr] = useState<string | null>(null);
+
   useEffect(() => { setSaved(null); }, [order.id]);
 
   const choiceOf = (id: string) => perScript[id] || emptyChoice();
   const setChoice = (id: string, part: Partial<Choice>) => setPerScript(m => ({ ...m, [id]: { ...(m[id] || emptyChoice()), ...part } }));
 
   const refUrlValid = /^https?:\/\/\S+\.\S+/.test(refUrl.trim());
+  // Solo el avatar es obligatorio; estilo, referencias y notas son opcionales
   const avatarsDone = scriptMode ? scripts.every(s => avatarChosen(choiceOf(s.id).avatar)) : avatarChosen(single.avatar);
-  const stylesDone = scriptMode ? scripts.every(s => Boolean(choiceOf(s.id).style.styleId)) : Boolean(single.style.styleId);
-  const steps = [avatarsDone, stylesDone, refs.length > 0];
-  const complete = steps.every(Boolean);
+  const complete = avatarsDone;
 
   const addRef = () => {
     if (!refUrlValid) return;
     setRefs(r => [...r, { id: `ref-${Date.now()}`, name: refName.trim() || `Referencia ${r.length + 1}`, url: refUrl.trim() }]);
     setRefName(''); setRefUrl('');
+  };
+
+  // Revisión de guiones y guiones propios: se guardan al instante
+  const saveReview = (r: ScriptReview) =>
+    updateOrder(order.id, { scriptReviews: [...(order.scriptReviews || []).filter(x => x.scriptId !== r.scriptId), r] });
+  const addOwnScript = (s: OrderScript) => updateOrder(order.id, { clientScripts: [...(order.clientScripts || []), s] });
+  const removeOwnScript = (id: string) => {
+    updateOrder(order.id, { clientScripts: (order.clientScripts || []).filter(s => s.id !== id), scriptReviews: (order.scriptReviews || []).filter(r => r.scriptId !== id) });
+    setPerScript(m => { const n = { ...m }; delete n[id]; return n; });
+  };
+  const submitOwnText = () => {
+    if (!ownText.trim()) return;
+    addOwnScript({ id: `cs-${Date.now()}`, title: ownTitle.trim() || `Guión propio ${ownScripts.length + 1}`, text: ownText.trim(), source: 'cliente' });
+    setOwnTitle(''); setOwnText('');
+  };
+  const submitOwnPdf = async (f: File | undefined) => {
+    if (!f) return;
+    setOwnUploading(true); setOwnErr(null);
+    try {
+      const url = await uploadSharedFile(f, `brief/client-scripts/${order.id}`);
+      addOwnScript({ id: `cs-${Date.now()}`, title: ownTitle.trim() || f.name.replace(/\.[^.]+$/, ''), text: '', fileName: f.name, fileUrl: url, source: 'cliente' });
+      setOwnTitle('');
+    } catch {
+      setOwnErr('No se pudo subir el archivo. Inténtalo de nuevo.');
+    } finally { setOwnUploading(false); }
   };
 
   const buildPatch = (confirm: boolean): Partial<Order> => {
@@ -82,14 +187,16 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
     if (scriptMode) {
       const choices: ScriptChoice[] = scripts.map(s => {
         const c = choiceOf(s.id);
+        const st = withAgencyStyle(c.style);
         return {
           scriptId: s.id, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
           avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
-          styleId: c.style.styleId ?? null, styleName: c.style.styleName ?? null,
+          styleId: st.styleId ?? null, styleName: st.styleName ?? null,
         };
       });
       return { ...base, scriptChoices: choices };
     }
+    const st = withAgencyStyle(single.style);
     return {
       ...base,
       avatarId: single.avatar.avatarId ?? null,
@@ -97,8 +204,8 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       avatarImageUrl: single.avatar.imageUrl ?? null,
       avatarCustomText: single.avatar.customText ?? null,
       avatarRefUrl: single.avatar.refUrl ?? null,
-      editingStyleId: single.style.styleId ?? null,
-      editingStyleName: single.style.styleName ?? null,
+      editingStyleId: st.styleId ?? null,
+      editingStyleName: st.styleName ?? null,
     };
   };
 
@@ -116,7 +223,12 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   };
 
   const scriptsPublished = Boolean(order.scriptsPublishedAt);
-  const waitingScripts = Boolean(order.scriptsService) && !scriptMode;
+  const waitingScripts = Boolean(order.scriptsService) && agencyScripts.length === 0;
+  const steps = [
+    { label: 'Avatar', ok: avatarsDone, required: true },
+    { label: 'Estilo', ok: true, required: false },
+    { label: 'Referencias', ok: refs.length > 0, required: false },
+  ];
 
   return (
     <div className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden">
@@ -132,9 +244,9 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
               <Download size={11} /> Brief en PDF
             </a>
           )}
-          {['Avatar', 'Estilo', 'Referencias'].map((label, i) => (
-            <span key={label} className={`text-[10px] font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${steps[i] ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
-              {steps[i] ? <CheckCircle2 size={11} /> : <span className="w-2.5 h-2.5 rounded-full border border-current" />} {label}
+          {steps.map(st => (
+            <span key={st.label} className={`text-[10px] font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${st.ok && (st.required || st.label === 'Referencias') ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
+              {st.ok && (st.required || st.label === 'Referencias') ? <CheckCircle2 size={11} /> : <span className="w-2.5 h-2.5 rounded-full border border-current" />} {st.label}{st.required ? '' : ' (opcional)'}
             </span>
           ))}
         </div>
@@ -143,7 +255,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       {asAdmin && (
         <div className="mx-5 mt-5 flex items-start gap-2.5 bg-violet/10 border border-violet/30 rounded-xl px-4 py-3 text-xs text-muted">
           <ShieldCheck size={15} className="text-violet shrink-0 mt-0.5" />
-          <span className="flex-1">Estás viendo y editando este brief <strong className="text-text">como si fueras el cliente</strong>. Puedes corregirlo o borrarlo y pedirle que lo rehaga; el PDF se vuelve a generar al guardar.</span>
+          <span className="flex-1">Estás viendo y editando este brief <strong className="text-text">como si fueras el cliente</strong>. Puedes corregirlo o borrarlo y pedirle que lo rehaga; el PDF se vuelve a generar al guardar. La aprobación de guiones la hace solo el cliente.</span>
         </div>
       )}
 
@@ -156,42 +268,89 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       )}
 
       <fieldset disabled={locked} className="p-5 space-y-7 disabled:opacity-70">
-        {/* Guiones (solo si SENDA los escribe para este cliente) */}
-        {order.scriptsService && (
-          <section className="space-y-3">
-            <SectionTitle n={1} icon={ScrollText} title="Tus guiones" hint="Revísalos antes de elegir avatar y estilo." />
-            {waitingScripts || !scriptsPublished ? (
-              <p className="text-xs text-muted-2 bg-surface-3 border border-dashed border-line rounded-xl px-4 py-4">Estamos escribiendo tus guiones. Te avisaremos por el chat cuando estén listos.</p>
-            ) : (
-              <>
-                {order.scriptsPdfUrl && (
-                  <a href={order.scriptsPdfUrl} target="_blank" rel="noreferrer" download={order.scriptsPdfName || undefined}
-                    className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-accent text-on-accent hover:bg-accent-strong">
-                    <Download size={14} /> Descargar guiones en PDF
-                  </a>
-                )}
-                <div className="space-y-2.5">
-                  {scripts.map((s, i) => (
-                    <details key={s.id} className="group bg-surface-3/60 border border-line rounded-xl overflow-hidden" open={i === 0}>
+        {/* 1. Guiones: los de SENDA (aprobar / rechazar / feedback) y los propios del cliente */}
+        <section className="space-y-3.5">
+          <SectionTitle n={1} icon={ScrollText} title="Guiones" badge="opcional"
+            hint={order.scriptsService ? 'Revisa los que escribió SENDA o aporta los tuyos (escritos o en PDF).' : 'Si ya tienes tus guiones, súbelos en PDF o escríbelos aquí.'} />
+
+          {order.scriptsService && (waitingScripts || !scriptsPublished) && agencyScripts.length === 0 && (
+            <p className="text-xs text-muted-2 bg-surface-3 border border-dashed border-line rounded-xl px-4 py-4">Estamos escribiendo tus guiones. Te avisaremos por el chat cuando estén listos.</p>
+          )}
+
+          {agencyScripts.length > 0 && (
+            <>
+              {order.scriptsPdfUrl && (
+                <a href={order.scriptsPdfUrl} target="_blank" rel="noreferrer" download={order.scriptsPdfName || undefined}
+                  className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-accent text-on-accent hover:bg-accent-strong">
+                  <Download size={14} /> Descargar guiones en PDF
+                </a>
+              )}
+              <div className="space-y-2.5">
+                {agencyScripts.map((s, i) => (
+                  <div key={s.id} className="bg-surface-3/60 border border-line rounded-xl overflow-hidden">
+                    <details open={i === 0}>
                       <summary className="cursor-pointer list-none flex items-center gap-2.5 px-4 py-3">
                         <span className="font-tech text-[11px] font-bold bg-surface text-accent rounded-md px-2 py-1">GUIÓN {i + 1}</span>
                         <span className="font-semibold text-sm flex-1 truncate">{s.title || `Guión ${i + 1}`}</span>
+                        {reviewOf(order, s) && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_STYLE[reviewOf(order, s)!.status]}`}>{REVIEW_LABEL[reviewOf(order, s)!.status]}</span>}
                       </summary>
-                      <p className="px-4 pb-4 text-sm text-text/90 leading-relaxed whitespace-pre-wrap">{s.text}</p>
+                      <p className="px-4 pb-3 text-sm text-text/90 leading-relaxed whitespace-pre-wrap">{s.text}</p>
                     </details>
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
-        )}
+                    <ReviewBar order={order} script={s} readOnly={asAdmin} onSave={saveReview} />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
-        {/* Avatar */}
+          {/* Guiones propios */}
+          <div className="bg-surface-3/40 border border-line rounded-xl p-4 space-y-3">
+            <p className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-accent" /> Tus propios guiones</p>
+            {ownScripts.length > 0 && (
+              <ul className="space-y-2">
+                {ownScripts.map(s => (
+                  <li key={s.id} className="bg-surface-2 border border-line rounded-lg px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-tech text-[10px] font-bold bg-violet/15 text-violet rounded-md px-1.5 py-0.5 shrink-0">TUYO</span>
+                      <span className="text-sm font-medium flex-1 truncate">{s.title}</span>
+                      {s.fileUrl && <a href={s.fileUrl} target="_blank" rel="noreferrer" className="text-xs text-accent font-semibold flex items-center gap-1"><Download size={12} /> {s.fileName || 'PDF'}</a>}
+                      <button type="button" title="Quitar guión" onClick={() => removeOwnScript(s.id)} className="text-muted-2 hover:text-red-400"><Trash2 size={13} /></button>
+                    </div>
+                    {s.text && <p className="text-xs text-muted mt-1.5 whitespace-pre-wrap line-clamp-4">{s.text}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-1.5">
+              {([['escribir', 'Escribir el guión'], ['pdf', 'Subir PDF']] as const).map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setOwnTab(k)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${ownTab === k ? 'bg-accent text-on-accent' : 'bg-surface-2 border border-line text-muted hover:text-text'}`}>{l}</button>
+              ))}
+            </div>
+            <input value={ownTitle} onChange={e => setOwnTitle(e.target.value)} placeholder="Título del guión (opcional)"
+              className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+            {ownTab === 'escribir' ? (
+              <>
+                <textarea value={ownText} onChange={e => setOwnText(e.target.value)} rows={5} placeholder="Escribe aquí tu guión completo…"
+                  className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-y leading-relaxed" />
+                <button type="button" onClick={submitOwnText} disabled={!ownText.trim()}
+                  className="px-4 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:bg-accent-strong disabled:opacity-40"><Plus size={13} /> Agregar guión</button>
+              </>
+            ) : (
+              <label className={`w-full py-3 rounded-xl border border-dashed border-accent/50 text-accent text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent/5 ${ownUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                {ownUploading ? <><Loader2 size={14} className="animate-spin" /> Subiendo…</> : <><Upload size={14} /> Elegir PDF del guión</>}
+                <input type="file" accept=".pdf,application/pdf" className="hidden" disabled={ownUploading} onChange={e => { void submitOwnPdf(e.target.files?.[0]); e.target.value = ''; }} />
+              </label>
+            )}
+            {ownErr && <p className="text-[11px] text-red-400">{ownErr}</p>}
+            <p className="text-[11px] text-muted-2">Cada guión corresponde a un video: abajo eliges el avatar y el estilo de cada uno.</p>
+          </div>
+        </section>
+
+        {/* 2. Avatar (obligatorio) */}
         <section className="space-y-3">
-          <SectionTitle n={order.scriptsService ? 2 : 1} icon={UserCircle2} title={scriptMode ? 'Avatar de cada guión' : 'Elige el avatar'} hint="Elige uno de la galería SENDA, o describe o sube el tuyo." />
-          {order.scriptsService && !scriptMode ? (
-            <p className="text-xs text-muted-2">Se habilita cuando publiquemos tus guiones.</p>
-          ) : scriptMode ? (
+          <SectionTitle n={2} icon={UserCircle2} title={scriptMode ? 'Avatar de cada guión' : 'Elige el avatar'} badge="obligatorio" hint="Elige uno de la galería SENDA, o describe o sube el tuyo." />
+          {scriptMode ? (
             <div className="space-y-2.5">
               {scripts.map((s, i) => (
                 <div key={s.id} className="grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center">
@@ -205,12 +364,11 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
           )}
         </section>
 
-        {/* Estilo */}
+        {/* 3. Estilo (opcional o a recomendación de SENDA) */}
         <section className="space-y-3">
-          <SectionTitle n={order.scriptsService ? 3 : 2} icon={Palette} title={scriptMode ? 'Estilo de edición de cada video' : 'Estilo de edición'} hint="Cada estilo es una categoría: ábrela para ver sus videos." />
-          {order.scriptsService && !scriptMode ? (
-            <p className="text-xs text-muted-2">Se habilita cuando publiquemos tus guiones.</p>
-          ) : scriptMode ? (
+          <SectionTitle n={3} icon={Palette} title={scriptMode ? 'Estilo de edición de cada video' : 'Estilo de edición'} badge="opcional"
+            hint="Elígelo tú o déjalo a recomendación de SENDA. Cada estilo es una categoría: ábrela para ver sus videos." />
+          {scriptMode ? (
             <div className="space-y-2.5">
               {scripts.map((s, i) => (
                 <div key={s.id} className="grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center">
@@ -224,9 +382,9 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
           )}
         </section>
 
-        {/* Referencias */}
+        {/* 4. Referencias (opcional) */}
         <section className="space-y-3">
-          <SectionTitle n={order.scriptsService ? 4 : 3} icon={Link2} title="Referencias" hint="Videos o cuentas que te gusten (TikTok, Reels, YouTube, Drive…)." />
+          <SectionTitle n={4} icon={Link2} title="Referencias" badge="opcional" hint="Videos o cuentas que te gusten (TikTok, Reels, YouTube, Drive…)." />
           {refs.length > 0 && (
             <ul className="space-y-1.5">
               {refs.map(r => (
@@ -250,9 +408,9 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
           </div>
         </section>
 
-        {/* Notas */}
+        {/* 5. Notas (opcional) */}
         <section className="space-y-3">
-          <SectionTitle n={order.scriptsService ? 5 : 4} icon={StickyNote} title="Notas para el equipo" hint="Mensajes clave, ofertas, lo que NO quieres ver…" />
+          <SectionTitle n={5} icon={StickyNote} title="Notas para el equipo" badge="opcional" hint="Mensajes clave, ofertas, lo que NO quieres ver…" />
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Escribe aquí cualquier detalle importante"
             className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-y" />
         </section>
@@ -265,7 +423,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
               : saved === 'draft' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Borrador guardado</span>
               : saved === 'admin' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Guardado · PDF actualizado</span>
               : order.briefConfirmedAt ? <span className="text-muted-2">Confirmado el {order.briefConfirmedAt.slice(0, 10)} · puedes seguir ajustándolo</span>
-              : <span className="text-muted-2">{complete ? 'Todo listo para confirmar' : 'Completa avatar, estilo y al menos una referencia'}</span>}
+              : <span className="text-muted-2">{complete ? 'Todo listo para confirmar' : scriptMode ? 'Falta elegir el avatar de cada guión (lo demás es opcional)' : 'Falta elegir el avatar (lo demás es opcional)'}</span>}
           </p>
           {asAdmin ? (
             <div className="flex gap-2 flex-wrap">

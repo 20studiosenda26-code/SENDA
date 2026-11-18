@@ -4,6 +4,7 @@ import { useStore } from '../../store';
 import { uploadSharedFile } from '../../lib/supabaseClient';
 import type { CatalogStyle } from '../../types';
 import { findAvatar, type GalleryAvatar } from '../../lib/avatarGallery';
+import { AGENCY_STYLE_ID, AGENCY_STYLE_NAME, allStyles } from '../../lib/styleCatalog';
 import { AvatarGallery } from './AvatarGallery';
 
 export interface AvatarChoice {
@@ -128,28 +129,38 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
 // ============================ ESTILO ============================
 const playable = (url: string) => /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) || url.includes('/storage/v1/object/');
 
+/** Estilo de edición: se elige una categoría o se deja a recomendación de SENDA (por defecto). */
 export function StylePicker({ value, onChange, compact }: { value: StyleChoice; onChange: (v: StyleChoice) => void; compact?: boolean }) {
   const { clientCatalog } = useStore();
+  const styles = allStyles(clientCatalog.styles);
   const [open, setOpen] = useState(false);
   const [cat, setCat] = useState<CatalogStyle | null>(null);
 
-  const selected = value.styleId ? clientCatalog.styles.find(s => s.id === value.styleId) || null : null;
+  const isAgency = !value.styleId || value.styleId === AGENCY_STYLE_ID;
+  const selected = isAgency ? null : styles.find(s => s.id === value.styleId) || null;
   const close = () => { setOpen(false); setCat(null); };
   const videosOf = (s: CatalogStyle) => [...(s.videos || []), ...(s.exampleUrl ? [{ id: 'ex', name: 'Video de ejemplo', url: s.exampleUrl }] : [])];
 
   return (
     <>
-      <div className={`flex items-center gap-3 bg-surface-3/60 border rounded-xl p-2.5 ${value.styleId ? 'border-accent/40' : 'border-line border-dashed'}`}>
+      <div className={`flex items-center gap-3 bg-surface-3/60 border rounded-xl p-2.5 ${selected ? 'border-accent/40' : 'border-line'}`}>
         <div className={`${compact ? 'w-11 h-11' : 'w-14 h-14'} rounded-lg bg-surface-3 border border-line flex items-center justify-center shrink-0`}>
-          <Palette size={20} className={value.styleId ? 'text-accent' : 'text-muted-2'} />
+          {selected ? <Palette size={20} className="text-accent" /> : <Sparkles size={20} className="text-mint" />}
         </div>
         <div className="flex-1 min-w-0">
-          {selected ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 line-clamp-1">{selected.description || 'Estilo de edición SENDA'}</p></>
-            : <p className="text-sm text-muted-2">Sin estilo elegido</p>}
+          {selected
+            ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 line-clamp-1">{selected.description || 'Estilo de edición SENDA'}</p></>
+            : <><p className="text-sm font-semibold">A recomendación de SENDA</p><p className="text-[11px] text-muted-2 line-clamp-1">Nuestro equipo elige el mejor estilo para este video</p></>}
         </div>
+        {selected && (
+          <button type="button" onClick={() => onChange({ styleId: AGENCY_STYLE_ID, styleName: AGENCY_STYLE_NAME })}
+            className="px-3 py-2 rounded-lg bg-surface-2 border border-line text-muted text-xs font-medium hover:text-text hover:border-mint/40 transition-colors shrink-0 hidden sm:block">
+            Que SENDA lo recomiende
+          </button>
+        )}
         <button type="button" onClick={() => setOpen(true)}
           className="px-3.5 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0">
-          {value.styleId ? 'Cambiar' : 'Elegir estilo'}
+          {selected ? 'Cambiar' : 'Elegir yo el estilo'}
         </button>
       </div>
 
@@ -163,16 +174,24 @@ export function StylePicker({ value, onChange, compact }: { value: StyleChoice; 
                 <CheckCircle2 size={15} /> {value.styleId === cat.id ? 'Estilo elegido' : 'Elegir este estilo'}
               </button>
             </div>
-          ) : undefined}>
-          {clientCatalog.styles.length === 0 ? (
+          ) : (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs text-muted">¿No sabes cuál? Déjalo en manos de nuestro equipo.</p>
+              <button type="button" onClick={() => { onChange({ styleId: AGENCY_STYLE_ID, styleName: AGENCY_STYLE_NAME }); close(); }}
+                className="px-4 py-2 rounded-xl bg-mint-dim text-mint border border-mint/30 text-xs font-semibold hover:bg-mint/20 flex items-center gap-1.5">
+                <Sparkles size={13} /> A recomendación de SENDA
+              </button>
+            </div>
+          )}>
+          {styles.length === 0 ? (
             <div className="text-center py-14">
               <Palette size={36} className="text-muted-2 mx-auto mb-3" />
               <p className="font-display font-semibold">Aún no hay estilos publicados</p>
-              <p className="text-xs text-muted mt-1">Cuéntanos el estilo que buscas en las notas para el equipo.</p>
+              <p className="text-xs text-muted mt-1">Déjalo a recomendación de SENDA y nuestro equipo lo resuelve.</p>
             </div>
           ) : !cat ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              {clientCatalog.styles.map(s => {
+              {styles.map(s => {
                 const n = videosOf(s).length;
                 const on = value.styleId === s.id;
                 return (
@@ -188,6 +207,10 @@ export function StylePicker({ value, onChange, compact }: { value: StyleChoice; 
                   </button>
                 );
               })}
+              <div className="rounded-2xl border border-dashed border-line p-5 flex flex-col justify-center text-center text-muted-2">
+                <Sparkles size={20} className="mx-auto mb-2" />
+                <p className="text-xs">Pronto habrá más estilos de edición.</p>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -195,12 +218,12 @@ export function StylePicker({ value, onChange, compact }: { value: StyleChoice; 
               {videosOf(cat).length === 0 ? (
                 <p className="text-sm text-muted-2 text-center py-8">Esta categoría aún no tiene videos de ejemplo, pero puedes elegirla igual.</p>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {videosOf(cat).map(v => (
                     <div key={v.id} className="rounded-xl border border-line overflow-hidden bg-black">
                       {playable(v.url)
-                        ? <video src={v.url} controls preload="metadata" playsInline className="w-full aspect-[9/16] object-cover" />
-                        : <a href={v.url} target="_blank" rel="noreferrer" className="w-full aspect-[9/16] bg-surface-3 flex flex-col items-center justify-center gap-2 text-accent text-xs font-semibold"><ExternalLink size={22} /> Ver video</a>}
+                        ? <video src={v.url} controls preload="metadata" playsInline className="w-full max-h-[420px] object-contain bg-black" />
+                        : <a href={v.url} target="_blank" rel="noreferrer" className="w-full aspect-video bg-surface-3 flex flex-col items-center justify-center gap-2 text-accent text-xs font-semibold"><ExternalLink size={22} /> Ver video</a>}
                       <p className="text-[11px] px-2.5 py-1.5 bg-surface-2 truncate">{v.name}</p>
                     </div>
                   ))}

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Loader2, Palette, Plus, Trash2, UserCircle2, Vi
 import { useStore } from '../store';
 import { uploadSharedFile } from '../lib/supabaseClient';
 import { CATEGORIES, GALLERY_AVATARS } from '../lib/avatarGallery';
+import { STATIC_STYLES } from '../data/styles';
 
 /** Catálogo que ven los clientes al armar su brief: resumen de la galería de avatares y estilos de edición por categoría. */
 export function ClientCatalogEditor() {
@@ -90,6 +91,16 @@ export function ClientCatalogEditor() {
           Cada estilo es una <strong className="text-text">categoría</strong> con varios videos de ejemplo subidos a la nube. El cliente solo ve los videos cuando abre la categoría.
         </p>
 
+        {STATIC_STYLES.map(st => (
+          <div key={st.id} className="flex items-center gap-3 bg-surface-2 border border-accent/30 rounded-lg px-3 py-2.5">
+            <Palette size={16} className="text-accent shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold truncate">{st.name} <span className="text-[10px] font-normal text-accent">· estilo de la agencia</span></p>
+              <p className="text-[10px] text-muted-2">{(st.videos || []).length} videos de ejemplo · ya visible para los clientes</p>
+            </div>
+          </div>
+        ))}
+
         <ul className="space-y-2">
           {clientCatalog.styles.map(st => {
             const open = openStyle === st.id;
@@ -143,7 +154,7 @@ export function ClientCatalogEditor() {
               </li>
             );
           })}
-          {clientCatalog.styles.length === 0 && <p className="text-[11px] text-muted-2 bg-surface-2 border border-dashed border-line rounded-lg px-3 py-4 text-center">Sin estilos todavía. Crea el primero (por ejemplo “Estilo Vidrio”).</p>}
+          {clientCatalog.styles.length === 0 && <p className="text-[11px] text-muted-2 bg-surface-2 border border-dashed border-line rounded-lg px-3 py-4 text-center">Aquí puedes crear más categorías de estilo cuando las tengas. Mientras tanto, el cliente ve “Estilo Vidrio”.</p>}
         </ul>
 
         <div className="space-y-2 pt-3 border-t border-line">
