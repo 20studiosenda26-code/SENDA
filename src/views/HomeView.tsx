@@ -3,7 +3,7 @@
 // - Clipper · Asistente de edición → este archivo (WorkerHome)
 // - Cliente → ClientHome (ClientArea.tsx)
 // Pensado para computador (bento de 12 columnas); en pantallas pequeñas se apila.
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '../store';
 import {
   AlertTriangle, ArrowRight, Bell, BookOpen, CalendarDays, CheckCircle2, Clapperboard, Clock3, Download,
@@ -48,9 +48,16 @@ function WorkerHome() {
   const {
     workers, currentWorkerId, brands, orders, financeSettings, payrollPayments, calendarEvents,
     classroomModules, lessonCompletions, notificationsArchive, getWorkerCapacity,
-    setView, setSelectedVideo, setSelectedClassroomModuleId,
+    setView, setSelectedVideo, setSelectedClassroomModuleId, refreshAssignments,
   } = useStore();
   const [panel, setPanel] = useState<ActionKey | 'waiting' | null>(null);
+
+  // Los videos que te asignan o te quitan aparecen aquí sin esperar: se trae lo último al abrir y cada 6 s
+  useEffect(() => {
+    void refreshAssignments();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') void refreshAssignments(); }, 6000);
+    return () => clearInterval(iv);
+  }, [refreshAssignments]);
 
   const worker = workers.find(w => w.id === currentWorkerId);
   const firstName = worker?.name?.split(' ')[0] || '';

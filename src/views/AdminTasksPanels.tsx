@@ -185,7 +185,7 @@ function AssignWorkspace({ search }: { search: string }) {
     setAssigning(true);
     try {
       const ok = await assignOrderVideos(selected.id, [], owners);
-      setDone(ok ? `"${selected.brand}" asignado y notificado. Ya está en En producción.` : `No se pudo asignar "${selected.brand}": ${briefReadiness(selected).reason}`);
+      setDone(ok ? `"${selected.brand}" asignado, verificado en el servidor y notificado. Ya está en En producción.` : `No se pudo asignar "${selected.brand}": ${briefReadiness(selected).reason || 'no se pudo confirmar el guardado en el servidor. Revisa tu conexión y vuelve a intentarlo.'}`);
       setTimeout(() => setDone(null), 6000);
     } finally {
       setAssigning(false);
