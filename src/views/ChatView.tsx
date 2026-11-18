@@ -6,6 +6,17 @@ import { Send, Search, Paperclip, Plus, X, Users, Bell, Loader2, Download, Check
 import type { NotificationCategory } from '../types';
 import { TEAM_ROLE_SHORT } from '../lib/roles';
 import { takeNavIntent } from '../lib/navIntent';
+import { useChatUnread } from '../lib/useChatUnread';
+
+/** Hora si es de hoy, "Ayer" o fecha corta, como en WhatsApp */
+function shortChatTime(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (d.getTime() >= startToday) return d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  if (d.getTime() >= startToday - 86400000) return 'Ayer';
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' });
+}
 
 function timeShort(iso: string) {
   const d = new Date(iso);
@@ -54,13 +65,17 @@ export function ChatView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const { unread, lastMsg, markRead } = useChatUnread();
+
+  // Como WhatsApp: arriba la conversación con el mensaje más reciente
   const myGroups = useMemo(() => {
     const list = isAdmin ? chatGroups : chatGroups.filter(g => user && g.memberIds.includes(user.id));
+    const stamp = (g: { id: string; createdAt: string }) => new Date(lastMsg[g.id]?.createdAt || g.createdAt).getTime();
     return list
       .filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase()))
       .slice()
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [chatGroups, isAdmin, user, search]);
+      .sort((a, b) => stamp(b) - stamp(a));
+  }, [chatGroups, isAdmin, user, search, lastMsg]);
 
   // El cliente entra directo a su conversación con SENDA
   const autoOpenedRef = useRef(false);
@@ -75,6 +90,11 @@ export function ChatView() {
     () => (activeGroup ? chatMessages.filter(m => m.groupId === activeGroup.id).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) : []),
     [chatMessages, activeGroup]
   );
+
+  // La conversación abierta se marca como leída al instante (también cuando llegan mensajes nuevos)
+  useEffect(() => {
+    if (activeGroup && document.visibilityState === 'visible') markRead(activeGroup.id);
+  }, [activeGroup, activeMessages.length, markRead]);
 
   const myNotifications = useMemo(
     () => notificationsArchive.filter(n => n.role === role && (!n.workerId || n.workerId === user?.id))
@@ -260,8 +280,30 @@ export function ChatView() {
                   onClick={() => setActiveId(g.id)}
                   className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${activeId === g.id ? 'bg-accent-dim text-accent' : 'text-muted hover:bg-surface-3 hover:text-text'} ${isAdmin ? 'pr-8' : ''}`}
                 >
-                  <span className="font-medium block truncate">{g.name}</span>
-                  <span className={`text-xs block ${activeId === g.id ? 'text-accent/70' : 'text-muted-2'}`}>{g.isDm ? 'Privado' : `Grupo · ${g.memberIds.length} miembros`}</span>
+                  {(() => {
+                    const n = unread[g.id] || 0;
+                    const last = lastMsg[g.id];
+                    const mine = last && user && last.senderId === user.id;
+                    const preview = last
+                      ? `${mine ? 'Tú: ' : !g.isDm && last.senderName ? `${last.senderName.split(' ')[0]}: ` : ''}${last.text || (last.fileName ? `📎 ${last.fileName}` : 'Archivo')}`
+                      : g.isDm ? 'Privado' : `Grupo · ${g.memberIds.length} miembros`;
+                    return (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`block truncate ${n ? 'font-semibold text-text' : 'font-medium'}`}>{g.name}</span>
+                          {last && <span className={`text-[10px] shrink-0 font-tech ${n ? 'text-accent' : 'text-muted-2'}`}>{shortChatTime(last.createdAt)}</span>}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <span className={`text-xs truncate ${n ? 'text-text/80' : activeId === g.id ? 'text-accent/70' : 'text-muted-2'}`}>{preview}</span>
+                          {n > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(53,214,228,0.5)]">
+                              {n > 99 ? '99+' : n}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </button>
               )}
               {isAdmin && confirmDeleteId !== g.id && (

@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { useStore } from '../store';
+import { useChatUnread } from '../lib/useChatUnread';
 import type { ViewKey, Role } from '../types';
 import { useAuth } from '../lib/auth';
 import { Home, Sparkles, PlayCircle, CheckSquare, MessageSquare, Calendar, GraduationCap, FileText, User, Briefcase, DollarSign, Wallet, Gauge, Shield, Moon, Sun, LogOut } from 'lucide-react';
@@ -26,6 +28,13 @@ export function Rail({ onSignOut }: { onSignOut: () => void }) {
   const { user } = useAuth();
   const role = user?.role || 'clipper';
   const items = NAV.filter(n => n.roles.includes(role));
+  const { total: chatUnread } = useChatUnread();
+
+  // Número de mensajes sin leer también en la pestaña del navegador: "(2) SENDA"
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, '');
+    document.title = chatUnread > 0 ? `(${chatUnread > 99 ? '99+' : chatUnread}) ${base}` : base;
+  }, [chatUnread]);
 
   return (
     <aside className="fixed left-0 top-0 h-full w-16 bg-surface border-r border-line flex flex-col items-center py-4 gap-1 z-50">
@@ -47,6 +56,11 @@ export function Rail({ onSignOut }: { onSignOut: () => void }) {
             >
               <Icon size={20} strokeWidth={active ? 2.5 : 2} />
               {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-accent rounded-r-full" />}
+              {item.key === 'chat' && chatUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold flex items-center justify-center shadow-[0_0_10px_rgba(53,214,228,0.6)] animate-pulse">
+                  {chatUnread > 99 ? '99+' : chatUnread}
+                </span>
+              )}
             </button>
           );
         })}
