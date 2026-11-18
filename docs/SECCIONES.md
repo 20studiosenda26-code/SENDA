@@ -14,7 +14,7 @@ Leyenda: ✅ terminada · ⏳ pendiente · 🔶 parcial. Actualizar este archivo
 | 8 | Perfil | Clipper | `ProfileView.tsx` | ✅ diseño + ganancias |
 | 9 | Finanzas | Admin | `FinancesView.tsx` | ✅ diseño + arreglos (fechas locales, fecha real de aprobación, pagos por persona, centavos, PDF seguro, por cobrar) |
 | 10 | Nóminas | Admin | `PayrollView.tsx`, `lib/payrollPdf.ts` | ✅ diseño, deshacer pago, aviso sin datos bancarios, ciclo en hora local |
-| 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ✅ conectado (cotizador → nuevo pedido, reasignar 1 vez, hora local, rol único) |
+| 11 | Capacidad / calculadora | Admin | `CapacityView.tsx`, `lib/capacity.ts` | ✅ conectado (cotizador → nuevo pedido, reasignar 1 vez, hora local, rol único); reparto por video (a cada persona X videos o todo el proyecto) y panel grande de reasignación con alertas siempre vigiladas |
 | 12 | Admin: usuarios, equipo y ajustes | Admin | `UserManagement.tsx`, `AdminView.tsx`, `SettingsPanel.tsx`, `ClientCatalogEditor.tsx` | ✅ diseño unificado |
 | 13 | Acceso y estructura: login, menú lateral, encabezado, correos reales | Todos | `LoginView.tsx`, `Rail.tsx`, `TopBar.tsx`, `App.tsx`, `supabase/functions` | ✅ correos reales funcionando (función `smooth-task`; sin dominio propio solo llegan al correo dueño de Resend) |
 | 14 | Pulido final: celular, rendimiento, limpieza | Todos | todo | 🔶 limpieza hecha; falta revisar en celular |

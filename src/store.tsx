@@ -8,6 +8,7 @@ import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView, OrderScript } from './types';
 import { buildBriefPdf, buildScriptsPdf, pdfFileName } from './lib/pdfTemplate';
+import { buildSlots, distribute, movableCount, primaryWorker, type Allocation } from './lib/assignment';
 import { allScripts, scriptHash, REVIEW_LABEL, briefReadiness } from './lib/scripts';
 
 export interface AdminProfile { id: string; name: string; }
@@ -252,6 +253,8 @@ interface Store {
   getWorkerCapacity: (workerId: string) => number;
   setWorkerCapacity: (workerId: string, capacity: number) => void;
   getWorkerWorkload: (workerId: string) => number;
+  /** Reparte los videos del proyecto: a cada persona X videos (o todo el proyecto a una). Devuelve false si no se pudo. */
+  assignOrderVideos: (orderId: string, allocation: Allocation[]) => Promise<boolean>;
   /** Devuelve false si no se pudo asignar (el brief del cliente aún no está completo) */
   assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<boolean>;
   assignOrderClipper: (orderId: string, clipperId: string) => Promise<boolean>;
@@ -1886,9 +1889,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return workerWorkload({ id: workerId, role: 'clipper' }, allVids, orders);
   }, [brands, orders]);
 
-  const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null): string => {
-    const clipper = clipperId ? workersRef.current.find(w => w.id === clipperId) : null;
-    const editor = editorId ? workersRef.current.find(w => w.id === editorId) : null;
+  const upsertBoardVideoForOrder = useCallback((order: Order, clipperId: string | null, editorId: string | null, perVideo?: (string | null)[]): string => {
     const count = Math.max(1, Number(order.videoCount) || 1);
     const targetBrandId = `brand-${order.id}`;
     let firstVideoId = order.boardVideoId || `${order.id}-v1`;
@@ -1911,11 +1912,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       const vidId = existingVid?.id || `${order.id}-v${i}`;
       if (i === 1) firstVideoId = vidId;
+      // Reparto por video: cada video lleva a SU persona; si no, todos los videos van con el mismo responsable
+      const wantedClipper = perVideo ? (perVideo[i - 1] ?? null) : clipperId;
+      const wantedEditor = perVideo ? wantedClipper : editorId;
+      const clipper = wantedClipper ? workersRef.current.find(w => w.id === wantedClipper) : null;
+      const editor = wantedEditor ? workersRef.current.find(w => w.id === wantedEditor) : null;
 
       // Al reasignar, los videos ya aprobados se quedan con quien los hizo (su pago no cambia de persona)
       const keepOwner = Boolean(existingVid && (existingVid.qc === "aprobado_senda" || existingVid.qc === "aprobado_cliente" || existingVid.paid50));
-      const resolvedClipperId = keepOwner ? (existingVid?.clipperId || "") : clipperId !== null ? clipperId : (existingVid?.clipperId || "");
-      const resolvedEditorId = keepOwner ? (existingVid?.editorId || "") : editorId !== null ? editorId : (existingVid?.editorId || "");
+      const resolvedClipperId = keepOwner ? (existingVid?.clipperId || "") : wantedClipper !== null ? wantedClipper : (existingVid?.clipperId || "");
+      const resolvedEditorId = keepOwner ? (existingVid?.editorId || "") : wantedEditor !== null ? wantedEditor : (existingVid?.editorId || "");
       const resolvedClipperName = keepOwner
         ? (existingVid?.clipperName || "Sin asignar")
         : clipper
@@ -2043,16 +2049,73 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return true;
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
-  // Rol único: asignar a la persona la deja a cargo de clips + imagen + video final del pedido completo
+  // Reparto por video: a cada persona X videos del proyecto (o todo el proyecto a una sola)
+  const assignOrderVideos = useCallback(async (orderId: string, alloc: Allocation[]): Promise<boolean> => {
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return false;
+    const firstTime = !order.clipperId;
+    // No se empieza a producir sin brief confirmado y con un avatar por cada video
+    if (firstTime && !briefReadiness(order).ready) return false;
+    const videos = brandsRef.current.flatMap(b => b.videos).filter(v => v.orderId === orderId || v.id === order.boardVideoId);
+    const slots = buildSlots(order.videoCount, videos);
+    const movable = movableCount(slots);
+    const wanted = alloc.filter(a => a.workerId && a.count > 0);
+    if (movable === 0 || wanted.reduce((s, a) => s + a.count, 0) !== movable) return false;
+    const owners = distribute(slots, wanted);
+    if (owners.some((o, i) => !slots[i].frozen && !o)) return false;
+    const primary = primaryWorker(owners) || wanted[0].workerId;
+    const videoId = upsertBoardVideoForOrder(order, primary, primary, owners);
+    const updatedOrder: Order = {
+      ...order,
+      clipperId: primary,
+      editorId: primary,
+      assignedWorkerIds: Array.from(new Set(owners.filter(Boolean) as string[])),
+      status: "asignado" as OrderStatus,
+      promotedToBoard: true,
+      boardVideoId: videoId,
+      lastReassignedAt: firstTime ? order.lastReassignedAt ?? null : new Date().toISOString(),
+    };
+    const nextOrders = ordersRef.current.map(o => o.id === orderId ? updatedOrder : o);
+    ordersRef.current = nextOrders;
+    setOrders(nextOrders);
+    saveState("orders", nextOrders);
+    if (isSupabaseConfigured) {
+      markLocalWrite();
+      await Promise.all([saveShared("orders", nextOrders), saveShared("brands", brandsRef.current)]);
+    }
+    // Avisos: a quien recibe videos y a quien deja de tenerlos
+    const nums = (list: number[]) => list.map(n => n + 1).join(', ');
+    const everyone = new Set<string>([...owners.filter(Boolean) as string[], ...slots.map(s => s.owner).filter(Boolean) as string[]]);
+    everyone.forEach(id => {
+      const gained = owners.map((o, i) => (o === id && slots[i].owner !== id ? i : -1)).filter(i => i >= 0);
+      const lost = slots.map((s, i) => (s.owner === id && !s.frozen && owners[i] !== id ? i : -1)).filter(i => i >= 0);
+      const total = owners.filter(o => o === id).length;
+      if (gained.length) {
+        pushNotification('clipper', 'trabajo_asignado', total === order.videoCount
+          ? `Te asignaron el proyecto completo "${order.brand}" (${order.videoCount} videos). Revisa cada video en Tareas.`
+          : `Te asignaron ${gained.length === 1 ? 'el video' : 'los videos'} ${nums(gained)} del proyecto "${order.brand}". Revisa cada video en Tareas.`, id);
+      }
+      if (lost.length) {
+        pushNotification('clipper', 'trabajo_asignado', `Se reasignó${lost.length === 1 ? '' : 'ron'} ${lost.length === 1 ? 'el video' : 'los videos'} ${nums(lost)} del proyecto "${order.brand}" a otra persona.`, id);
+      }
+    });
+    return true;
+  }, [upsertBoardVideoForOrder, markLocalWrite, pushNotification]);
+
+  // Todo el proyecto (lo que aún se puede mover) a una sola persona
   const assignOrderClipper = useCallback(async (orderId: string, clipperId: string): Promise<boolean> => {
     if (!clipperId) return false;
-    return assignOrderTeam(orderId, clipperId, clipperId);
-  }, [assignOrderTeam]);
+    const order = ordersRef.current.find(o => o.id === orderId);
+    if (!order) return false;
+    const videos = brandsRef.current.flatMap(b => b.videos).filter(v => v.orderId === orderId || v.id === order.boardVideoId);
+    const movable = movableCount(buildSlots(order.videoCount, videos));
+    if (movable === 0) return false;
+    return assignOrderVideos(orderId, [{ workerId: clipperId, count: movable }]);
+  }, [assignOrderVideos]);
 
   const assignOrderEditor = useCallback(async (orderId: string, editorId: string): Promise<boolean> => {
-    if (!editorId) return false;
-    return assignOrderTeam(orderId, editorId, editorId);
-  }, [assignOrderTeam]);
+    return assignOrderClipper(orderId, editorId);
+  }, [assignOrderClipper]);
 
   const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
     setFinanceSettings(prev => {
@@ -2493,7 +2556,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     notificationsArchive,
     orders, addOrder, updateOrder, deleteOrder, deleteBrandProject, liquidateOrders, assignProject, assignClipper,
     workerCapacities, getWorkerCapacity, setWorkerCapacity, getWorkerWorkload, assignOrderTeam,
-    assignOrderClipper, assignOrderEditor,
+    assignOrderClipper, assignOrderEditor, assignOrderVideos,
     financeSettings, updateFinanceSettings, financeClosings, recordFinanceDayClosing,
     appExpenses, addAppExpense, deleteAppExpense,
     payrollPayments, payrollAdjustments, setWorkerPayrollAdjustment, recordPayrollPayment, revertPayrollPayment,

@@ -15,7 +15,8 @@ import {
 import { TasksBoard } from "./TasksView";
 import { DriveFolderField } from "../components/DriveFolderField";
 import { ClientAccountField } from "../components/ClientAccountField";
-import { WorkerPicker } from "../components/tasks/WorkerPicker";
+import { VideoAllocator, allocToList, allocTotal, type AllocMap } from "../components/tasks/VideoAllocator";
+import { buildSlots, movableCount } from "../lib/assignment";
 import { GlowCard } from "../components/ui/spotlight-card";
 import { CountTicker } from "../components/ui/number-ticker";
 import { initialsOf } from "../components/ui/avatar-stack";
@@ -154,7 +155,7 @@ function StatChip({ label, value, tone, onClick }: { label: string; value: numbe
 // Por asignar: lista a la izquierda, detalle y responsable a la derecha
 // ---------------------------------------------------------------------------
 function AssignWorkspace({ search }: { search: string }) {
-  const { orders, assignOrderClipper, deleteOrder } = useStore();
+  const { orders, brands, assignOrderVideos, deleteOrder } = useStore();
   const list = useMemo(() => {
     const q = norm(search.trim());
     return orders
@@ -169,18 +170,20 @@ function AssignWorkspace({ search }: { search: string }) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = list.find(o => o.id === selectedId) || list[0] || null;
-  const [worker, setWorker] = useState<string | null>(null);
+  const [alloc, setAlloc] = useState<AllocMap>({});
   const [assigning, setAssigning] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  useEffect(() => { setWorker(null); setConfirmDelete(false); }, [selected?.id]);
+  useEffect(() => { setAlloc({}); setConfirmDelete(false); }, [selected?.id]);
+  const slots = useMemo(() => selected ? buildSlots(selected.videoCount, brands.flatMap(b => b.videos).filter(v => v.orderId === selected.id || v.id === selected.boardVideoId)) : [], [selected, brands]);
+  const movable = movableCount(slots);
 
   const assign = async () => {
-    if (!selected || !worker) return;
+    if (!selected || allocTotal(alloc) !== movable) return;
     setAssigning(true);
     try {
-      const ok = await assignOrderClipper(selected.id, worker);
+      const ok = await assignOrderVideos(selected.id, allocToList(alloc));
       setDone(ok ? `"${selected.brand}" asignado y notificado. Ya está en En producción.` : `No se pudo asignar "${selected.brand}": ${briefReadiness(selected).reason}`);
       setTimeout(() => setDone(null), 6000);
     } finally {
@@ -297,25 +300,25 @@ function AssignWorkspace({ search }: { search: string }) {
           </div>
 
           <div className="pt-3 border-t border-line/70">
-            <p className="text-sm font-semibold flex items-center gap-1.5"><Gauge size={15} className="text-accent" /> Elige responsable</p>
-            <p className="text-[11px] text-muted-2 mb-2.5">Hace imagen principal, clips y video final de los {selected.videoCount} videos. Ordenado por quién está en línea y tiene más espacio hoy.</p>
+            <p className="text-sm font-semibold flex items-center gap-1.5"><Gauge size={15} className="text-accent" /> Reparte el proyecto</p>
+            <p className="text-[11px] text-muted-2 mb-2.5">Cada persona hace imagen principal, clips y video final de SUS videos. Repartir evita que un solo retraso afecte todo el proyecto. Ordenado por quién está en línea y tiene más espacio hoy.</p>
             {!briefReadiness(selected).ready && (
               <p className="text-xs text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2 mb-2.5">
                 Todavía no se puede asignar. {briefReadiness(selected).reason} Se necesita el brief confirmado con un avatar por cada video; si falta algo, avísale al cliente desde Clientes → Brief y guiones.
               </p>
             )}
-            <WorkerPicker selected={worker} onSelect={setWorker} />
+            <VideoAllocator slots={slots} alloc={alloc} onChange={setAlloc} />
             <div className="flex items-center gap-3 pt-3 flex-wrap">
               <LiquidMetalButton
                 onClick={assign}
-                disabled={!worker || !briefReadiness(selected).ready}
+                disabled={allocTotal(alloc) !== movable || !briefReadiness(selected).ready}
                 loading={assigning}
                 label="Asignar proyecto"
                 loadingLabel="Asignando..."
                 icon={CheckCircle2}
                 variant="cyan"
               />
-              {!worker && briefReadiness(selected).ready && <span className="text-xs text-muted-2">Selecciona a una persona para asignar.</span>}
+              {allocTotal(alloc) !== movable && briefReadiness(selected).ready && <span className="text-xs text-muted-2">Reparte los {movable} videos entre las personas para asignar.</span>}
             </div>
           </div>
         </GlowCard>
