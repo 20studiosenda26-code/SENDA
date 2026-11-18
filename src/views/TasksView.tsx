@@ -1315,6 +1315,26 @@ function VideoDetail({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
+              {/* Documentos del proyecto: quien lo tiene asignado los descarga aquí, sin que el admin se los pase */}
+              {order && (() => {
+                const files = [
+                  ...(order.scriptsPdfUrl ? [{ key: 'agencia', title: 'Guiones escritos por SENDA', url: order.scriptsPdfUrl, name: order.scriptsPdfName }] : []),
+                  ...(order.clientScripts || []).filter(s => s.fileUrl).map(s => ({ key: s.id, title: s.title || 'Guión del cliente', url: s.fileUrl as string, name: s.fileName })),
+                ];
+                if (files.length === 0) return null;
+                return (
+                  <div className="bg-accent-dim/40 border border-accent/30 rounded-lg p-3 col-span-2 space-y-2">
+                    <p className="text-[10px] uppercase tracking-wide text-accent font-tech flex items-center gap-1"><FileText size={11} /> Guiones del proyecto (PDF)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {files.map(f => (
+                        <DownloadButton key={f.key} url={f.url} fileName={f.name || `${f.title}.pdf`} label={`Descargar: ${f.title}`}
+                          className="!h-9 !px-3 !text-xs !font-semibold !bg-accent !text-on-accent !border-accent hover:!bg-accent-strong hover:!text-on-accent" />
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-muted-2">Estos son los guiones del cliente: el guión 1 es del video 1, el 2 del video 2… Si todos vienen en un solo PDF, ahí están todos.</p>
+                  </div>
+                );
+              })()}
               {(() => {
                 // Con servicio de guiones: el guión N, su avatar y su estilo son los del video N
                 const idx = (video.videoNumber || 1) - 1;
