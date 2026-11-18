@@ -1,3 +1,4 @@
+import { isImageUrl } from '../components/brief/BriefPickers';
 import { useStore } from '../store';
 import type { Video, QcStatus, ClipStatus, MainImageStatus, Clip } from '../types';
 import {
@@ -1366,7 +1367,7 @@ function VideoDetail({
                       </details>
                     )}
                     <div className="bg-surface-3 border border-line rounded-lg p-2.5 flex gap-2.5">
-                      {(av?.imageUrl || refUrl) && (
+                      {(av?.imageUrl || isImageUrl(refUrl)) && (
                         <a href={av?.imageUrl || refUrl || '#'} target="_blank" rel="noreferrer" className="w-14 aspect-[3/4] rounded-md overflow-hidden border border-line shrink-0 bg-surface-2">
                           <img src={av?.imageUrl || refUrl || ''} alt="Avatar" className="w-full h-full object-cover" />
                         </a>
@@ -1375,6 +1376,7 @@ function VideoDetail({
                         <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
                         <p className="text-text">{av?.name || avName || (customText ? 'Avatar propio' : null) || <span className="text-muted-2">Sin elegir</span>}</p>
                         {!av && customText && <p className="text-muted text-[11px] mt-0.5 line-clamp-3">{customText}</p>}
+                        {!av && refUrl && !isImageUrl(refUrl) && <a href={refUrl} target="_blank" rel="noreferrer" className="text-accent text-[11px] font-semibold mt-1 inline-block">Abrir archivo del avatar</a>}
                       </div>
                     </div>
                     <div className="bg-surface-3 border border-line rounded-lg p-2.5">

@@ -69,11 +69,11 @@ function avatarCard(a: ResolvedAvatar | null, customText?: string | null, refUrl
     </div>`;
   }
   return `<div style="display:flex;gap:22px;align-items:flex-start;padding-bottom:16px">
-    ${refUrl ? `<img crossorigin="anonymous" src="${esc(refUrl)}" style="width:${w}px;height:auto;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
+    ${refUrl && /\.(png|jpe?g|webp|gif|avif|bmp|svg)(\?|#|$)/i.test(refUrl) ? `<img crossorigin="anonymous" src="${esc(refUrl)}" style="width:${w}px;height:auto;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
     <div style="flex:1">
       <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700">Avatar propio del cliente</div>
       ${customText ? `<div style="font-size:14px;line-height:1.6;margin-top:8px">${nl2br(customText)}</div>` : ''}
-      ${refUrl ? `<div style="font-size:11.5px;color:${C.muted};margin-top:10px">Imagen de referencia adjunta.</div>` : ''}
+      ${refUrl ? `<div style="font-size:11.5px;color:${C.muted};margin-top:10px">Archivo de referencia adjunto.<br/><span style="word-break:break-all;font-size:10.5px">${esc(refUrl)}</span></div>` : ''}
     </div>
   </div>`;
 }
