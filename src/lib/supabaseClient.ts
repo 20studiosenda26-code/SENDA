@@ -630,6 +630,19 @@ export async function saveShared<T>(key: string, value: T): Promise<void> {
   });
 }
 
+/** Guarda ya (sin espera) y avisa si funcionó. Para datos críticos que deben verificarse. */
+export async function saveSharedNow<T>(key: string, value: T): Promise<boolean> {
+  if (!supabase) return false;
+  if (sharedWriteGuard && !sharedWriteGuard(key)) return false;
+  markKeyWrittenLocally(key);
+  try {
+    const { error } = await supabase.from("platform_kv").upsert({ key, value, updated_at: new Date().toISOString() });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 export function subscribeToTable(
   table: string,
   onChange: (changedKey?: string) => void
