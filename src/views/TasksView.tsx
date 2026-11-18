@@ -22,6 +22,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { AdminTasksRoot } from './AdminTasksPanels';
 import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
 import { TimeField } from '../components/TimeField';
+import { MediaIdentity } from '../components/MediaIdentity';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
@@ -670,6 +671,13 @@ function VideoDetail({
               </div>
             )}
           </div>
+
+          {activeMedia?.fileUrl && !isImageFile(activeMedia.fileName) && (
+            <MediaIdentity
+              label={activeFinal ? `Video final · versión ${activeFinal.version || 1}` : `Clip · ${activeMedia.name}`}
+              url={activeMedia.fileUrl}
+            />
+          )}
 
           {activeFinal && (
             <FinalReviewPanel
