@@ -5,6 +5,7 @@ import { buildWorkUnits, spreadLoad } from '../lib/capacity';
 import { ClientPortal } from './ClientPortal';
 import { ClientAccountField } from '../components/ClientAccountField';
 import { DriveFolderField } from '../components/DriveFolderField';
+import { OrderBriefPanel } from '../components/brief/OrderBriefPanel';
 import { addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
 import { AttentionTile, fmtDate } from '../components/home/home-bits';
 import { GlowCard } from '../components/ui/spotlight-card';
@@ -680,6 +681,7 @@ function OrderCard({ order, number }: { order: Order; number: number }) {
   const [busy, setBusy] = useState<'brief' | 'invoice' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
 
   const count = Math.max(1, order.videoCount || 1);
   const eco = unitEconomics(null, order, financeSettings);
@@ -786,6 +788,8 @@ th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.m
 
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>}
 
+      {showBrief && <OrderBriefPanel order={order} />}
+
       <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-line/60">
         {order.briefFileUrl ? (
           <a href={order.briefFileUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
@@ -817,6 +821,10 @@ th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.m
 
         <button type="button" onClick={printInvoice} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
           <Printer size={13} className="text-accent" /> Factura PDF
+        </button>
+        <button type="button" onClick={() => setShowBrief(v => !v)}
+          className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors ${showBrief ? 'bg-violet/15 border-violet/40 text-violet' : 'bg-surface-3 border-line text-text hover:border-violet/40'}`}>
+          <FileText size={13} className="text-violet" /> Brief y guiones
         </button>
         <button type="button" onClick={() => setView('tareas')} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-accent text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
           Ir a Tareas <ArrowRight size={12} />
