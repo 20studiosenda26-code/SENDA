@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, CheckCircle2, ExternalLink, ImagePlus, Loader2, Palette, Play, Sparkles, UserCircle2, X } from 'lucide-react';
 import { useStore } from '../../store';
 import { uploadSharedFile } from '../../lib/supabaseClient';
-import type { CatalogAvatar, CatalogStyle } from '../../types';
+import type { CatalogStyle } from '../../types';
+import { findAvatar, type GalleryAvatar } from '../../lib/avatarGallery';
+import { AvatarGallery } from './AvatarGallery';
 
 export interface AvatarChoice {
   avatarId?: string | null;
   avatarName?: string | null;
+  /** Ruta de la imagen del avatar elegido */
+  imageUrl?: string | null;
   customText?: string | null;
   refUrl?: string | null;
 }
@@ -43,37 +47,33 @@ function Sheet({ title, icon, onClose, children, footer }: { title: string; icon
 export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice; onChange: (v: AvatarChoice) => void; compact?: boolean }) {
   const { clientCatalog } = useStore();
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<'todos' | 'mujer' | 'hombre'>('todos');
   const [custom, setCustom] = useState(false);
   const [text, setText] = useState(value.customText || '');
   const [ref, setRef] = useState(value.refUrl || '');
   const [uploading, setUploading] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
 
-  const selected = value.avatarId ? clientCatalog.avatars.find(a => a.id === value.avatarId) || null : null;
-  const list = useMemo(() => clientCatalog.avatars.filter(a => filter === 'todos' || a.gender === filter), [clientCatalog.avatars, filter]);
-  const counts = { mujer: clientCatalog.avatars.filter(a => a.gender === 'mujer').length, hombre: clientCatalog.avatars.filter(a => a.gender === 'hombre').length };
+  const selected = findAvatar(value.avatarId, clientCatalog.avatars, value.imageUrl, value.avatarName);
+  const thumb = selected?.imageUrl || value.refUrl || null;
 
-  const pick = (a: CatalogAvatar) => {
-    onChange({ avatarId: a.id, avatarName: a.name, customText: null, refUrl: null });
+  const pick = (a: GalleryAvatar) => {
+    onChange({ avatarId: a.id, avatarName: a.name, imageUrl: a.src, customText: null, refUrl: null });
     setOpen(false);
   };
   const saveCustom = () => {
     if (!text.trim() && !ref.trim()) return;
-    onChange({ avatarId: null, avatarName: null, customText: text.trim() || null, refUrl: ref.trim() || null });
+    onChange({ avatarId: null, avatarName: null, imageUrl: null, customText: text.trim() || null, refUrl: ref.trim() || null });
     setOpen(false);
   };
 
   return (
     <>
       <div className={`flex items-center gap-3 bg-surface-3/60 border rounded-xl p-2.5 ${avatarChosen(value) ? 'border-accent/40' : 'border-line border-dashed'}`}>
-        <div className={`${compact ? 'w-11' : 'w-14'} aspect-[9/16] rounded-lg bg-surface-3 border border-line overflow-hidden flex items-center justify-center shrink-0`}>
-          {selected?.imageUrl ? <img src={selected.imageUrl} alt={selected.name} className="w-full h-full object-cover" />
-            : value.refUrl ? <img src={value.refUrl} alt="Referencia" className="w-full h-full object-cover" />
-            : <UserCircle2 size={22} className="text-muted-2" />}
+        <div className={`${compact ? 'w-11' : 'w-14'} aspect-[3/4] rounded-lg bg-surface-3 border border-line overflow-hidden flex items-center justify-center shrink-0`}>
+          {thumb ? <img src={thumb} alt={selected?.name || 'Referencia'} className="w-full h-full object-cover" /> : <UserCircle2 size={22} className="text-muted-2" />}
         </div>
         <div className="flex-1 min-w-0">
-          {selected ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 capitalize">{selected.gender || 'Avatar'} de la galería SENDA</p></>
+          {selected ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 truncate">{selected.subtitle || 'Avatar de la galería SENDA'}</p></>
             : value.customText || value.refUrl ? <><p className="text-sm font-semibold">Avatar propio</p><p className="text-[11px] text-muted-2 line-clamp-2">{value.customText || 'Con imagen de referencia'}</p></>
             : <p className="text-sm text-muted-2">Sin avatar elegido</p>}
         </div>
@@ -87,9 +87,9 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
         <Sheet title="Galería de avatares SENDA" icon={<UserCircle2 size={20} className="text-accent" />} onClose={() => setOpen(false)}
           footer={
             <div className="space-y-3">
-              <button type="button" onClick={() => setCustom(c => !c)}
+              <button type="button" onClick={() => setCustom(c => !c)} aria-expanded={custom}
                 className="text-xs text-muted hover:text-accent flex items-center gap-1.5 transition-colors">
-                <Sparkles size={13} /> {custom ? 'Ocultar' : 'Quiero otro estilo de avatar: describirlo o poner una imagen de referencia'}
+                <Sparkles size={13} /> ¿No encuentras el avatar ideal? Descríbelo y nuestro equipo lo crea
               </button>
               {custom && (
                 <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 animate-fadeIn">
@@ -118,41 +118,7 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
               )}
             </div>
           }>
-          {clientCatalog.avatars.length === 0 ? (
-            <div className="text-center py-14">
-              <UserCircle2 size={36} className="text-muted-2 mx-auto mb-3" />
-              <p className="font-display font-semibold">La galería se está preparando</p>
-              <p className="text-xs text-muted mt-1">Mientras tanto usa “Quiero otro estilo de avatar” y descríbelo abajo.</p>
-            </div>
-          ) : (
-            <>
-              <div className="flex gap-1.5 mb-4">
-                {([['todos', `Todos (${clientCatalog.avatars.length})`], ['mujer', `Mujeres (${counts.mujer})`], ['hombre', `Hombres (${counts.hombre})`]] as const).map(([k, l]) => (
-                  <button key={k} type="button" onClick={() => setFilter(k)}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === k ? 'bg-accent text-on-accent' : 'bg-surface-3 border border-line text-muted hover:text-text'}`}>{l}</button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-                {list.map(a => {
-                  const on = value.avatarId === a.id;
-                  return (
-                    <button key={a.id} type="button" onClick={() => pick(a)}
-                      className={`group relative text-left rounded-xl border overflow-hidden transition-all hover:-translate-y-0.5 ${on ? 'border-accent ring-2 ring-accent/40' : 'border-line hover:border-accent/50'}`}>
-                      <div className="aspect-[9/16] bg-surface-3 flex items-center justify-center">
-                        {a.imageUrl ? <img src={a.imageUrl} alt={a.name} loading="lazy" className="w-full h-full object-cover" /> : <UserCircle2 size={36} className="text-muted-2" />}
-                      </div>
-                      <div className="px-3 py-2 bg-surface-2">
-                        <p className="text-sm font-semibold truncate">{a.name}</p>
-                        {a.description && <p className="text-[11px] text-muted-2 line-clamp-2">{a.description}</p>}
-                      </div>
-                      {on && <CheckCircle2 size={22} className="absolute top-2 right-2 text-accent bg-surface rounded-full" />}
-                    </button>
-                  );
-                })}
-              </div>
-              {list.length === 0 && <p className="text-sm text-muted text-center py-10">No hay avatares en este filtro.</p>}
-            </>
-          )}
+          <AvatarGallery selectedId={value.avatarId} onSelect={pick} />
         </Sheet>
       )}
     </>

@@ -2,7 +2,8 @@
 // Todos los documentos de la plataforma usan este mismo encabezado, secciones y pie de página.
 // Se arma con HTML con estilos propios y se convierte a un PDF real (descargable y subible a la nube).
 import sendaLogo from '../assets/senda-logo.png';
-import type { CatalogAvatar, CatalogStyle, ClientCatalog, Order, OrderScript, ScriptChoice } from '../types';
+import type { CatalogStyle, ClientCatalog, Order, OrderScript, ScriptChoice } from '../types';
+import { findAvatar, type ResolvedAvatar } from './avatarGallery';
 
 const C = {
   dark: '#131519', dark2: '#1A1D22', accent: '#35D6E4', deep: '#0EA6B8', mint: '#2FBF9B',
@@ -52,25 +53,21 @@ function section(n: number | string, title: string, body: string, hint?: string)
 
 const empty = (t: string) => `<div style="font-size:13px;color:${C.muted};font-style:italic;padding:6px 0 14px">${esc(t)}</div>`;
 
-function avatarCard(a: CatalogAvatar | null, customText?: string | null, refUrl?: string | null, w = 190): string {
-  const h = Math.round((w * 16) / 9);
+function avatarCard(a: ResolvedAvatar | null, customText?: string | null, refUrl?: string | null, w = 190): string {
   if (!a && !customText && !refUrl) return empty('Sin avatar elegido todavía.');
   if (a) {
     return `<div style="display:flex;gap:22px;align-items:flex-start;padding-bottom:16px">
-      ${a.imageUrl ? `<img crossorigin="anonymous" src="${esc(a.imageUrl)}" style="width:${w}px;height:${h}px;object-fit:cover;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
+      ${a.imageUrl ? `<img crossorigin="anonymous" src="${esc(a.imageUrl)}" style="width:${w}px;height:auto;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
       <div style="flex:1">
         <div style="font-family:${DISPLAY};font-size:20px;font-weight:700;color:${C.dark}">${esc(a.name)}</div>
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-          ${a.gender ? `<span style="font-size:11px;background:${C.soft};border:1px solid ${C.line};border-radius:20px;padding:3px 10px;color:${C.muted};text-transform:capitalize">${esc(a.gender)}</span>` : ''}
-          ${a.background ? `<span style="font-size:11px;background:${C.soft};border:1px solid ${C.line};border-radius:20px;padding:3px 10px;color:${C.muted}">Fondo ${esc(a.background)}</span>` : ''}
-        </div>
-        ${a.description ? `<div style="font-size:13px;line-height:1.55;margin-top:12px;color:${C.text}">${nl2br(a.description)}</div>` : ''}
-        <div style="font-size:11.5px;color:${C.muted};margin-top:12px">Avatar de la galería de SENDA · imagen con todos sus ángulos.</div>
+        ${a.gender ? `<div style="margin-top:8px"><span style="font-size:11px;background:${C.soft};border:1px solid ${C.line};border-radius:20px;padding:3px 10px;color:${C.muted};text-transform:capitalize">${esc(a.gender)}</span></div>` : ''}
+        ${a.subtitle ? `<div style="font-size:12.5px;line-height:1.55;margin-top:12px;color:${C.text}">${nl2br(a.subtitle)}</div>` : ''}
+        <div style="font-size:11.5px;color:${C.muted};margin-top:12px">Código <b>${esc(a.id)}</b> · galería de avatares SENDA.</div>
       </div>
     </div>`;
   }
   return `<div style="display:flex;gap:22px;align-items:flex-start;padding-bottom:16px">
-    ${refUrl ? `<img crossorigin="anonymous" src="${esc(refUrl)}" style="width:${w}px;height:${h}px;object-fit:cover;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
+    ${refUrl ? `<img crossorigin="anonymous" src="${esc(refUrl)}" style="width:${w}px;height:auto;border-radius:14px;border:1px solid ${C.line};background:${C.soft}" />` : ''}
     <div style="flex:1">
       <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700">Avatar propio del cliente</div>
       ${customText ? `<div style="font-size:14px;line-height:1.6;margin-top:8px">${nl2br(customText)}</div>` : ''}
@@ -105,7 +102,7 @@ export function briefBlocks(order: Order, catalog: ClientCatalog): string[] {
     blocks.push(section('1', 'Guiones, avatares y estilos', '', 'Cada guión es un video: su avatar y su estilo de edición están abajo.'));
     scripts.forEach((sc, i) => {
       const ch: ScriptChoice | undefined = choices.find(c => c.scriptId === sc.id);
-      const av = ch?.avatarId ? catalog.avatars.find(a => a.id === ch.avatarId) || null : null;
+      const av = findAvatar(ch?.avatarId, catalog.avatars, ch?.avatarImageUrl, ch?.avatarName);
       const st = ch?.styleId ? catalog.styles.find(s => s.id === ch.styleId) || null : null;
       blocks.push(`
       <div style="padding:6px 48px 4px;font-family:${FONT};color:${C.text}">
@@ -129,7 +126,7 @@ export function briefBlocks(order: Order, catalog: ClientCatalog): string[] {
       </div>`);
     });
   } else {
-    const av = order.avatarId ? catalog.avatars.find(a => a.id === order.avatarId) || null : null;
+    const av = findAvatar(order.avatarId, catalog.avatars, order.avatarImageUrl, order.avatarName);
     const st = order.editingStyleId ? catalog.styles.find(s => s.id === order.editingStyleId) || null : null;
     blocks.push(section('1', 'Avatar', avatarCard(av, order.avatarCustomText || (!av ? order.avatarName : null), order.avatarRefUrl), 'La persona que aparece en los videos.'));
     blocks.push(section('2', 'Estilo de edición', styleCard(st, order.editingStyleName), 'Ritmo, subtítulos, transiciones y música.'));

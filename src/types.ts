@@ -280,6 +280,8 @@ export interface Order {
   /** Avatar propio: descripción escrita y/o imagen de referencia (cuando no elige uno de la galería) */
   avatarCustomText?: string | null;
   avatarRefUrl?: string | null;
+  /** Ruta de la imagen del avatar elegido (galería de SENDA) */
+  avatarImageUrl?: string | null;
   /** Servicio de guiones: SENDA escribe los guiones y el cliente los revisa */
   scriptsService?: boolean;
   scripts?: OrderScript[];
@@ -302,6 +304,7 @@ export interface ScriptChoice {
   avatarName?: string | null;
   avatarCustomText?: string | null;
   avatarRefUrl?: string | null;
+  avatarImageUrl?: string | null;
   styleId?: string | null;
   styleName?: string | null;
 }
@@ -347,7 +350,7 @@ export interface ClientProfile {
 
 /** Acciones que hace el cliente; se aplican en su vista al instante y el equipo las procesa */
 export type ClientAction =
-  | { id: string; type: 'brief'; orderId: string; patch: Partial<Pick<Order, 'references' | 'avatarId' | 'avatarName' | 'avatarCustomText' | 'avatarRefUrl' | 'editingStyleId' | 'editingStyleName' | 'clientNotes' | 'briefConfirmedAt' | 'scriptChoices'>>; at: string }
+  | { id: string; type: 'brief'; orderId: string; patch: Partial<Pick<Order, 'references' | 'avatarId' | 'avatarName' | 'avatarCustomText' | 'avatarRefUrl' | 'avatarImageUrl' | 'editingStyleId' | 'editingStyleName' | 'clientNotes' | 'briefConfirmedAt' | 'scriptChoices'>>; at: string }
   | { id: string; type: 'feedback'; videoId: string; items: { time: number; text: string }[]; at: string }
   | { id: string; type: 'approve'; videoId: string; at: string };
 

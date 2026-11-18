@@ -2407,6 +2407,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       avatarName: patch.avatarName,
       avatarCustomText: patch.avatarCustomText,
       avatarRefUrl: patch.avatarRefUrl,
+      avatarImageUrl: patch.avatarImageUrl,
       scriptChoices: patch.scriptChoices,
       editingStyleId: patch.editingStyleId,
       editingStyleName: patch.editingStyleName,

@@ -47,6 +47,7 @@ function sanitizeOrder(o: Order): Order {
     clientId: o.clientId ?? null,
     avatarCustomText: o.avatarCustomText ?? null,
     avatarRefUrl: o.avatarRefUrl ?? null,
+    avatarImageUrl: o.avatarImageUrl ?? null,
     scriptsService: Boolean(o.scriptsService),
     // El cliente solo ve los guiones cuando SENDA los publica
     scripts: o.scriptsPublishedAt ? (o.scripts || []) : [],
