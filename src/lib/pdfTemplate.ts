@@ -4,7 +4,7 @@
 import sendaLogo from '../assets/senda-logo.png';
 import type { CatalogStyle, ClientCatalog, Order, OrderScript } from '../types';
 import { findAvatar, type ResolvedAvatar } from './avatarGallery';
-import { allScripts, reviewOf, REVIEW_LABEL, choiceForSlot, videoSlots } from './scripts';
+import { allScripts, scriptFiles, reviewOf, REVIEW_LABEL, choiceForSlot, videoSlots } from './scripts';
 import { findStyle } from './styleCatalog';
 
 const C = {
@@ -131,6 +131,10 @@ export function briefBlocks(order: Order, catalog: ClientCatalog): string[] {
         </div>
       </div>
     </div>`);
+  }
+  const pdfScripts = scriptFiles(order);
+  if (pdfScripts.length) {
+    blocks.push(`<div style="padding:10px 48px 6px;font-family:${FONT};color:${C.text}"><div style="border:1px solid ${C.line};border-radius:14px;padding:14px 18px;background:#F3F7F9"><div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700;margin-bottom:6px">Guiones del cliente en PDF (todos juntos)</div>${pdfScripts.map(f => `<div style="font-size:12.5px;line-height:1.6"><b>${esc(f.fileName || 'guiones.pdf')}</b><br/><span style="word-break:break-all;font-size:11px;color:${C.muted}">${esc(f.fileUrl || '')}</span></div>`).join('')}</div></div>`);
   }
   if (scripts.length > total) {
     blocks.push(`<div style="padding:10px 48px 4px;font-family:${FONT};font-size:12.5px;color:${C.muted}">Hay ${scripts.length - total} guión(es) más que videos en el proyecto: ${scripts.slice(total).map(x => esc(x.title)).join(', ')}.</div>`);

@@ -4,6 +4,7 @@ import {
   uploadSharedFile,
   resolveMediaUrl,
   downloadMediaFile,
+  withSupabaseDownloadParam,
   isGoogleDriveUrl,
   getGoogleDrivePreviewUrl,
   getGoogleDriveBridgeUrl,
@@ -1315,6 +1316,26 @@ function VideoDetail({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
+              {/* Documentos del proyecto: quien lo tiene asignado los descarga aquí, sin que el admin se los pase */}
+              {order && (() => {
+                const files = [
+                  ...(order.scriptsPdfUrl ? [{ key: 'agencia', title: 'Guiones escritos por SENDA', url: order.scriptsPdfUrl, name: order.scriptsPdfName }] : []),
+                  ...(order.clientScripts || []).filter(s => s.fileUrl).map(s => ({ key: s.id, title: 'Guiones del cliente (PDF con todos)', url: s.fileUrl as string, name: s.fileName })),
+                ];
+                if (files.length === 0) return null;
+                return (
+                  <div className="bg-accent-dim/40 border border-accent/30 rounded-lg p-3 col-span-2 space-y-2">
+                    <p className="text-[10px] uppercase tracking-wide text-accent font-tech flex items-center gap-1"><FileText size={11} /> Guiones del proyecto (PDF)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {files.map(f => (
+                        <DownloadButton key={f.key} url={f.url} fileName={f.name || `${f.title}.pdf`} label={`Descargar: ${f.title}`}
+                          className="!h-9 !px-3 !text-xs !font-semibold !bg-accent !text-on-accent !border-accent hover:!bg-accent-strong hover:!text-on-accent" />
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-muted-2">Si el cliente subió un PDF, ahí vienen todos sus guiones juntos. Los guiones escritos por SENDA o por el cliente en la página siguen el orden: el guión 1 es del video 1, el 2 del video 2…</p>
+                  </div>
+                );
+              })()}
               {(() => {
                 // Con servicio de guiones: el guión N, su avatar y su estilo son los del video N
                 const idx = (video.videoNumber || 1) - 1;
@@ -1638,6 +1659,26 @@ function DownloadButton({ url, fileName, label, className = '' }: { url?: string
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [pct, setPct] = useState(0);
   const disabled = !url || state === 'loading';
+  // Archivos de la plataforma: enlace real que el servidor entrega como descarga (no depende de scripts ni permisos del navegador)
+  const safeName = (fileName || 'archivo-senda').replace(/[\\/:*?"<>|]/g, '_');
+  const directHref = url ? withSupabaseDownloadParam(url, safeName) : null;
+  if (directHref) {
+    return (
+      <a
+        href={directHref}
+        download={safeName}
+        rel="noopener"
+        title={`Descargar ${fileName || ''}`.trim()}
+        onClick={e => { e.stopPropagation(); setState('done'); setTimeout(() => setState('idle'), 1800); }}
+        className={`inline-flex items-center justify-center gap-1.5 h-8 ${label ? 'px-2.5' : 'w-8'} rounded-lg border text-[11px] font-medium shrink-0 transition-all duration-200 ${
+          state === 'done' ? 'bg-mint-dim text-mint border-mint/30' : 'bg-surface border-line text-muted hover:text-accent hover:border-accent/50 hover:bg-accent/10'
+        } ${className}`}
+      >
+        {state === 'done' ? <Check size={13} /> : <Download size={13} />}
+        {label && <span>{state === 'done' ? 'Descargando…' : label}</span>}
+      </a>
+    );
+  }
   return (
     <button
       type="button"

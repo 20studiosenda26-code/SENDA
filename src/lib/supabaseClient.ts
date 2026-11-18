@@ -483,7 +483,7 @@ function triggerHiddenFrameDownload(url: string) {
   setTimeout(() => frame.remove(), 120_000);
 }
 
-function withSupabaseDownloadParam(url: string, fileName: string): string | null {
+export function withSupabaseDownloadParam(url: string, fileName: string): string | null {
   if (!url.includes("/storage/v1/object/public/")) return null;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}download=${encodeURIComponent(fileName)}`;

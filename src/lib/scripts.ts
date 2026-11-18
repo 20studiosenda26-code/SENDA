@@ -13,9 +13,14 @@ export function scriptHash(s: Pick<OrderScript, 'title' | 'text'>): string {
 export function allScripts(order: Pick<Order, 'scripts' | 'clientScripts'>): OrderScript[] {
   return [
     ...(order.scripts || []).map(s => ({ ...s, source: 'agencia' as const })),
-    ...(order.clientScripts || []).map(s => ({ ...s, source: 'cliente' as const })),
+    // Un PDF trae todos los guiones juntos: no es "un guión", así que no ocupa un número
+    ...(order.clientScripts || []).filter(s => !s.fileUrl).map(s => ({ ...s, source: 'cliente' as const })),
   ];
 }
+
+/** PDF con los guiones del cliente (cada uno trae TODOS sus guiones; no se numeran) */
+export const scriptFiles = (order: Pick<Order, 'clientScripts'>): OrderScript[] =>
+  (order.clientScripts || []).filter(s => s.fileUrl).map(s => ({ ...s, source: 'cliente' as const }));
 
 /** Revisión vigente de un guión (si SENDA lo cambió después, ya no cuenta) */
 export function reviewOf(order: Pick<Order, 'scriptReviews'>, script: OrderScript): ScriptReview | null {

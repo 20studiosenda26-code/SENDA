@@ -7,7 +7,7 @@ import { useStore } from '../../store';
 import { uploadSharedFile } from '../../lib/supabaseClient';
 import type { Order, OrderReference, OrderScript, ScriptChoice, ScriptReview } from '../../types';
 import { AvatarPicker, StylePicker, avatarChosen, type AvatarChoice, type StyleChoice } from './BriefPickers';
-import { allScripts, reviewOf, scriptHash, REVIEW_LABEL, choiceForSlot, slotKey, videoSlots } from '../../lib/scripts';
+import { allScripts, scriptFiles, reviewOf, scriptHash, REVIEW_LABEL, choiceForSlot, slotKey, videoSlots } from '../../lib/scripts';
 import { AGENCY_STYLE_ID, AGENCY_STYLE_NAME } from '../../lib/styleCatalog';
 import { DownloadFileButton } from '../DownloadFileButton';
 
@@ -105,6 +105,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   const scripts = allScripts(order);
   const agencyScripts = scripts.filter(s => s.source !== 'cliente');
   const ownScripts = scripts.filter(s => s.source === 'cliente');
+  const ownFiles = scriptFiles(order);
 
   // Una elección por VIDEO (v1…vN): el avatar de cada uno es obligatorio
   const total = videoSlots(order);
@@ -169,8 +170,8 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
     setOwnUploading(true); setOwnErr(null);
     try {
       const url = await uploadSharedFile(f, `brief/client-scripts/${order.id}`);
-      addOwnScript({ id: `cs-${Date.now()}`, title: ownTitle.trim() || f.name.replace(/\.[^.]+$/, ''), text: '', fileName: f.name, fileUrl: url, source: 'cliente' });
-      setOwnTitle('');
+      // Un PDF trae todos los guiones juntos: se guarda como "Guiones en PDF", sin número
+      addOwnScript({ id: `cs-${Date.now()}`, title: 'Guiones en PDF', text: '', fileName: f.name, fileUrl: url, source: 'cliente' });
     } catch {
       setOwnErr('No se pudo subir el archivo. Inténtalo de nuevo.');
     } finally { setOwnUploading(false); }
@@ -299,6 +300,18 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
           {/* Guiones propios */}
           <div className="bg-surface-3/40 border border-line rounded-xl p-4 space-y-3">
             <p className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-accent" /> Tus propios guiones</p>
+            {ownFiles.length > 0 && (
+              <ul className="space-y-2">
+                {ownFiles.map(s => (
+                  <li key={s.id} className="bg-surface-2 border border-line rounded-lg px-3 py-2.5 flex items-center gap-2">
+                    <span className="font-tech text-[10px] font-bold bg-violet/15 text-violet rounded-md px-1.5 py-0.5 shrink-0">TODOS LOS GUIONES</span>
+                    <span className="text-sm font-medium flex-1 truncate">Guiones en PDF</span>
+                    <DownloadFileButton url={s.fileUrl} fileName={s.fileName} label={s.fileName || 'Descargar'} className="text-xs text-accent font-semibold max-w-[220px] truncate" />
+                    <button type="button" title="Quitar PDF" onClick={() => removeOwnScript(s.id)} className="text-muted-2 hover:text-red-400"><Trash2 size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {ownScripts.length > 0 && (
               <ul className="space-y-2">
                 {ownScripts.map(s => (
@@ -306,7 +319,6 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
                     <div className="flex items-center gap-2">
                       <span className="font-tech text-[10px] font-bold bg-violet/15 text-violet rounded-md px-1.5 py-0.5 shrink-0">TUYO</span>
                       <span className="text-sm font-medium flex-1 truncate">{s.title}</span>
-                      {s.fileUrl && <a href={s.fileUrl} target="_blank" rel="noreferrer" className="text-xs text-accent font-semibold flex items-center gap-1"><Download size={12} /> {s.fileName || 'PDF'}</a>}
                       <button type="button" title="Quitar guión" onClick={() => removeOwnScript(s.id)} className="text-muted-2 hover:text-red-400"><Trash2 size={13} /></button>
                     </div>
                     {s.text && <p className="text-xs text-muted mt-1.5 whitespace-pre-wrap line-clamp-4">{s.text}</p>}
@@ -320,8 +332,10 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${ownTab === k ? 'bg-accent text-on-accent' : 'bg-surface-2 border border-line text-muted hover:text-text'}`}>{l}</button>
               ))}
             </div>
-            <input value={ownTitle} onChange={e => setOwnTitle(e.target.value)} placeholder="Título del guión (opcional)"
-              className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+            {ownTab === 'escribir' && (
+              <input value={ownTitle} onChange={e => setOwnTitle(e.target.value)} placeholder="Título del guión (opcional)"
+                className="w-full bg-surface-2 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
+            )}
             {ownTab === 'escribir' ? (
               <>
                 <textarea value={ownText} onChange={e => setOwnText(e.target.value)} rows={5} placeholder="Escribe aquí tu guión completo…"
@@ -331,12 +345,12 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
               </>
             ) : (
               <label className={`w-full py-3 rounded-xl border border-dashed border-accent/50 text-accent text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent/5 ${ownUploading ? 'opacity-60 pointer-events-none' : ''}`}>
-                {ownUploading ? <><Loader2 size={14} className="animate-spin" /> Subiendo…</> : <><Upload size={14} /> Elegir PDF del guión</>}
+                {ownUploading ? <><Loader2 size={14} className="animate-spin" /> Subiendo…</> : <><Upload size={14} /> Elegir el PDF con tus guiones</>}
                 <input type="file" accept=".pdf,application/pdf" className="hidden" disabled={ownUploading} onChange={e => { void submitOwnPdf(e.target.files?.[0]); e.target.value = ''; }} />
               </label>
             )}
             {ownErr && <p className="text-[11px] text-red-400">{ownErr}</p>}
-            <p className="text-[11px] text-muted-2">El guión 1 va con el video 1, el 2 con el video 2… Abajo eliges el avatar de cada video. Puedes subir todos tus guiones en un solo PDF.</p>
+            <p className="text-[11px] text-muted-2">Un solo PDF puede traer todos tus guiones. Si los escribes aquí, el guión 1 va con el video 1, el 2 con el video 2… Abajo eliges el avatar de cada video.</p>
           </div>
         </section>
 
