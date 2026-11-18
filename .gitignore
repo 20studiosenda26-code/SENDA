@@ -10,3 +10,4 @@ dist
 
 # Imágenes de avatares: viven en Supabase Storage (scripts/upload-avatars.mjs), no en el repositorio
 public/avatars/
+public/styles/

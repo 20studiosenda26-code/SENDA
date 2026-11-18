@@ -55,6 +55,8 @@ function sanitizeOrder(o: Order): Order {
     scriptsPdfName: o.scriptsPublishedAt ? (o.scriptsPdfName ?? null) : null,
     scriptsPdfUrl: o.scriptsPublishedAt ? (o.scriptsPdfUrl ?? null) : null,
     scriptChoices: o.scriptChoices || [],
+    scriptReviews: o.scriptReviews || [],
+    clientScripts: o.clientScripts || [],
   };
 }
 

@@ -290,12 +290,32 @@ export interface Order {
   scriptsPdfUrl?: string | null;
   /** Elección por guión/video (guión N ↔ video N): avatar y estilo de edición */
   scriptChoices?: ScriptChoice[];
+  /** Revisión del cliente de cada guión de SENDA: aprobar, rechazar o dejar feedback */
+  scriptReviews?: ScriptReview[];
+  /** Guiones propios del cliente (escritos en la página o subidos en PDF) */
+  clientScripts?: OrderScript[];
 }
 
 export interface OrderScript {
   id: string;
   title: string;
   text: string;
+  /** 'agencia' = lo escribió SENDA · 'cliente' = lo aportó el cliente */
+  source?: 'agencia' | 'cliente';
+  /** Guion subido como archivo (PDF) */
+  fileName?: string | null;
+  fileUrl?: string | null;
+}
+
+export type ScriptReviewStatus = 'approved' | 'rejected' | 'feedback';
+
+export interface ScriptReview {
+  scriptId: string;
+  status: ScriptReviewStatus;
+  feedback?: string | null;
+  at: string;
+  /** Huella del texto revisado: si SENDA lo cambia, la revisión deja de valer */
+  hash?: string;
 }
 
 export interface ScriptChoice {
@@ -350,7 +370,7 @@ export interface ClientProfile {
 
 /** Acciones que hace el cliente; se aplican en su vista al instante y el equipo las procesa */
 export type ClientAction =
-  | { id: string; type: 'brief'; orderId: string; patch: Partial<Pick<Order, 'references' | 'avatarId' | 'avatarName' | 'avatarCustomText' | 'avatarRefUrl' | 'avatarImageUrl' | 'editingStyleId' | 'editingStyleName' | 'clientNotes' | 'briefConfirmedAt' | 'scriptChoices'>>; at: string }
+  | { id: string; type: 'brief'; orderId: string; patch: Partial<Pick<Order, 'references' | 'avatarId' | 'avatarName' | 'avatarCustomText' | 'avatarRefUrl' | 'avatarImageUrl' | 'editingStyleId' | 'editingStyleName' | 'clientNotes' | 'briefConfirmedAt' | 'scriptChoices' | 'scriptReviews' | 'clientScripts'>>; at: string }
   | { id: string; type: 'feedback'; videoId: string; items: { time: number; text: string }[]; at: string }
   | { id: string; type: 'approve'; videoId: string; at: string };
 

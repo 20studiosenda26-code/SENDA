@@ -3,6 +3,8 @@ import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Plus, RefreshC
 import { useStore } from '../../store';
 import type { Order, OrderScript } from '../../types';
 import { BriefEditor } from './BriefEditor';
+import { allScripts, reviewOf, REVIEW_LABEL } from '../../lib/scripts';
+import { AGENCY_STYLE_ID } from '../../lib/styleCatalog';
 
 const newScript = (n: number): OrderScript => ({ id: `sc-${Date.now()}-${n}`, title: `Guión ${n}`, text: '' });
 
@@ -20,9 +22,12 @@ export function OrderBriefPanel({ order }: { order: Order }) {
   const dirty = JSON.stringify(scripts) !== JSON.stringify(order.scripts || []);
   const flash = (ok: boolean, text: string) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
 
+  const all = allScripts(order);
+  const hasChoice = (c: { avatarId?: string | null; avatarCustomText?: string | null; avatarRefUrl?: string | null }) => Boolean(c.avatarId || c.avatarCustomText || c.avatarRefUrl);
+  const reviews = (order.scripts || []).map(s => reviewOf(order, { ...s, source: 'agencia' as const }));
   const steps = [
-    { label: 'Avatar', ok: order.scriptsService && (order.scripts || []).length ? (order.scriptChoices || []).some(c => c.avatarId || c.avatarCustomText || c.avatarRefUrl) : Boolean(order.avatarId || order.avatarCustomText || order.avatarName) },
-    { label: 'Estilo', ok: order.scriptsService && (order.scripts || []).length ? (order.scriptChoices || []).some(c => c.styleId) : Boolean(order.editingStyleId) },
+    { label: 'Avatar (obligatorio)', ok: all.length ? all.every(s => { const c = (order.scriptChoices || []).find(x => x.scriptId === s.id); return Boolean(c && hasChoice(c)); }) : Boolean(order.avatarId || order.avatarCustomText || order.avatarName) },
+    { label: 'Estilo', ok: all.length ? (order.scriptChoices || []).some(c => c.styleId && c.styleId !== AGENCY_STYLE_ID) : Boolean(order.editingStyleId && order.editingStyleId !== AGENCY_STYLE_ID) },
     { label: 'Referencias', ok: (order.references || []).length > 0 },
     { label: 'Confirmado', ok: Boolean(order.briefConfirmedAt) },
   ];
@@ -100,6 +105,17 @@ export function OrderBriefPanel({ order }: { order: Order }) {
                 </div>
                 <textarea value={s.text} onChange={e => setScripts(list => list.map(x => x.id === s.id ? { ...x, text: e.target.value } : x))} rows={5} placeholder="Escribe el guión completo del video…"
                   className="w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent resize-y leading-relaxed" />
+                {(() => {
+                  const saved = (order.scripts || []).find(x => x.id === s.id);
+                  const rv = saved ? reviews[(order.scripts || []).indexOf(saved)] : null;
+                  const stale = saved && (order.scriptReviews || []).some(r => r.scriptId === s.id) && !rv;
+                  if (!rv && !stale) return null;
+                  return rv ? (
+                    <p className={`text-[11px] rounded-lg px-3 py-2 border ${rv.status === 'approved' ? 'bg-mint-dim text-mint border-mint/30' : rv.status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-amber-dim text-amber border-amber/30'}`}>
+                      <b>Cliente: {REVIEW_LABEL[rv.status]}</b> · {rv.at.slice(0, 10)}{rv.feedback ? <> — <span className="text-text/90">{rv.feedback}</span></> : null}
+                    </p>
+                  ) : <p className="text-[11px] text-muted-2">Cambiaste este guión: el cliente debe revisarlo de nuevo.</p>;
+                })()}
               </div>
             ))}
             <div className="flex items-center gap-2 flex-wrap">
@@ -114,6 +130,17 @@ export function OrderBriefPanel({ order }: { order: Order }) {
                 {busy === 'scripts' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {order.scriptsPublishedAt ? 'Publicar cambios al cliente' : 'Publicar guiones al cliente'}
               </button>
             </div>
+            {(order.clientScripts || []).length > 0 && (
+              <div className="bg-surface-2 border border-line rounded-xl p-3 space-y-2">
+                <p className="text-xs font-semibold flex items-center gap-1.5"><FileText size={13} className="text-violet" /> Guiones propios del cliente ({(order.clientScripts || []).length})</p>
+                {(order.clientScripts || []).map(s => (
+                  <div key={s.id} className="text-xs bg-surface-3 border border-line rounded-lg px-3 py-2">
+                    <p className="font-medium flex items-center gap-2">{s.title}{s.fileUrl && <a href={s.fileUrl} target="_blank" rel="noreferrer" className="text-accent font-semibold flex items-center gap-1"><Download size={11} /> {s.fileName || 'PDF'}</a>}</p>
+                    {s.text && <p className="text-muted mt-1 whitespace-pre-wrap line-clamp-4">{s.text}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
             {order.scriptsPublishedAt && (
               <p className="text-[11px] text-mint flex items-center gap-1.5 flex-wrap">
                 <CheckCircle2 size={12} /> Publicados el {order.scriptsPublishedAt.slice(0, 10)}
