@@ -544,10 +544,10 @@ function VideoReview({
           <div className={`rounded-xl p-4 space-y-3 border ${video.qc === 'aprobado_cliente' ? 'bg-mint/10 border-mint/40' : 'bg-surface-2 border-line'}`}>
             <span className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={15} className="text-mint" /> Decisión final</span>
             {video.qc === 'aprobado_cliente' ? (
-              <p className="text-xs text-mint">Aprobado por el cliente{video.date ? ` el ${video.date}` : ''}. El pago del 100% quedó liberado.</p>
+              <p className="text-xs text-mint">Video aprobado{video.date ? ` el ${video.date}` : ''}.</p>
             ) : confirmApprove ? (
               <div className="space-y-2 animate-fadeIn">
-                <p className="text-xs text-muted">¿Confirmas que el video queda aprobado? Esto cierra el video y libera el 100% del pago al equipo.</p>
+                <p className="text-xs text-muted">¿Confirmas que apruebas este video?</p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setConfirmApprove(false)}
                     className="flex-1 py-2 rounded-xl bg-surface-3 border border-line text-xs text-muted hover:text-text flex items-center justify-center gap-1"><X size={13} /> Cancelar</button>
