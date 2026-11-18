@@ -1,12 +1,13 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, NotificationCategory, Role, ThemeMode, ViewKey, Config, PaidHistoryEntry, ChatMessage, Video, QcStatus, ClipStatus, CalendarEvent, MainImageStatus, ClassroomModule, EmailLogEntry, Contract, ContractSignedUpload, ChatGroup, ChatMsg, Order, OrderStatus, FinanceSettings, FinanceDayClosing, AppExpense, PayrollPayment, CapacityProtocolConfig } from './types';
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
-import { saveSharedNow, loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
+import { uploadSharedFile, saveSharedNow, loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
 import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
-import type { ClientAction, ClientCatalog, ClientProfile, ClientView } from './types';
+import type { ClientAction, ClientCatalog, ClientProfile, ClientView, OrderScript } from './types';
+import { buildBriefPdf, buildScriptsPdf, pdfFileName } from './lib/pdfTemplate';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -159,6 +160,14 @@ interface Store {
   refreshProfiles: () => Promise<void>;
   /** Vuelve a copiar al visor de cada cliente lo que se le ha publicado */
   resyncClientView: () => void;
+  /** Genera el PDF del brief (plantilla SENDA), lo sube y lo deja como brief del proyecto */
+  generateBriefPdf: (orderId: string, overrides?: Partial<Order>) => Promise<boolean>;
+  /** Servicio de guiones: guarda los guiones, genera su PDF y avisa al cliente por el chat */
+  publishScripts: (orderId: string, scripts: OrderScript[]) => Promise<boolean>;
+  /** Borra lo que el cliente eligió en el brief y le avisa para que lo vuelva a llenar */
+  resetBrief: (orderId: string) => Promise<void>;
+  /** Admin: guarda cambios al brief como si fuera el cliente, regenera el PDF y (opcional) avisa al cliente */
+  saveBriefAsAdmin: (orderId: string, patch: Partial<Order>, notifyClient: boolean) => Promise<boolean>;
   notifications: NotificationItem[];
   deleteNotification: (id: string) => void;
   clearNotifications: (role: Role) => void;
@@ -2279,6 +2288,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!clientOwnsTarget(clientId, a, ordersRef.current, brandsRef.current)) continue;
         if (a.type === 'brief') {
           applyOrderPatchRef.current(a.orderId, a.patch);
+          // Al confirmar, el brief se vuelve un PDF con la plantilla de SENDA y queda en el proyecto
+          if (a.patch.briefConfirmedAt) void generateBriefRef.current(a.orderId, a.patch);
           pushNotification('admin', 'sistema', `El cliente actualizó el brief de "${ordersRef.current.find(o => o.id === a.orderId)?.brand || 'su proyecto'}"`);
         } else if (a.type === 'feedback') {
           submitFeedbackRef.current(a.videoId, a.items);
@@ -2304,9 +2315,79 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [role, processClientInbox]);
 
   const applyOrderPatchRef = useRef<(id: string, patch: Partial<Order>) => void>(() => {});
+  const generateBriefRef = useRef<(orderId: string, overrides?: Partial<Order>) => Promise<boolean>>(async () => false);
   const submitFeedbackRef = useRef<(videoId: string, items: { time: number; text: string }[]) => void>(() => {});
   const setQcRef = useRef<(videoId: string, status: QcStatus) => void>(() => {});
+  const clientCatalogRef = useRef(clientCatalog);
+  useEffect(() => { clientCatalogRef.current = clientCatalog; }, [clientCatalog]);
+
+  // Aviso al cliente por su chat con el admin (los clientes no tienen campana)
+  const notifyClientByChat = useCallback(async (clientId: string | null | undefined, text: string) => {
+    if (!clientId) return;
+    try {
+      const gid = await startAdminDm(clientId);
+      if (gid) await sendChatGroupMessage(gid, text);
+    } catch { /* el aviso es un extra: no debe romper el guardado */ }
+  }, [startAdminDm, sendChatGroupMessage]);
+
+  const generateBriefPdf = useCallback(async (orderId: string, overrides?: Partial<Order>): Promise<boolean> => {
+    const base = ordersRef.current.find(o => o.id === orderId);
+    if (!base) return false;
+    const order = { ...base, ...overrides };
+    try {
+      const blob = await buildBriefPdf(order, clientCatalogRef.current);
+      const name = pdfFileName('Brief', order.brand);
+      const url = await uploadSharedFile(new File([blob], name, { type: 'application/pdf' }), `briefs/${orderId}`);
+      updateOrder(orderId, { briefFileName: name, briefFileUrl: url });
+      // El PDF queda como brief de cada video del proyecto (el Clipper lo ve en su tarea)
+      brandsRef.current.forEach(b => b.videos
+        .filter(v => v.orderId === orderId || v.id === base.boardVideoId)
+        .forEach(v => uploadBrief(v.id, name, url)));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [updateOrder, uploadBrief]);
+
+  const publishScripts = useCallback(async (orderId: string, scripts: OrderScript[]): Promise<boolean> => {
+    const base = ordersRef.current.find(o => o.id === orderId);
+    if (!base) return false;
+    const clean = scripts.filter(s => s.text.trim() || s.title.trim());
+    const next = { ...base, scriptsService: true, scripts: clean, scriptsPublishedAt: new Date().toISOString() };
+    try {
+      const blob = await buildScriptsPdf(next);
+      const name = pdfFileName('Guiones', base.brand);
+      const url = await uploadSharedFile(new File([blob], name, { type: 'application/pdf' }), `guiones/${orderId}`);
+      updateOrder(orderId, { scriptsService: true, scripts: clean, scriptsPublishedAt: next.scriptsPublishedAt, scriptsPdfName: name, scriptsPdfUrl: url });
+      void notifyClientByChat(base.clientId, `Ya están listos los guiones de "${base.brand}". Entra a Mis proyectos para revisarlos y elegir el avatar y el estilo de edición de cada uno.`);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [updateOrder, notifyClientByChat]);
+
+  const resetBrief = useCallback(async (orderId: string) => {
+    const base = ordersRef.current.find(o => o.id === orderId);
+    if (!base) return;
+    updateOrder(orderId, {
+      avatarId: null, avatarName: null, avatarCustomText: null, avatarRefUrl: null,
+      editingStyleId: null, editingStyleName: null, references: [], clientNotes: null,
+      scriptChoices: [], briefConfirmedAt: null,
+    });
+    void notifyClientByChat(base.clientId, `Revisamos el brief de "${base.brand}" y necesitamos que lo vuelvas a llenar. Entra a Mis proyectos y confírmalo de nuevo.`);
+  }, [updateOrder, notifyClientByChat]);
+
+  const saveBriefAsAdmin = useCallback(async (orderId: string, patch: Partial<Order>, notifyClient: boolean): Promise<boolean> => {
+    const base = ordersRef.current.find(o => o.id === orderId);
+    if (!base) return false;
+    updateOrder(orderId, patch);
+    const ok = await generateBriefPdf(orderId, patch);
+    if (notifyClient) void notifyClientByChat(base.clientId, `Actualizamos el brief de "${base.brand}". Puedes revisarlo en Mis proyectos.`);
+    return ok;
+  }, [updateOrder, generateBriefPdf, notifyClientByChat]);
+
   useEffect(() => {
+    generateBriefRef.current = generateBriefPdf;
     applyOrderPatchRef.current = updateOrder;
     submitFeedbackRef.current = submitClientFeedbackBatch;
     setQcRef.current = setQc;
@@ -2324,6 +2405,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       references: patch.references,
       avatarId: patch.avatarId,
       avatarName: patch.avatarName,
+      avatarCustomText: patch.avatarCustomText,
+      avatarRefUrl: patch.avatarRefUrl,
+      scriptChoices: patch.scriptChoices,
       editingStyleId: patch.editingStyleId,
       editingStyleName: patch.editingStyleName,
       clientNotes: patch.clientNotes,
@@ -2338,6 +2422,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles, resyncClientView,
+    generateBriefPdf, publishScripts, resetBrief, saveBriefAsAdmin,
     notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,

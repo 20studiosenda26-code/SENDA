@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
-import type { Brand, Order, OrderReference, Video } from '../types';
+import type { Brand, Order, Video } from '../types';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { AnimatedRadialChart } from '../components/ui/animated-radial-chart';
 import { AttentionTile, countdownLabel, deadlineMs, fmtDate, FollowUpRow, Modal, VideoList } from '../components/home/home-bits';
 import { setNavIntent } from '../lib/navIntent';
+import { BriefEditor, briefLocked } from '../components/brief/BriefEditor';
 import {
-  ArrowRight, CheckCircle2, Clock, ExternalLink, Film, Link2, Lock, MessageSquare, Palette,
-  PlayCircle, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, UserCircle2, Receipt, Download,
+  ArrowRight, CheckCircle2, Clock, Film, MessageSquare, Palette,
+  PlayCircle, RefreshCw, Sparkles, Receipt, Download,
 } from 'lucide-react';
 
 const isDelivered = (v: Video) => Boolean(v.publishedToClient || v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente');
 const toReview = (v: Video) => isDelivered(v) && v.qc !== 'aprobado_cliente' && v.qc !== 'correcciones';
-const briefLocked = (o: Order) => Boolean(o.clipperId);
 
 function brandOf(order: Order, brands: Brand[]): Brand | undefined {
   return brands.find(b => b.id === `brand-${order.id}`) || brands.find(b => b.videos.some(v => v.orderId === order.id));
@@ -312,199 +312,6 @@ export function ClientBriefs() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function BriefEditor({ order }: { order: Order }) {
-  const { clientCatalog, updateOrder, setView } = useStore();
-  const locked = briefLocked(order);
-  const [avatarId, setAvatarId] = useState<string | null>(order.avatarId ?? null);
-  const [avatarName, setAvatarName] = useState(order.avatarName || '');
-  const [styleId, setStyleId] = useState<string | null>(order.editingStyleId ?? null);
-  const [refs, setRefs] = useState<OrderReference[]>(order.references || []);
-  const [refName, setRefName] = useState('');
-  const [refUrl, setRefUrl] = useState('');
-  const [notes, setNotes] = useState(order.clientNotes || '');
-  const [saved, setSaved] = useState<'draft' | 'confirmed' | null>(null);
-
-  useEffect(() => { setSaved(null); }, [order.id]);
-
-  const style = clientCatalog.styles.find(s => s.id === styleId) || null;
-  const avatar = clientCatalog.avatars.find(a => a.id === avatarId) || null;
-  const refUrlValid = /^https?:\/\/\S+\.\S+/.test(refUrl.trim());
-  const steps = [Boolean(avatarId || avatarName.trim()), Boolean(styleId), refs.length > 0];
-  const complete = steps.every(Boolean);
-
-  const addRef = () => {
-    if (!refUrlValid) return;
-    setRefs(r => [...r, { id: `ref-${Date.now()}`, name: refName.trim() || `Referencia ${r.length + 1}`, url: refUrl.trim() }]);
-    setRefName('');
-    setRefUrl('');
-  };
-
-  const save = (confirm: boolean) => {
-    updateOrder(order.id, {
-      avatarId,
-      avatarName: avatar?.name || avatarName.trim() || null,
-      editingStyleId: styleId,
-      editingStyleName: style?.name || null,
-      references: refs,
-      clientNotes: notes.trim() || null,
-      briefConfirmedAt: confirm ? new Date().toISOString() : order.briefConfirmedAt ?? null,
-    });
-    setSaved(confirm ? 'confirmed' : 'draft');
-    setTimeout(() => setSaved(null), 2500);
-  };
-
-  return (
-    <div className="glow-card bg-surface-2 border border-line rounded-xl overflow-hidden">
-      <div className="p-5 border-b border-line flex items-center justify-between gap-3 flex-wrap bg-gradient-to-br from-accent/5 to-transparent">
-        <div>
-          <p className="text-[11px] font-tech uppercase tracking-wider text-accent">Brief del proyecto</p>
-          <h3 className="font-display text-2xl font-bold">{order.brand}</h3>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {['Avatar', 'Estilo', 'Referencias'].map((label, i) => (
-            <span key={label} className={`text-[10px] font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${steps[i] ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
-              {steps[i] ? <CheckCircle2 size={11} /> : <span className="w-2.5 h-2.5 rounded-full border border-current" />} {label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {locked && (
-        <div className="mx-5 mt-5 flex items-start gap-2.5 bg-surface-3 border border-line rounded-xl px-4 py-3 text-xs text-muted">
-          <Lock size={15} className="text-amber shrink-0 mt-0.5" />
-          <span className="flex-1">Tu proyecto ya está en producción y el brief quedó fijo. Si necesitas cambiar algo, escríbenos por el chat.</span>
-          <button type="button" onClick={() => setView('chat')} className="text-accent font-semibold shrink-0">Ir al chat</button>
-        </div>
-      )}
-
-      <fieldset disabled={locked} className="p-5 space-y-6 disabled:opacity-70">
-        {/* 1. Avatar */}
-        <section className="space-y-3">
-          <SectionTitle n={1} icon={UserCircle2} title="Elige el avatar" hint="La persona o personaje que aparecerá en tus videos." />
-          {clientCatalog.avatars.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-              {clientCatalog.avatars.map(a => {
-                const on = avatarId === a.id;
-                return (
-                  <button key={a.id} type="button" onClick={() => setAvatarId(on ? null : a.id)}
-                    className={`relative text-left rounded-xl border overflow-hidden transition-all ${on ? 'border-accent ring-2 ring-accent/40' : 'border-line hover:border-accent/40'}`}>
-                    <div className="aspect-[4/5] bg-surface-3 flex items-center justify-center">
-                      {a.imageUrl ? <img src={a.imageUrl} alt={a.name} className="w-full h-full object-cover" /> : <UserCircle2 size={36} className="text-muted-2" />}
-                    </div>
-                    <div className="px-3 py-2">
-                      <p className="text-sm font-semibold truncate">{a.name}</p>
-                      {a.description && <p className="text-[11px] text-muted-2 line-clamp-2">{a.description}</p>}
-                    </div>
-                    {on && <CheckCircle2 size={20} className="absolute top-2 right-2 text-accent bg-surface rounded-full" />}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <input value={avatarName} onChange={e => setAvatarName(e.target.value)} placeholder="Describe el avatar que quieres (ej. mujer 25-30, estilo casual)"
-              className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
-          )}
-        </section>
-
-        {/* 2. Estilo */}
-        <section className="space-y-3">
-          <SectionTitle n={2} icon={Palette} title="Estilo de edición" hint="Ritmo, subtítulos, transiciones y música." />
-          {clientCatalog.styles.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {clientCatalog.styles.map(st => {
-                const on = styleId === st.id;
-                return (
-                  <button key={st.id} type="button" onClick={() => setStyleId(on ? null : st.id)}
-                    className={`text-left rounded-xl border p-4 transition-all ${on ? 'bg-accent/10 border-accent ring-1 ring-accent/30' : 'bg-surface-3/60 border-line hover:border-accent/40'}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold">{st.name}</p>
-                      {on ? <CheckCircle2 size={17} className="text-accent" /> : <span className="w-4 h-4 rounded-full border border-line" />}
-                    </div>
-                    <p className="text-xs text-muted mt-1 leading-snug">{st.description}</p>
-                    {st.exampleUrl && (
-                      <a href={st.exampleUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline">
-                        Ver ejemplo <ExternalLink size={11} />
-                      </a>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-2 bg-surface-3 border border-dashed border-line rounded-xl px-4 py-3">El equipo SENDA aún no publicó estilos. Cuéntanos el estilo que buscas en las notas.</p>
-          )}
-        </section>
-
-        {/* 3. Referencias */}
-        <section className="space-y-3">
-          <SectionTitle n={3} icon={Link2} title="Referencias" hint="Videos o cuentas que te gusten (TikTok, Reels, YouTube, Drive…)." />
-          {refs.length > 0 && (
-            <ul className="space-y-1.5">
-              {refs.map(r => (
-                <li key={r.id} className="flex items-center gap-2 bg-surface-3/70 border border-line rounded-xl px-3 py-2">
-                  <Link2 size={13} className="text-accent shrink-0" />
-                  <a href={r.url} target="_blank" rel="noreferrer" className="flex-1 min-w-0 text-sm truncate hover:text-accent">{r.name}<span className="text-muted-2 text-xs ml-2">{r.url}</span></a>
-                  <button type="button" onClick={() => setRefs(list => list.filter(x => x.id !== r.id))} title="Quitar" className="text-muted-2 hover:text-red-400"><Trash2 size={13} /></button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex gap-2 flex-wrap">
-            <input value={refName} onChange={e => setRefName(e.target.value)} placeholder="Nombre (opcional)"
-              className="w-40 bg-surface-3 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2" />
-            <input value={refUrl} onChange={e => setRefUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addRef(); }} placeholder="https://…"
-              className={`flex-1 min-w-[180px] bg-surface-3 border rounded-xl px-3 py-2 text-sm outline-none placeholder:text-muted-2 ${refUrl && !refUrlValid ? 'border-red-500/60' : 'border-line focus:border-accent'}`} />
-            <button type="button" onClick={addRef} disabled={!refUrlValid}
-              className="px-3.5 rounded-xl bg-surface-3 border border-line text-accent text-sm font-semibold flex items-center gap-1 hover:border-accent/50 disabled:opacity-40">
-              <Plus size={14} /> Añadir
-            </button>
-          </div>
-        </section>
-
-        {/* 4. Notas */}
-        <section className="space-y-3">
-          <SectionTitle n={4} icon={StickyNote} title="Notas para el equipo" hint="Mensajes clave, ofertas, lo que NO quieres ver…" />
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Escribe aquí cualquier detalle importante"
-            className="w-full bg-surface-3 border border-line rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-y" />
-        </section>
-      </fieldset>
-
-      {!locked && (
-        <div className="px-5 py-4 border-t border-line bg-surface-3/40 flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs">
-            {saved === 'confirmed' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Brief confirmado y enviado a SENDA</span>
-              : saved === 'draft' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Borrador guardado</span>
-              : order.briefConfirmedAt ? <span className="text-muted-2">Confirmado el {order.briefConfirmedAt.slice(0, 10)} · puedes seguir ajustándolo</span>
-              : <span className="text-muted-2">{complete ? 'Todo listo para confirmar' : 'Completa avatar, estilo y al menos una referencia'}</span>}
-          </p>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => save(false)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-surface-3 border border-line text-muted hover:text-text">
-              <Save size={13} /> Guardar borrador
-            </button>
-            <button type="button" onClick={() => save(true)} disabled={!complete}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-accent text-on-accent hover:bg-accent-strong disabled:opacity-40 disabled:cursor-not-allowed">
-              <CheckCircle2 size={13} /> Confirmar brief
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SectionTitle({ n, icon: Icon, title, hint }: { n: number; icon: typeof Film; title: string; hint: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="w-7 h-7 rounded-lg bg-accent-dim text-accent font-tech text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
-      <div>
-        <p className="font-semibold flex items-center gap-1.5"><Icon size={15} className="text-accent" /> {title}</p>
-        <p className="text-xs text-muted-2">{hint}</p>
-      </div>
     </div>
   );
 }

@@ -45,6 +45,15 @@ function sanitizeOrder(o: Order): Order {
     invoiceFileName: o.invoiceFileName ?? null,
     invoiceFileUrl: o.invoiceFileUrl ?? null,
     clientId: o.clientId ?? null,
+    avatarCustomText: o.avatarCustomText ?? null,
+    avatarRefUrl: o.avatarRefUrl ?? null,
+    scriptsService: Boolean(o.scriptsService),
+    // El cliente solo ve los guiones cuando SENDA los publica
+    scripts: o.scriptsPublishedAt ? (o.scripts || []) : [],
+    scriptsPublishedAt: o.scriptsPublishedAt ?? null,
+    scriptsPdfName: o.scriptsPublishedAt ? (o.scriptsPdfName ?? null) : null,
+    scriptsPdfUrl: o.scriptsPublishedAt ? (o.scriptsPdfUrl ?? null) : null,
+    scriptChoices: o.scriptChoices || [],
   };
 }
 

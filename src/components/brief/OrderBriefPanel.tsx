@@ -1,0 +1,141 @@
+import { useEffect, useState } from 'react';
+import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Plus, RefreshCw, ScrollText, Send, ShieldCheck, Trash2, X } from 'lucide-react';
+import { useStore } from '../../store';
+import type { Order, OrderScript } from '../../types';
+import { BriefEditor } from './BriefEditor';
+
+const newScript = (n: number): OrderScript => ({ id: `sc-${Date.now()}-${n}`, title: `Guión ${n}`, text: '' });
+
+/** Admin: ve el brief como el cliente, lo corrige o lo borra, descarga su PDF y gestiona el servicio de guiones. */
+export function OrderBriefPanel({ order }: { order: Order }) {
+  const { generateBriefPdf, publishScripts, updateOrder } = useStore();
+  const [openBrief, setOpenBrief] = useState(false);
+  const [busy, setBusy] = useState<'pdf' | 'scripts' | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [scripts, setScripts] = useState<OrderScript[]>(order.scripts || []);
+
+  // Si cambian por fuera (otro admin), se actualizan mientras no haya cambios sin publicar
+  useEffect(() => { setScripts(order.scripts || []); }, [order.scripts]);
+
+  const dirty = JSON.stringify(scripts) !== JSON.stringify(order.scripts || []);
+  const flash = (ok: boolean, text: string) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
+
+  const steps = [
+    { label: 'Avatar', ok: order.scriptsService && (order.scripts || []).length ? (order.scriptChoices || []).some(c => c.avatarId || c.avatarCustomText || c.avatarRefUrl) : Boolean(order.avatarId || order.avatarCustomText || order.avatarName) },
+    { label: 'Estilo', ok: order.scriptsService && (order.scripts || []).length ? (order.scriptChoices || []).some(c => c.styleId) : Boolean(order.editingStyleId) },
+    { label: 'Referencias', ok: (order.references || []).length > 0 },
+    { label: 'Confirmado', ok: Boolean(order.briefConfirmedAt) },
+  ];
+
+  const genPdf = async () => {
+    setBusy('pdf');
+    const ok = await generateBriefPdf(order.id);
+    setBusy(null);
+    flash(ok, ok ? 'PDF del brief generado y subido al proyecto' : 'No se pudo generar el PDF. Intenta de nuevo.');
+  };
+  const publish = async () => {
+    setBusy('scripts');
+    const ok = await publishScripts(order.id, scripts);
+    setBusy(null);
+    flash(ok, ok ? 'Guiones publicados: el cliente ya los ve y recibió el aviso por el chat' : 'No se pudieron publicar los guiones. Intenta de nuevo.');
+  };
+
+  return (
+    <div className="bg-surface-3/50 border border-line rounded-xl p-4 space-y-4 animate-fadeIn">
+      {/* Brief */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-accent" /> Brief del proyecto</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {steps.map(s => (
+              <span key={s.label} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${s.ok ? 'bg-mint-dim text-mint' : 'bg-surface-2 text-muted-2'}`}>
+                {s.ok ? <CheckCircle2 size={10} /> : <span className="w-2 h-2 rounded-full border border-current" />} {s.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button type="button" onClick={() => setOpenBrief(true)}
+            className="px-3.5 py-2 rounded-lg bg-violet/15 border border-violet/40 text-violet text-xs font-semibold flex items-center gap-1.5 hover:bg-violet/25">
+            <ShieldCheck size={14} /> Abrir brief como cliente
+          </button>
+          {order.briefFileUrl ? (
+            <a href={order.briefFileUrl} target="_blank" rel="noreferrer" download={order.briefFileName || undefined}
+              className="px-3.5 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+              <Download size={14} className="text-accent" /> Descargar brief PDF <ExternalLink size={11} className="text-muted-2" />
+            </a>
+          ) : null}
+          <button type="button" disabled={busy === 'pdf'} onClick={() => void genPdf()}
+            className="px-3.5 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40 disabled:opacity-50">
+            {busy === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} className="text-accent" />} {order.briefFileUrl ? 'Regenerar PDF' : 'Generar PDF del brief'}
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-2">Cuando el cliente confirma su brief, el PDF se genera solo y queda en el proyecto para el Clipper.</p>
+      </div>
+
+      {/* Servicio de guiones */}
+      <div className="space-y-3 pt-4 border-t border-line">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-accent" /> Servicio de guiones</p>
+          <button type="button" role="switch" aria-checked={Boolean(order.scriptsService)}
+            onClick={() => updateOrder(order.id, { scriptsService: !order.scriptsService })}
+            className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${order.scriptsService ? 'bg-mint-dim text-mint border-mint/30' : 'bg-surface-2 text-muted border-line'}`}>
+            <span className={`w-8 h-4 rounded-full relative transition-colors ${order.scriptsService ? 'bg-mint' : 'bg-surface-3 border border-line'}`}>
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${order.scriptsService ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </span>
+            {order.scriptsService ? 'Activo para este cliente' : 'Inactivo'}
+          </button>
+        </div>
+
+        {order.scriptsService && (
+          <div className="space-y-2.5 animate-fadeIn">
+            <p className="text-[11px] text-muted-2">Escribe un guión por video. Al publicar, se genera el PDF de guiones con la plantilla de SENDA y el cliente recibe el aviso por el chat para elegir avatar y estilo de cada uno.</p>
+            {scripts.map((s, i) => (
+              <div key={s.id} className="bg-surface-2 border border-line rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-tech text-[11px] font-bold bg-surface-3 text-accent rounded-md px-2 py-1 shrink-0">GUIÓN {i + 1}</span>
+                  <input value={s.title} onChange={e => setScripts(list => list.map(x => x.id === s.id ? { ...x, title: e.target.value } : x))} placeholder="Título del guión"
+                    className="flex-1 bg-surface-3 border border-line rounded-lg px-3 py-1.5 text-sm outline-none focus:border-accent" />
+                  <button type="button" title="Quitar guión" onClick={() => setScripts(list => list.filter(x => x.id !== s.id))} className="text-muted-2 hover:text-red-400"><Trash2 size={14} /></button>
+                </div>
+                <textarea value={s.text} onChange={e => setScripts(list => list.map(x => x.id === s.id ? { ...x, text: e.target.value } : x))} rows={5} placeholder="Escribe el guión completo del video…"
+                  className="w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent resize-y leading-relaxed" />
+              </div>
+            ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button type="button" onClick={() => setScripts(list => [...list, newScript(list.length + 1)])}
+                className="px-3 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40"><Plus size={13} className="text-accent" /> Agregar guión</button>
+              {scripts.length === 0 && order.videoCount > 1 && (
+                <button type="button" onClick={() => setScripts(Array.from({ length: order.videoCount }, (_, i) => newScript(i + 1)))}
+                  className="px-3 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium hover:border-accent/40">Crear {order.videoCount} guiones en blanco</button>
+              )}
+              <button type="button" disabled={busy === 'scripts' || scripts.every(s => !s.text.trim()) || (!dirty && Boolean(order.scriptsPublishedAt))} onClick={() => void publish()}
+                className="ml-auto px-4 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:bg-accent-strong disabled:opacity-40">
+                {busy === 'scripts' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {order.scriptsPublishedAt ? 'Publicar cambios al cliente' : 'Publicar guiones al cliente'}
+              </button>
+            </div>
+            {order.scriptsPublishedAt && (
+              <p className="text-[11px] text-mint flex items-center gap-1.5 flex-wrap">
+                <CheckCircle2 size={12} /> Publicados el {order.scriptsPublishedAt.slice(0, 10)}
+                {order.scriptsPdfUrl && <a href={order.scriptsPdfUrl} target="_blank" rel="noreferrer" className="underline hover:text-text">Ver PDF de guiones</a>}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {msg && <p className={`text-xs flex items-center gap-1.5 ${msg.ok ? 'text-mint' : 'text-red-400'}`}>{msg.ok ? <CheckCircle2 size={13} /> : <X size={13} />} {msg.text}</p>}
+
+      {openBrief && (
+        <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm overflow-y-auto p-3 sm:p-6 animate-fadeIn" onClick={() => setOpenBrief(false)}>
+          <div className="max-w-4xl mx-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-end mb-2">
+              <button type="button" onClick={() => setOpenBrief(false)} className="px-3 py-1.5 rounded-lg bg-surface-2 border border-line text-xs text-muted hover:text-text flex items-center gap-1.5"><X size={13} /> Cerrar</button>
+            </div>
+            <BriefEditor order={order} asAdmin onDone={() => setOpenBrief(false)} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

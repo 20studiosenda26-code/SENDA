@@ -331,7 +331,7 @@ function VideoDetail({
   const allClipsApproved = video.clips.length > 0 && video.clips.every(c => c.status === 'approved');
   const pendingClipsCount = video.clips.filter(c => c.status !== 'approved').length;
   // Carpeta de Drive del proyecto (si el admin la vinculó); si no, la carpeta general
-  const { orders: allOrders } = useStore();
+  const { orders: allOrders, clientCatalog } = useStore();
   const projectDriveUrl = findOrderForVideo(video, brandName, allOrders)?.driveFolderUrl || getGoogleDriveFolderUrl();
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
@@ -1276,14 +1276,46 @@ function VideoDetail({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-surface-3 border border-line rounded-lg p-2.5">
-                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
-                <p className="text-text">{order?.avatarName || <span className="text-muted-2">Sin elegir</span>}</p>
-              </div>
-              <div className="bg-surface-3 border border-line rounded-lg p-2.5">
-                <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><Palette size={11} /> Estilo</p>
-                <p className="text-text">{order?.editingStyleName || <span className="text-muted-2">Sin elegir</span>}</p>
-              </div>
+              {(() => {
+                // Con servicio de guiones: el guión N, su avatar y su estilo son los del video N
+                const idx = (video.videoNumber || 1) - 1;
+                const sc = order?.scriptsService ? (order.scripts || [])[idx] : undefined;
+                const ch = sc ? (order?.scriptChoices || []).find(c => c.scriptId === sc.id) : undefined;
+                const avatarId = sc ? ch?.avatarId : order?.avatarId;
+                const av = avatarId ? clientCatalog.avatars.find(a => a.id === avatarId) : null;
+                const customText = sc ? ch?.avatarCustomText : order?.avatarCustomText;
+                const refUrl = sc ? ch?.avatarRefUrl : order?.avatarRefUrl;
+                const avName = sc ? ch?.avatarName : order?.avatarName;
+                const styleName = sc ? ch?.styleName : order?.editingStyleName;
+                const styleDesc = clientCatalog.styles.find(s => s.id === (sc ? ch?.styleId : order?.editingStyleId))?.description;
+                return (
+                  <>
+                    {sc && (
+                      <details className="bg-surface-3 border border-line rounded-lg p-2.5 col-span-2" open>
+                        <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-muted-2 font-tech">Guión {idx + 1} · {sc.title}</summary>
+                        <p className="text-text whitespace-pre-line mt-2 leading-relaxed">{sc.text}</p>
+                      </details>
+                    )}
+                    <div className="bg-surface-3 border border-line rounded-lg p-2.5 flex gap-2.5">
+                      {(av?.imageUrl || refUrl) && (
+                        <a href={av?.imageUrl || refUrl || '#'} target="_blank" rel="noreferrer" className="w-12 aspect-[9/16] rounded-md overflow-hidden border border-line shrink-0 bg-surface-2">
+                          <img src={av?.imageUrl || refUrl || ''} alt="Avatar" className="w-full h-full object-cover" />
+                        </a>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><User size={11} /> Avatar</p>
+                        <p className="text-text">{av?.name || avName || (customText ? 'Avatar propio' : null) || <span className="text-muted-2">Sin elegir</span>}</p>
+                        {!av && customText && <p className="text-muted text-[11px] mt-0.5 line-clamp-3">{customText}</p>}
+                      </div>
+                    </div>
+                    <div className="bg-surface-3 border border-line rounded-lg p-2.5">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><Palette size={11} /> Estilo</p>
+                      <p className="text-text">{styleName || <span className="text-muted-2">Sin elegir</span>}</p>
+                      {styleDesc && <p className="text-muted text-[11px] mt-0.5 line-clamp-3">{styleDesc}</p>}
+                    </div>
+                  </>
+                );
+              })()}
               <div className="bg-surface-3 border border-line rounded-lg p-2.5 col-span-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-2 font-tech flex items-center gap-1 mb-1"><Link2 size={11} /> Referencias</p>
                 {order?.references && order.references.length > 0 ? (
