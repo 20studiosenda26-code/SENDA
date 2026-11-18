@@ -48,13 +48,12 @@ function sanitizeOrder(o: Order): Order {
   };
 }
 
-/** El enlace de video final que ve el cliente. Única fórmula: la usan la copia del cliente y la verificación del admin. */
+/** El enlace de video final que ve el cliente: el MISMO que está en el video final del admin.
+ *  Única fórmula: la usan la copia del cliente y la verificación del admin. */
 export function clientShownUrl(v: Video): string | null {
-  const approved = v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente';
+  // Siempre el mismo enlace que el admin tiene en el video final (sin versiones ni condiciones)
   const final = v.finalVideos[v.finalVideos.length - 1];
-  if (!final) return null;
-  // Si el equipo está corrigiendo tras el feedback, el cliente sigue viendo la versión que ya revisó
-  return (approved ? final.fileUrl : final.previousVersions?.[final.previousVersions.length - 1]?.fileUrl || final.fileUrl) ?? null;
+  return final?.fileUrl ?? null;
 }
 
 /** Huella corta de una copia del cliente: sirve para comprobar que lo guardado es lo que se quiso guardar. */
