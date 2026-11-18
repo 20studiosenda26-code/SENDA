@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, CheckCircle2, ExternalLink, ImagePlus, Loader2, Palette, Play, Sparkles, UserCircle2, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ExternalLink, FileText, ImagePlus, Loader2, Palette, Play, Sparkles, UserCircle2, X } from 'lucide-react';
 import { useStore } from '../../store';
 import { uploadSharedFile } from '../../lib/supabaseClient';
 import type { CatalogStyle } from '../../types';
@@ -20,6 +20,10 @@ export interface StyleChoice {
   styleName?: string | null;
   by?: 'cliente' | 'senda';
 }
+
+/** ¿El archivo adjunto es una imagen que se puede mostrar? (si no, es PDF, Word, etc.) */
+export const isImageUrl = (u?: string | null) => Boolean(u) && (/\.(png|jpe?g|webp|gif|avif|bmp|svg|heic)(\?|#|$)/i.test(u as string) || (u as string).startsWith('data:image'));
+const fileLabel = (u: string) => { try { return decodeURIComponent(u.split('?')[0].split('/').pop() || 'archivo'); } catch { return 'archivo'; } };
 
 export const avatarChosen = (c: AvatarChoice) => Boolean(c.avatarId || c.customText?.trim() || c.refUrl);
 
@@ -56,7 +60,7 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
   const [upErr, setUpErr] = useState<string | null>(null);
 
   const selected = findAvatar(value.avatarId, clientCatalog.avatars, value.imageUrl, value.avatarName);
-  const thumb = selected?.imageUrl || value.refUrl || null;
+  const thumb = selected?.imageUrl || (isImageUrl(value.refUrl) ? value.refUrl : null) || null;
 
   const pick = (a: GalleryAvatar) => {
     onChange({ avatarId: a.id, avatarName: a.name, imageUrl: a.src, customText: null, refUrl: null });
@@ -72,16 +76,20 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
     <>
       <div className={`flex items-center gap-3 bg-surface-3/60 border rounded-xl p-2.5 ${avatarChosen(value) ? 'border-accent/40' : 'border-line border-dashed'}`}>
         <div className={`${compact ? 'w-11' : 'w-14'} aspect-[3/4] rounded-lg bg-surface-3 border border-line overflow-hidden flex items-center justify-center shrink-0`}>
-          {thumb ? <img src={thumb} alt={selected?.name || 'Referencia'} className="w-full h-full object-cover" /> : <UserCircle2 size={22} className="text-muted-2" />}
+          {thumb ? <img src={thumb} alt={selected?.name || 'Referencia'} className="w-full h-full object-cover" /> : value.refUrl && !selected ? <FileText size={22} className="text-accent" /> : <UserCircle2 size={22} className="text-muted-2" />}
         </div>
         <div className="flex-1 min-w-0">
           {selected ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 truncate">{selected.subtitle || 'Avatar de la galería SENDA'}</p></>
-            : value.customText || value.refUrl ? <><p className="text-sm font-semibold">Avatar propio</p><p className="text-[11px] text-muted-2 line-clamp-2">{value.customText || 'Con imagen de referencia'}</p></>
+            : value.customText || value.refUrl ? <><p className="text-sm font-semibold">Avatar propio</p><p className="text-[11px] text-muted-2 line-clamp-2">{value.customText || 'Con archivo de referencia adjunto'}</p></>
             : <p className="text-sm text-muted-2">Sin avatar elegido</p>}
         </div>
-        <button type="button" onClick={() => setOpen(true)}
+        <button type="button" onClick={() => { setCustom(false); setOpen(true); }}
           className="px-3.5 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0">
           {avatarChosen(value) ? 'Cambiar' : 'Elegir avatar'}
+        </button>
+        <button type="button" onClick={() => { setCustom(true); setOpen(true); }}
+          className="px-3.5 py-2 rounded-lg bg-surface-2 border border-accent/40 text-accent text-xs font-semibold hover:bg-accent-dim transition-colors shrink-0 flex items-center gap-1.5">
+          <ImagePlus size={13} /> Avatar propio
         </button>
       </div>
 
@@ -91,28 +99,36 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
             <div className="space-y-3">
               <button type="button" onClick={() => setCustom(c => !c)} aria-expanded={custom}
                 className="text-xs text-muted hover:text-accent flex items-center gap-1.5 transition-colors">
-                <Sparkles size={13} /> ¿No encuentras el avatar ideal? Descríbelo y nuestro equipo lo crea
+                <Sparkles size={13} /> Avatar propio: descríbelo por escrito o sube una imagen o archivo
               </button>
               {custom && (
                 <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 animate-fadeIn">
                   <div className="space-y-2">
-                    <textarea value={text} onChange={e => setText(e.target.value)} rows={2} placeholder="Descríbelo: edad, aspecto, ropa, ambiente… (ej. mujer de 28 años, estilo casual, pelo oscuro)"
+                    <textarea value={text} onChange={e => setText(e.target.value)} rows={2} placeholder="Descríbelo por escrito: edad, aspecto, ropa, ambiente… (ej. mujer de 28 años, estilo casual, pelo oscuro)"
                       className="w-full bg-surface-3 border border-line rounded-xl px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted-2 resize-none" />
                     <div className="flex gap-2">
-                      <input value={ref} onChange={e => setRef(e.target.value)} placeholder="Imagen de referencia (pega el enlace)"
+                      <input value={ref} onChange={e => setRef(e.target.value)} placeholder="Archivo de referencia (sube uno o pega el enlace)"
                         className="flex-1 bg-surface-3 border border-line rounded-xl px-3 py-2 text-xs outline-none focus:border-accent placeholder:text-muted-2" />
                       <label className={`px-3 rounded-xl bg-surface-3 border border-line text-accent text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:border-accent/50 ${uploading ? 'opacity-60 pointer-events-none' : ''}`}>
                         {uploading ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />} Subir
-                        <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                        <input type="file" className="hidden" onChange={async e => {
                           const f = e.target.files?.[0];
                           if (!f) return;
                           setUploading(true); setUpErr(null);
-                          try { setRef(await uploadSharedFile(f, 'brief/avatar-refs')); } catch { setUpErr('No se pudo subir la imagen; pega un enlace.'); }
+                          try { setRef(await uploadSharedFile(f, 'brief/avatar-refs')); } catch { setUpErr('No se pudo subir el archivo (máximo 50 MB); pega un enlace.'); }
                           finally { setUploading(false); e.target.value = ''; }
                         }} />
                       </label>
                     </div>
                     {upErr && <p className="text-[11px] text-red-400">{upErr}</p>}
+                    {ref && (
+                      <div className="flex items-center gap-2 text-[11px] text-muted bg-surface-3 border border-line rounded-lg px-2.5 py-1.5">
+                        {isImageUrl(ref) ? <img src={ref} alt="" className="w-8 h-8 rounded object-cover" /> : <FileText size={14} className="text-accent" />}
+                        <span className="truncate flex-1">{fileLabel(ref)}</span>
+                        <button type="button" onClick={() => setRef('')} className="text-muted-2 hover:text-red-400" aria-label="Quitar archivo"><X size={13} /></button>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-2">Vale cualquier formato: JPG, PNG, PDF, Word… Puedes escribir, subir un archivo o ambos.</p>
                   </div>
                   <button type="button" onClick={saveCustom} disabled={!text.trim() && !ref.trim()}
                     className="self-end px-5 py-2.5 rounded-xl bg-accent text-on-accent text-xs font-semibold disabled:opacity-40">Usar este avatar</button>
