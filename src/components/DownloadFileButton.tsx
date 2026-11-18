@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { AlertCircle, Check, Download, Loader2 } from 'lucide-react';
-import { downloadMediaFile } from '../lib/supabaseClient';
+import { downloadMediaFile, withSupabaseDownloadParam } from '../lib/supabaseClient';
 
 /** Botón que SÍ descarga el archivo (también PDF guardados en otro sitio), con estado de carga y reintento.
  *  Un enlace con "download" no funciona cuando el archivo está en otro dominio: por eso se baja desde aquí. */
@@ -8,6 +8,23 @@ export function DownloadFileButton({ url, fileName, label, className = '', icon 
   url?: string | null; fileName?: string | null; label: string; className?: string; icon?: ReactNode;
 }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  // Archivos de la plataforma: un enlace real que el servidor entrega como descarga (el navegador siempre lo permite)
+  const safeName = (fileName || 'archivo-senda').replace(/[\\/:*?"<>|]/g, '_');
+  const href = url ? withSupabaseDownloadParam(url, safeName) : null;
+  if (href) {
+    return (
+      <a
+        href={href}
+        download={safeName}
+        rel="noopener"
+        onClick={e => { e.stopPropagation(); setState('done'); setTimeout(() => setState('idle'), 2200); }}
+        className={`inline-flex items-center justify-center gap-1.5 transition-colors ${className}`}
+      >
+        {state === 'done' ? <Check size={13} /> : (icon || <Download size={13} />)}
+        {state === 'done' ? 'Descargando…' : label}
+      </a>
+    );
+  }
   return (
     <button
       type="button"

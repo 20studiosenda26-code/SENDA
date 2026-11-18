@@ -91,6 +91,14 @@ export function VideoAllocator({ slots, alloc, onChange }: { slots: Slot[]; allo
                   {w.id === recommended && <span className="text-[10px] font-semibold text-mint bg-mint-dim border border-mint/30 rounded-full px-1.5 py-0.5 flex items-center gap-1"><Sparkles size={10} /> Recomendado</span>}
                   {here > 0 && <span className="text-[10px] text-muted-2">(tiene {here} aquí)</span>}
                 </p>
+                {n > 0 && (
+                  <p className="flex items-center gap-1 flex-wrap mt-1">
+                    <span className="text-[10px] text-muted-2">{n === 1 ? 'Video' : 'Videos'}:</span>
+                    {slots.map((s, i) => (owners[i] === w.id && !s.frozen ? (
+                      <span key={s.index} className="font-tech text-[11px] font-bold bg-accent text-on-accent rounded-md px-1.5 py-0.5">{i + 1}</span>
+                    ) : null))}
+                  </p>
+                )}
                 <div className="flex items-center gap-2 mt-1">
                   <div className="h-1 flex-1 max-w-[140px] bg-surface-2 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full ${full ? 'bg-amber' : today > 0 ? 'bg-mint' : 'bg-accent/50'}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
