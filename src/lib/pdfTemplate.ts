@@ -167,12 +167,55 @@ export function scriptsBlocks(order: Order): string[] {
 }
 
 // ---------- Motor: HTML → PDF real ----------
+// Las dos librerías (html2canvas y jsPDF) se cargan por internet solo cuando se genera un PDF.
+// Así no hay que instalar nada y la plataforma compila igual en cualquier entorno.
+const HTML2CANVAS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+
+interface PdfDoc {
+  addImage(data: string, format: string, x: number, y: number, w: number, h: number): void;
+  addPage(): void;
+  getNumberOfPages(): number;
+  setPage(n: number): void;
+  setDrawColor(r: number, g: number, b: number): void;
+  setTextColor(r: number, g: number, b: number): void;
+  setFont(name: string, style: string): void;
+  setFontSize(n: number): void;
+  line(x1: number, y1: number, x2: number, y2: number): void;
+  text(t: string, x: number, y: number, opts?: { align: string }): void;
+  output(type: 'blob'): Blob;
+}
+type PdfCtor = new (opts: { unit: string; format: string; orientation: string; compress: boolean }) => PdfDoc;
+type Html2Canvas = (el: HTMLElement, opts: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+const scriptCache: Record<string, Promise<void>> = {};
+function loadScript(src: string): Promise<void> {
+  if (!scriptCache[src]) {
+    scriptCache[src] = new Promise<void>((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.async = true;
+      el.onload = () => resolve();
+      el.onerror = () => { delete scriptCache[src]; reject(new Error(`No se pudo cargar ${src}`)); };
+      document.head.appendChild(el);
+    });
+  }
+  return scriptCache[src];
+}
+
+async function loadPdfLibs(): Promise<{ html2canvas: Html2Canvas; jsPDF: PdfCtor }> {
+  await Promise.all([loadScript(HTML2CANVAS_URL), loadScript(JSPDF_URL)]);
+  const w = window as unknown as { html2canvas?: Html2Canvas; jspdf?: { jsPDF: PdfCtor } };
+  if (!w.html2canvas || !w.jspdf) throw new Error('Las librerías de PDF no cargaron');
+  return { html2canvas: w.html2canvas, jsPDF: w.jspdf.jsPDF };
+}
+
 async function waitImages(el: HTMLElement) {
   await Promise.all(Array.from(el.querySelectorAll('img')).map(img => (img.complete ? Promise.resolve() : new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); }))));
 }
 
 export async function renderPdf(blocks: string[], footerLabel: string): Promise<Blob> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
+  const { html2canvas, jsPDF } = await loadPdfLibs();
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;pointer-events:none';
   document.body.appendChild(host);
