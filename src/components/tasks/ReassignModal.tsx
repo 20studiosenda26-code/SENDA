@@ -57,10 +57,10 @@ export function ReassignModal({ order, alert, onClose }: { order: Order; alert?:
     const ok = await assignOrderVideos(order.id, [], owners);
     setBusy(false);
     if (ok) {
-      setMsg({ ok: true, text: 'Listo: reparto guardado y el equipo ya recibió su aviso.' });
+      setMsg({ ok: true, text: 'Listo: reparto guardado y verificado en el servidor. El equipo ya recibió su aviso.' });
       setTimeout(onClose, 900);
     } else {
-      setMsg({ ok: false, text: blocked ? ready.reason : 'No se pudo guardar el reparto. Revisa que estén repartidos todos los videos.' });
+      setMsg({ ok: false, text: blocked ? ready.reason : 'No se pudo confirmar el guardado en el servidor, así que la otra persona podría no verlo todavía. Revisa tu conexión y vuelve a confirmar.' });
     }
   };
 

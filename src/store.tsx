@@ -13,6 +13,23 @@ import { allScripts, scriptHash, REVIEW_LABEL, briefReadiness } from './lib/scri
 
 export interface AdminProfile { id: string; name: string; }
 
+/** Guarda los videos conservando SIEMPRE quién los tiene según el servidor: una pestaña con datos viejos
+ *  no puede deshacer una asignación o reasignación hecha por el admin. */
+async function saveBrandsKeepingOwners(local: Brand[]): Promise<void> {
+  const remote = await loadShared<Brand[]>('brands');
+  if (!Array.isArray(remote)) { await saveShared('brands', local); return; }
+  const owners = new Map<string, Video>();
+  remote.forEach(b => b.videos.forEach(v => owners.set(v.id, v)));
+  const merged = local.map(b => ({
+    ...b,
+    videos: b.videos.map(v => {
+      const r = owners.get(v.id);
+      return r ? { ...v, clipperId: r.clipperId, clipperName: r.clipperName, editorId: r.editorId, editorName: r.editorName } : v;
+    }),
+  }));
+  await saveShared('brands', merged);
+}
+
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const HEARTBEAT_TTL_MS = 35 * 1000;
 
@@ -160,6 +177,8 @@ interface Store {
   workers: Worker[];
   registeredUsersCount: number;
   refreshProfiles: () => Promise<void>;
+  /** Trae del servidor lo último de videos y pedidos (se usa al abrir Tareas e Inicio) */
+  refreshAssignments: () => Promise<void>;
   /** Vuelve a copiar al visor de cada cliente lo que se le ha publicado */
   resyncClientView: () => void;
   /** Genera el PDF del brief (plantilla SENDA), lo sube y lo deja como brief del proyecto */
@@ -378,7 +397,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (applyingRemoteRef.current) return;
     if (isSupabaseConfigured && hydratedRef.current) {
       markLocalWrite(key);
-      void saveShared(key, value);
+      if (key === 'brands' && roleRef.current !== 'admin') void saveBrandsKeepingOwners(value as unknown as Brand[]);
+      else void saveShared(key, value);
     }
   }, [markLocalWrite]);
 
@@ -491,39 +511,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    const handleShared = (changedKey?: string) => {
-      void (async () => {
+    // Devuelve false si el cambio se SALTÓ (por una escritura propia reciente): hay que reintentarlo, no perderlo
+    const handleShared = (changedKey?: string): Promise<boolean> => {
+      return (async () => {
         // Si lo que cambió fue el latido de presencia online, solo actualizamos presencia y NO tocamos pedidos ni tareas
         if (changedKey === "online_heartbeats") {
           await refreshOnlineHeartbeats();
-          return;
+          return true;
         }
         // Portal de clientes: el admin procesa la bandeja; las vistas/confirmaciones las escucha el propio cliente
         if (changedKey?.startsWith("client_inbox_")) {
           if (roleRef.current === "admin") void processClientInboxRef.current(changedKey.slice("client_inbox_".length));
-          return;
+          return true;
         }
-        if (changedKey?.startsWith("client_view_") || changedKey?.startsWith("client_ack_")) return;
-        if (roleRef.current === "cliente") return;
+        if (changedKey?.startsWith("client_view_") || changedKey?.startsWith("client_ack_")) return true;
+        if (roleRef.current === "cliente") return true;
         if (changedKey === CLIENT_CATALOG_KEY) {
           const remoteCatalog = await loadShared<ClientCatalog>(CLIENT_CATALOG_KEY);
           if (remoteCatalog && typeof remoteCatalog === "object" && Date.now() - getLastLocalWriteAt(CLIENT_CATALOG_KEY) > 8000) {
             setClientCatalog({ avatars: remoteCatalog.avatars || [], styles: remoteCatalog.styles || [] });
           }
-          return;
+          return true;
         }
 
         const now = Date.now();
-        if (now < localWriteLockUntil.current) return;
+        if (now < localWriteLockUntil.current) return false;
 
         const shouldLoad = (k: string) =>
           (!changedKey || changedKey === k) && (now - getLastLocalWriteAt(k) > 8000);
 
         // Una sola consulta para todo lo que cambió (antes eran varias seguidas)
         const wanted = ["orders", "brands", "notifications", "calendarEvents", "workerGoals", "workerPointsOverride", "financeSettings", "financeClosings", "appExpenses", "payrollPayments", "payrollAdjustments", "capacityProtocolConfig", "classroomModules", "lessonCompletions", "workerCapacities"].filter(shouldLoad);
-        if (wanted.length === 0) return;
+        if (wanted.length === 0) return false;
         const kvRemote = await loadSharedMany(wanted);
-        if (!kvRemote) return;
+        if (!kvRemote) return false;
         const pick = <T,>(k: string) => ((k in kvRemote ? kvRemote[k] : null) as T | null);
         applyingRemoteRef.current = true;
         try {
@@ -598,20 +619,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         } finally {
           setTimeout(() => { applyingRemoteRef.current = false; }, 80);
         }
+        return true;
       })();
     };
-    const unsub = subscribeToTable("platform_kv", handleShared);
+    const unsub = subscribeToTable("platform_kv", (changedKey?: string) => {
+      void handleShared(changedKey).then(ok => {
+        if (ok || !changedKey) return;
+        // Se saltó por una escritura propia reciente: se vuelve a intentar para no perder el cambio
+        setTimeout(() => void handleShared(changedKey), 3500);
+        setTimeout(() => void handleShared(changedKey), 9000);
+      });
+    });
     // Respaldo del tiempo real: si un aviso se pierde, cada 8 s (pestaña visible) y al volver a la pestaña se sincroniza
     // Solo se descargan las claves que cambiaron desde la última revisión
     let stamps: Record<string, string> | null = null;
+    let running = false;
     const resync = () => {
-      if (document.visibilityState !== 'visible') return;
-      void loadSharedStamps().then(next => {
-        if (!next) return;
-        const prev = stamps;
-        stamps = next;
-        if (!prev) return;
-        Object.keys(next).forEach(k => { if (next[k] !== prev[k]) handleShared(k); });
+      if (document.visibilityState !== 'visible' || running) return;
+      running = true;
+      void loadSharedStamps().then(async next => {
+        try {
+          if (!next) return;
+          const prev = stamps;
+          if (!prev) { stamps = next; return; }
+          const kept: Record<string, string> = { ...next };
+          for (const k of Object.keys(next)) {
+            if (next[k] === prev[k]) continue;
+            const ok = await handleShared(k);
+            // Lo que se saltó conserva la marca vieja: se detecta otra vez en la próxima revisión
+            if (!ok) kept[k] = prev[k];
+          }
+          stamps = kept;
+        } finally { running = false; }
       });
     };
     resync();
@@ -2049,6 +2088,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return true;
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
+  // Guarda el reparto y lo LEE de vuelta del servidor para comprobar que quedó (si no, reintenta)
+  const persistAssignmentVerified = useCallback(async (orderId: string, nextOrders: Order[], nextBrands: Brand[]): Promise<boolean> => {
+    const sig = (brs: Brand[]) => brs.flatMap(b => b.videos).filter(v => v.orderId === orderId).map(v => `${v.id}:${v.clipperId || ''}:${v.editorId || ''}`).sort().join('|');
+    const want = sig(nextBrands);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const okOrders = await saveSharedNow('orders', nextOrders);
+      const okBrands = await saveSharedNow('brands', nextBrands);
+      await new Promise(r => setTimeout(r, 700));
+      const remote = await loadShared<Brand[]>('brands');
+      if (okOrders && okBrands && Array.isArray(remote) && sig(remote) === want) return true;
+    }
+    return false;
+  }, []);
+
   // Reparto por video: a cada persona X videos del proyecto (o todo el proyecto a una sola)
   const assignOrderVideos = useCallback(async (orderId: string, alloc: Allocation[], explicitOwners?: (string | null)[]): Promise<boolean> => {
     const order = ordersRef.current.find(o => o.id === orderId);
@@ -2088,9 +2141,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ordersRef.current = nextOrders;
     setOrders(nextOrders);
     saveState("orders", nextOrders);
+    let verified = true;
     if (isSupabaseConfigured) {
       markLocalWrite();
-      await Promise.all([saveShared("orders", nextOrders), saveShared("brands", brandsRef.current)]);
+      verified = await persistAssignmentVerified(orderId, nextOrders, brandsRef.current);
     }
     // Avisos: a quien recibe videos y a quien deja de tenerlos
     const nums = (list: number[]) => list.map(n => n + 1).join(', ');
@@ -2108,8 +2162,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         pushNotification('clipper', 'trabajo_asignado', `Se reasignó${lost.length === 1 ? '' : 'ron'} ${lost.length === 1 ? 'el video' : 'los videos'} ${nums(lost)} del proyecto "${order.brand}" a otra persona.`, id);
       }
     });
-    return true;
-  }, [upsertBoardVideoForOrder, markLocalWrite, pushNotification]);
+    return verified;
+  }, [upsertBoardVideoForOrder, markLocalWrite, pushNotification, persistAssignmentVerified]);
 
   // Todo el proyecto (lo que aún se puede mover) a una sola persona
   const assignOrderClipper = useCallback(async (orderId: string, clipperId: string): Promise<boolean> => {
@@ -2418,6 +2472,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [role, processClientInbox]);
 
   const applyOrderPatchRef = useRef<(id: string, patch: Partial<Order>) => void>(() => {});
+  const refreshAssignments = useCallback(async () => {
+    if (!isSupabaseConfigured || roleRef.current === 'cliente') return;
+    const kv = await loadSharedMany(['brands', 'orders']);
+    if (!kv) return;
+    applyingRemoteRef.current = true;
+    try {
+      const rb = kv.brands as Brand[] | undefined;
+      const ro = kv.orders as Order[] | undefined;
+      if (Array.isArray(rb) && Date.now() - getLastLocalWriteAt('brands') > 3000) { brandsRef.current = rb; setBrands(rb); saveState('brands', rb); }
+      if (Array.isArray(ro) && Date.now() - getLastLocalWriteAt('orders') > 3000) { ordersRef.current = ro; setOrders(ro); saveState('orders', ro); }
+    } finally {
+      setTimeout(() => { applyingRemoteRef.current = false; }, 80);
+    }
+  }, []);
   const generateBriefRef = useRef<(orderId: string, overrides?: Partial<Order>) => Promise<boolean>>(async () => false);
   const notifyClientByChatRef = useRef<(clientId: string | null | undefined, text: string) => Promise<void>>(async () => {});
   const submitFeedbackRef = useRef<(videoId: string, items: { time: number; text: string }[]) => void>(() => {});
@@ -2543,7 +2611,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles, resyncClientView,
-    generateBriefPdf, publishScripts, resetBrief, reopenBrief, saveBriefAsAdmin,
+    generateBriefPdf, publishScripts, resetBrief, reopenBrief, saveBriefAsAdmin, refreshAssignments,
     notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,

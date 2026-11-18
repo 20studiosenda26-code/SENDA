@@ -111,6 +111,14 @@ export function TasksView() {
 
   const [openBrandId, setOpenBrandId] = useState<string | null>(null);
 
+  // Mientras Tareas está abierta, se trae de la base lo último (asignaciones y reasignaciones) sin esperar
+  const { refreshAssignments } = useStore();
+  useEffect(() => {
+    void refreshAssignments();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') void refreshAssignments(); }, 6000);
+    return () => clearInterval(iv);
+  }, [refreshAssignments]);
+
   const myProjectsWithVideos = useMemo(() => {
     return brands
       .map(b => {
