@@ -5,7 +5,8 @@ import type { Brand, Correction, Video } from '../types';
 import { resolveMediaUrl, isGoogleDriveUrl, getGoogleDrivePreviewUrl, fetchDriveVideoDuration } from '../lib/supabaseClient';
 import { findOrderForVideo } from '../lib/economics';
 import { fmtDate } from '../components/home/home-bits';
-import { CorrectionTimeline, fmtTime, parseTime } from '../components/CorrectionTimeline';
+import { CorrectionTimeline, fmtTime } from '../components/CorrectionTimeline';
+import { TimeField } from '../components/TimeField';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import {
   ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Film, FolderOpen, Lock, Maximize2,
@@ -271,7 +272,6 @@ function VideoReview({
   const [orientation, setOrientation] = useState<Orientation>('auto');
   const [drafts, setDrafts] = useState<{ time: number; text: string }[]>([]);
   const [pickTime, setPickTime] = useState<number | null>(null);
-  const [timeInput, setTimeInput] = useState('0:00');
   const [text, setText] = useState('');
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -306,7 +306,6 @@ function VideoReview({
   const playSrc = drive.src;
   const mode = orientation === 'auto' ? (isDrive ? 'horizontal' : detected) : orientation;
   const effectiveTime = pickTime ?? Math.round(time);
-  useEffect(() => { setTimeInput(fmtTime(effectiveTime)); }, [effectiveTime]);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
   const seek = (t: number) => {
@@ -316,8 +315,7 @@ function VideoReview({
   };
   const addDraft = () => {
     if (!text.trim()) return;
-    const raw = parseTime(timeInput) ?? effectiveTime;
-    const t = realDuration ? Math.min(raw, realDuration) : raw;
+    const t = realDuration ? Math.min(effectiveTime, realDuration) : effectiveTime;
     setDrafts(d => [...d, { time: t, text: text.trim() }].sort((a, b) => a.time - b.time));
     setText('');
     setPickTime(null);
@@ -457,12 +455,11 @@ function VideoReview({
             {canSend ? (
               <>
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-surface-3 border border-line rounded-lg pl-2 focus-within:border-amber transition-colors">
-                    <Clock size={12} className="text-amber" />
-                    <input value={timeInput}
-                      onChange={e => { setTimeInput(e.target.value); const t = parseTime(e.target.value); if (t !== null) setPickTime(t); }}
-                      className="w-12 bg-transparent py-2 text-xs font-tech font-bold text-amber outline-none" />
-                  </div>
+                  <TimeField
+                    value={effectiveTime}
+                    max={realDuration || undefined}
+                    onChange={t => { setPickTime(t); seek(t); }}
+                  />
                   {!isDrive && (
                     <button type="button" onClick={() => setPickTime(Math.round(time))}
                       className="text-[11px] text-muted hover:text-accent px-2 py-2 rounded-lg bg-surface-3 border border-line hover:border-accent/50 transition-colors">
