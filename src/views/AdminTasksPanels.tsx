@@ -3,6 +3,7 @@
 //   · En producción → tablero por etapa (kanban) o por proyecto
 //   · Finalizados   → proyectos con todos sus videos aprobados por el cliente
 // Al abrir cualquier video se usa el mismo detalle que ve el Clipper · Asistente (VideoDetail).
+import { briefReadiness } from '../lib/scripts';
 import { LiquidMetalButton } from "../components/ui/liquid-metal-button";
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useStore } from "../store";
@@ -179,9 +180,9 @@ function AssignWorkspace({ search }: { search: string }) {
     if (!selected || !worker) return;
     setAssigning(true);
     try {
-      await assignOrderClipper(selected.id, worker);
-      setDone(`"${selected.brand}" asignado y notificado. Ya está en En producción.`);
-      setTimeout(() => setDone(null), 5000);
+      const ok = await assignOrderClipper(selected.id, worker);
+      setDone(ok ? `"${selected.brand}" asignado y notificado. Ya está en En producción.` : `No se pudo asignar "${selected.brand}": ${briefReadiness(selected).reason}`);
+      setTimeout(() => setDone(null), 6000);
     } finally {
       setAssigning(false);
     }
@@ -298,18 +299,23 @@ function AssignWorkspace({ search }: { search: string }) {
           <div className="pt-3 border-t border-line/70">
             <p className="text-sm font-semibold flex items-center gap-1.5"><Gauge size={15} className="text-accent" /> Elige responsable</p>
             <p className="text-[11px] text-muted-2 mb-2.5">Hace imagen principal, clips y video final de los {selected.videoCount} videos. Ordenado por quién está en línea y tiene más espacio hoy.</p>
+            {!briefReadiness(selected).ready && (
+              <p className="text-xs text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2 mb-2.5">
+                Todavía no se puede asignar. {briefReadiness(selected).reason} Se necesita el brief confirmado con un avatar por cada video; si falta algo, avísale al cliente desde Clientes → Brief y guiones.
+              </p>
+            )}
             <WorkerPicker selected={worker} onSelect={setWorker} />
             <div className="flex items-center gap-3 pt-3 flex-wrap">
               <LiquidMetalButton
                 onClick={assign}
-                disabled={!worker}
+                disabled={!worker || !briefReadiness(selected).ready}
                 loading={assigning}
                 label="Asignar proyecto"
                 loadingLabel="Asignando..."
                 icon={CheckCircle2}
                 variant="cyan"
               />
-              {!worker && <span className="text-xs text-muted-2">Selecciona a una persona para asignar.</span>}
+              {!worker && briefReadiness(selected).ready && <span className="text-xs text-muted-2">Selecciona a una persona para asignar.</span>}
             </div>
           </div>
         </GlowCard>
