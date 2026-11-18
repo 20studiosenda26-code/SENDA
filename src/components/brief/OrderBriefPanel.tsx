@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Plus, RefreshCw, ScrollText, Send, ShieldCheck, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Plus, RefreshCw, RotateCcw, ScrollText, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useStore } from '../../store';
 import type { Order, OrderScript } from '../../types';
 import { BriefEditor } from './BriefEditor';
-import { allScripts, reviewOf, REVIEW_LABEL } from '../../lib/scripts';
+import { reviewOf, REVIEW_LABEL, briefReadiness } from '../../lib/scripts';
 import { AGENCY_STYLE_ID } from '../../lib/styleCatalog';
 
 const newScript = (n: number): OrderScript => ({ id: `sc-${Date.now()}-${n}`, title: `Guión ${n}`, text: '' });
 
 /** Admin: ve el brief como el cliente, lo corrige o lo borra, descarga su PDF y gestiona el servicio de guiones. */
 export function OrderBriefPanel({ order }: { order: Order }) {
-  const { generateBriefPdf, publishScripts, updateOrder } = useStore();
+  const { generateBriefPdf, publishScripts, updateOrder, reopenBrief } = useStore();
+  const [reopenMsg, setReopenMsg] = useState('');
+  const [reopening, setReopening] = useState(false);
   const [openBrief, setOpenBrief] = useState(false);
   const [busy, setBusy] = useState<'pdf' | 'scripts' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -22,14 +24,14 @@ export function OrderBriefPanel({ order }: { order: Order }) {
   const dirty = JSON.stringify(scripts) !== JSON.stringify(order.scripts || []);
   const flash = (ok: boolean, text: string) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
 
-  const all = allScripts(order);
-  const hasChoice = (c: { avatarId?: string | null; avatarCustomText?: string | null; avatarRefUrl?: string | null }) => Boolean(c.avatarId || c.avatarCustomText || c.avatarRefUrl);
+  const ready = briefReadiness(order);
   const reviews = (order.scripts || []).map(s => reviewOf(order, { ...s, source: 'agencia' as const }));
+  const stylePicked = (order.scriptChoices || []).some(c => c.styleId && c.styleId !== AGENCY_STYLE_ID) || Boolean(order.editingStyleId && order.editingStyleId !== AGENCY_STYLE_ID);
   const steps = [
-    { label: 'Avatar (obligatorio)', ok: all.length ? all.every(s => { const c = (order.scriptChoices || []).find(x => x.scriptId === s.id); return Boolean(c && hasChoice(c)); }) : Boolean(order.avatarId || order.avatarCustomText || order.avatarName) },
-    { label: 'Estilo', ok: all.length ? (order.scriptChoices || []).some(c => c.styleId && c.styleId !== AGENCY_STYLE_ID) : Boolean(order.editingStyleId && order.editingStyleId !== AGENCY_STYLE_ID) },
+    { label: `Avatares ${ready.chosen}/${ready.total} (obligatorio)`, ok: ready.chosen === ready.total },
+    { label: 'Estilo', ok: stylePicked },
     { label: 'Referencias', ok: (order.references || []).length > 0 },
-    { label: 'Confirmado', ok: Boolean(order.briefConfirmedAt) },
+    { label: 'Confirmado', ok: ready.confirmed },
   ];
 
   const genPdf = async () => {
@@ -76,6 +78,24 @@ export function OrderBriefPanel({ order }: { order: Order }) {
           </button>
         </div>
         <p className="text-[11px] text-muted-2">Cuando el cliente confirma su brief, el PDF se genera solo y queda en el proyecto para el Clipper.</p>
+
+        {!ready.ready && !order.clipperId && (
+          <p className="text-[11px] text-amber bg-amber-dim/40 border border-amber/30 rounded-lg px-3 py-2">No se puede asignar a producción todavía. {ready.reason} Se necesita el brief confirmado con un avatar por cada video.</p>
+        )}
+
+        {order.briefConfirmedAt && (
+          <div className="bg-surface-2 border border-line rounded-xl p-3 space-y-2">
+            <p className="text-xs font-semibold flex items-center gap-1.5"><RotateCcw size={13} className="text-amber" /> ¿Falta algo? Devuelve el brief al cliente</p>
+            <p className="text-[11px] text-muted-2">Quita la confirmación y el brief vuelve a "pendiente"{order.clipperId ? ' aunque el proyecto ya esté en producción' : ''}. El cliente recibe tu mensaje por el chat y lo completa de nuevo.</p>
+            <textarea value={reopenMsg} onChange={e => setReopenMsg(e.target.value)} rows={2} placeholder="¿Qué falta? (ej. Falta el guión 3 / falta elegir el avatar del video 4)"
+              className="w-full bg-surface-3 border border-line rounded-lg px-3 py-2 text-xs outline-none focus:border-accent resize-none placeholder:text-muted-2" />
+            <button type="button" disabled={reopening || !reopenMsg.trim()}
+              onClick={async () => { setReopening(true); await reopenBrief(order.id, reopenMsg); setReopening(false); setReopenMsg(''); flash(true, 'Brief devuelto a pendiente y cliente avisado por el chat'); }}
+              className="px-3.5 py-2 rounded-lg bg-amber-dim border border-amber/40 text-amber text-xs font-semibold flex items-center gap-1.5 hover:bg-amber/20 disabled:opacity-40">
+              {reopening ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Regresar a brief pendiente y avisar
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Servicio de guiones */}

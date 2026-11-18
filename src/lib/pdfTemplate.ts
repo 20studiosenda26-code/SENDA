@@ -2,9 +2,9 @@
 // Todos los documentos de la plataforma usan este mismo encabezado, secciones y pie de página.
 // Se arma con HTML con estilos propios y se convierte a un PDF real (descargable y subible a la nube).
 import sendaLogo from '../assets/senda-logo.png';
-import type { CatalogStyle, ClientCatalog, Order, OrderScript, ScriptChoice } from '../types';
+import type { CatalogStyle, ClientCatalog, Order, OrderScript } from '../types';
 import { findAvatar, type ResolvedAvatar } from './avatarGallery';
-import { allScripts, reviewOf, REVIEW_LABEL } from './scripts';
+import { allScripts, reviewOf, REVIEW_LABEL, choiceForSlot, videoSlots } from './scripts';
 import { findStyle } from './styleCatalog';
 
 const C = {
@@ -98,48 +98,45 @@ export function briefBlocks(order: Order, catalog: ClientCatalog): string[] {
     ['Estado', order.briefConfirmedAt ? 'Brief confirmado' : 'Borrador'], ['Generado', today()],
   ]));
 
-  const choices = order.scriptChoices || [];
   const scripts = allScripts(order);
-  if (scripts.length) {
-    blocks.push(section('1', 'Guiones, avatares y estilos', '', 'Cada guión es un video: su avatar y su estilo de edición están abajo.'));
-    scripts.forEach((sc, i) => {
-      const ch: ScriptChoice | undefined = choices.find(c => c.scriptId === sc.id);
-      const av = findAvatar(ch?.avatarId, catalog.avatars, ch?.avatarImageUrl, ch?.avatarName);
-      const st = findStyle(ch?.styleId, catalog.styles);
-      const rv = reviewOf(order, sc);
-      blocks.push(`
-      <div style="padding:6px 48px 4px;font-family:${FONT};color:${C.text}">
-        <div style="border:1px solid ${C.line};border-radius:16px;overflow:hidden">
-          <div style="background:${C.soft};padding:12px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid ${C.line}">
-            <span style="background:${C.dark};color:${C.accent};font-family:${DISPLAY};font-weight:700;font-size:12px;border-radius:7px;padding:4px 10px">VIDEO ${i + 1}</span>
-            <span style="font-family:${DISPLAY};font-weight:700;font-size:15px;color:${C.dark}">${esc(sc.title || `Guión ${i + 1}`)}</span>
-            ${sc.source === 'cliente' ? `<span style="font-size:10px;background:#E4F7FA;color:${C.deep};border-radius:20px;padding:3px 10px;font-weight:700">GUIÓN DEL CLIENTE</span>` : ''}
-            ${rv ? `<span style="margin-left:auto;font-size:10px;border-radius:20px;padding:3px 10px;font-weight:700;background:${rv.status === 'approved' ? '#DCF5EC' : rv.status === 'rejected' ? '#FDE8E8' : '#FFF1D6'};color:${rv.status === 'approved' ? '#12805F' : rv.status === 'rejected' ? '#B42318' : '#9A6A00'}">${esc(REVIEW_LABEL[rv.status])}</span>` : ''}
+  const total = videoSlots(order);
+  blocks.push(section('1', 'Videos: guion, avatar y estilo', '', `El proyecto tiene ${total} video${total === 1 ? '' : 's'}: cada uno lleva su avatar y su estilo de edición${scripts.length ? ' (el guión 1 va con el video 1, y así sucesivamente)' : ''}.`));
+  for (let i = 0; i < total; i++) {
+    const sc = scripts[i];
+    const ch = choiceForSlot(order, i);
+    const av = findAvatar(ch?.avatarId, catalog.avatars, ch?.avatarImageUrl, ch?.avatarName);
+    const st = findStyle(ch?.styleId, catalog.styles);
+    const rv = sc ? reviewOf(order, sc) : null;
+    blocks.push(`
+    <div style="padding:6px 48px 4px;font-family:${FONT};color:${C.text}">
+      <div style="border:1px solid ${C.line};border-radius:16px;overflow:hidden">
+        <div style="background:${C.soft};padding:12px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid ${C.line}">
+          <span style="background:${C.dark};color:${C.accent};font-family:${DISPLAY};font-weight:700;font-size:12px;border-radius:7px;padding:4px 10px">VIDEO ${i + 1}</span>
+          ${sc ? `<span style="font-family:${DISPLAY};font-weight:700;font-size:15px;color:${C.dark}">${esc(sc.title || `Guión ${i + 1}`)}</span>` : `<span style="font-size:12.5px;color:${C.muted}">Sin guión asignado</span>`}
+          ${sc?.source === 'cliente' ? `<span style="font-size:10px;background:#E4F7FA;color:${C.deep};border-radius:20px;padding:3px 10px;font-weight:700">GUIÓN DEL CLIENTE</span>` : ''}
+          ${rv ? `<span style="margin-left:auto;font-size:10px;border-radius:20px;padding:3px 10px;font-weight:700;background:${rv.status === 'approved' ? '#DCF5EC' : rv.status === 'rejected' ? '#FDE8E8' : '#FFF1D6'};color:${rv.status === 'approved' ? '#12805F' : rv.status === 'rejected' ? '#B42318' : '#9A6A00'}">${esc(REVIEW_LABEL[rv.status])}</span>` : ''}
+        </div>
+        ${sc?.text ? `<div style="padding:16px 20px;font-size:13px;line-height:1.7;white-space:normal">${nl2br(sc.text)}</div>` : ''}
+        ${sc?.fileUrl ? `<div style="padding:12px 20px;font-size:12.5px;color:${C.deep}">Guión en PDF adjunto: <b>${esc(sc.fileName || 'archivo')}</b><br/><span style="word-break:break-all;font-size:11px;color:${C.muted}">${esc(sc.fileUrl)}</span></div>` : ''}
+        ${rv?.feedback ? `<div style="padding:10px 20px 14px;font-size:12.5px;line-height:1.6;border-top:1px dashed ${C.line}"><b style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${C.muted}">Feedback del cliente</b><br/>${nl2br(rv.feedback)}</div>` : ''}
+        <div style="display:flex;border-top:1px solid ${C.line}">
+          <div style="flex:1;padding:14px 20px;border-right:1px solid ${C.line}">
+            <div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700;margin-bottom:8px">Avatar</div>
+            ${avatarCard(av, ch?.avatarCustomText, ch?.avatarRefUrl, total > 1 || scripts.length ? 118 : 150)}
           </div>
-          ${sc.text ? `<div style="padding:16px 20px;font-size:13px;line-height:1.7;white-space:normal">${nl2br(sc.text)}</div>` : ''}
-          ${sc.fileUrl ? `<div style="padding:12px 20px;font-size:12.5px;color:${C.deep}">Guión en PDF adjunto: <b>${esc(sc.fileName || 'archivo')}</b><br/><span style="word-break:break-all;font-size:11px;color:${C.muted}">${esc(sc.fileUrl)}</span></div>` : ''}
-          ${rv?.feedback ? `<div style="padding:10px 20px 14px;font-size:12.5px;line-height:1.6;border-top:1px dashed ${C.line}"><b style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${C.muted}">Feedback del cliente</b><br/>${nl2br(rv.feedback)}</div>` : ''}
-          <div style="display:flex;border-top:1px solid ${C.line}">
-            <div style="flex:1;padding:14px 20px;border-right:1px solid ${C.line}">
-              <div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700;margin-bottom:8px">Avatar</div>
-              ${avatarCard(av, ch?.avatarCustomText, ch?.avatarRefUrl, 118)}
-            </div>
-            <div style="flex:1;padding:14px 20px">
-              <div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700;margin-bottom:8px">Estilo de edición</div>
-              ${styleCard(st, ch?.styleName)}
-            </div>
+          <div style="flex:1;padding:14px 20px">
+            <div style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${C.deep};font-weight:700;margin-bottom:8px">Estilo de edición</div>
+            ${styleCard(st, ch?.styleName)}
           </div>
         </div>
-      </div>`);
-    });
-  } else {
-    const av = findAvatar(order.avatarId, catalog.avatars, order.avatarImageUrl, order.avatarName);
-    const st = findStyle(order.editingStyleId, catalog.styles);
-    blocks.push(section('1', 'Avatar', avatarCard(av, order.avatarCustomText || (!av ? order.avatarName : null), order.avatarRefUrl), 'La persona que aparece en los videos.'));
-    blocks.push(section('2', 'Estilo de edición', styleCard(st, order.editingStyleName), 'Ritmo, subtítulos, transiciones y música.'));
+      </div>
+    </div>`);
+  }
+  if (scripts.length > total) {
+    blocks.push(`<div style="padding:10px 48px 4px;font-family:${FONT};font-size:12.5px;color:${C.muted}">Hay ${scripts.length - total} guión(es) más que videos en el proyecto: ${scripts.slice(total).map(x => esc(x.title)).join(', ')}.</div>`);
   }
 
-  const n0 = scripts.length ? 2 : 3;
+  const n0 = 2;
   const refs = order.references || [];
   blocks.push(section(n0, 'Referencias', refs.length
     ? `<ul style="margin:0;padding:0;list-style:none">${refs.map(r => `<li style="padding:9px 0;border-bottom:1px solid ${C.line};font-size:13px"><b style="color:${C.dark}">${esc(r.name)}</b><br/><span style="color:${C.deep};font-size:11.5px;word-break:break-all">${esc(r.url)}</span></li>`).join('')}</ul>`

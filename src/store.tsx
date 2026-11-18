@@ -8,7 +8,7 @@ import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView, OrderScript } from './types';
 import { buildBriefPdf, buildScriptsPdf, pdfFileName } from './lib/pdfTemplate';
-import { allScripts, scriptHash, REVIEW_LABEL } from './lib/scripts';
+import { allScripts, scriptHash, REVIEW_LABEL, briefReadiness } from './lib/scripts';
 
 export interface AdminProfile { id: string; name: string; }
 
@@ -167,6 +167,8 @@ interface Store {
   publishScripts: (orderId: string, scripts: OrderScript[]) => Promise<boolean>;
   /** Borra lo que el cliente eligió en el brief y le avisa para que lo vuelva a llenar */
   resetBrief: (orderId: string) => Promise<void>;
+  /** Admin: devuelve el brief a "pendiente" (le quita la confirmación) y le avisa al cliente por el chat qué falta */
+  reopenBrief: (orderId: string, message: string) => Promise<void>;
   /** Admin: guarda cambios al brief como si fuera el cliente, regenera el PDF y (opcional) avisa al cliente */
   saveBriefAsAdmin: (orderId: string, patch: Partial<Order>, notifyClient: boolean) => Promise<boolean>;
   notifications: NotificationItem[];
@@ -250,9 +252,10 @@ interface Store {
   getWorkerCapacity: (workerId: string) => number;
   setWorkerCapacity: (workerId: string, capacity: number) => void;
   getWorkerWorkload: (workerId: string) => number;
-  assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<void>;
-  assignOrderClipper: (orderId: string, clipperId: string) => Promise<void>;
-  assignOrderEditor: (orderId: string, editorId: string) => Promise<void>;
+  /** Devuelve false si no se pudo asignar (el brief del cliente aún no está completo) */
+  assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<boolean>;
+  assignOrderClipper: (orderId: string, clipperId: string) => Promise<boolean>;
+  assignOrderEditor: (orderId: string, editorId: string) => Promise<boolean>;
   financeSettings: FinanceSettings;
   updateFinanceSettings: (patch: Partial<FinanceSettings>) => void;
   financeClosings: FinanceDayClosing[];
@@ -2009,9 +2012,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pushNotification(targetRole, "trabajo_asignado", msg, workerId);
   }, [pushNotification]);
 
-  const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string) => {
+  const assignOrderTeam = useCallback(async (orderId: string, clipperId: string, editorId: string): Promise<boolean> => {
     const order = ordersRef.current.find(o => o.id === orderId);
-    if (!order) return;
+    if (!order) return false;
+    // No se empieza a producir sin brief confirmado y con un avatar por cada video (las reasignaciones no se bloquean)
+    if (!order.clipperId && !briefReadiness(order).ready) return false;
     const videoId = upsertBoardVideoForOrder(order, clipperId, editorId);
     const updatedOrder: Order = {
       ...order,
@@ -2035,17 +2040,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     if (clipperId) await notifyPersonAssigned(updatedOrder, "clipper", clipperId);
     if (editorId && editorId !== clipperId) await notifyPersonAssigned(updatedOrder, "editor", editorId);
+    return true;
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
   // Rol único: asignar a la persona la deja a cargo de clips + imagen + video final del pedido completo
-  const assignOrderClipper = useCallback(async (orderId: string, clipperId: string) => {
-    if (!clipperId) return;
-    await assignOrderTeam(orderId, clipperId, clipperId);
+  const assignOrderClipper = useCallback(async (orderId: string, clipperId: string): Promise<boolean> => {
+    if (!clipperId) return false;
+    return assignOrderTeam(orderId, clipperId, clipperId);
   }, [assignOrderTeam]);
 
-  const assignOrderEditor = useCallback(async (orderId: string, editorId: string) => {
-    if (!editorId) return;
-    await assignOrderTeam(orderId, editorId, editorId);
+  const assignOrderEditor = useCallback(async (orderId: string, editorId: string): Promise<boolean> => {
+    if (!editorId) return false;
+    return assignOrderTeam(orderId, editorId, editorId);
   }, [assignOrderTeam]);
 
   const updateFinanceSettings = useCallback((patch: Partial<FinanceSettings>) => {
@@ -2288,9 +2294,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         acked.add(a.id);
         if (!clientOwnsTarget(clientId, a, ordersRef.current, brandsRef.current)) continue;
         if (a.type === 'brief') {
-          applyOrderPatchRef.current(a.orderId, a.patch);
+          // El brief solo se acepta confirmado si trae un avatar por cada video
+          let patch = a.patch;
+          const target = ordersRef.current.find(o => o.id === a.orderId);
+          if (target && patch.briefConfirmedAt) {
+            const check = briefReadiness({ ...target, ...patch } as Order);
+            if (check.chosen < check.total) {
+              patch = { ...patch, briefConfirmedAt: null };
+              void notifyClientByChatRef.current(target.clientId, `Tu brief de "${target.brand}" no se pudo confirmar: faltan avatares (tienes ${check.chosen} de ${check.total}). Elige un avatar por cada video y vuelve a confirmarlo.`);
+            }
+          }
+          applyOrderPatchRef.current(a.orderId, patch);
           // Al confirmar, el brief se vuelve un PDF con la plantilla de SENDA y queda en el proyecto
-          if (a.patch.briefConfirmedAt) void generateBriefRef.current(a.orderId, a.patch);
+          if (patch.briefConfirmedAt) void generateBriefRef.current(a.orderId, patch);
           // Avisos al admin: el cliente revisó un guión o aportó uno propio
           const cur = ordersRef.current.find(o => o.id === a.orderId);
           if (cur && a.patch.scriptReviews) {
@@ -2331,6 +2347,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const applyOrderPatchRef = useRef<(id: string, patch: Partial<Order>) => void>(() => {});
   const generateBriefRef = useRef<(orderId: string, overrides?: Partial<Order>) => Promise<boolean>>(async () => false);
+  const notifyClientByChatRef = useRef<(clientId: string | null | undefined, text: string) => Promise<void>>(async () => {});
   const submitFeedbackRef = useRef<(videoId: string, items: { time: number; text: string }[]) => void>(() => {});
   const setQcRef = useRef<(videoId: string, status: QcStatus) => void>(() => {});
   const clientCatalogRef = useRef(clientCatalog);
@@ -2397,6 +2414,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void notifyClientByChat(base.clientId, `Revisamos el brief de "${base.brand}" y necesitamos que lo vuelvas a llenar. Entra a Mis proyectos y confírmalo de nuevo.`);
   }, [updateOrder, notifyClientByChat]);
 
+  const reopenBrief = useCallback(async (orderId: string, message: string) => {
+    const base = ordersRef.current.find(o => o.id === orderId);
+    if (!base) return;
+    updateOrder(orderId, { briefConfirmedAt: null });
+    const text = message.trim() || 'Falta completar algo del brief.';
+    void notifyClientByChat(base.clientId, `Necesitamos que revises el brief de "${base.brand}": ${text} Entra a Mis proyectos, complétalo y vuelve a confirmarlo.`);
+  }, [updateOrder, notifyClientByChat]);
+
   const saveBriefAsAdmin = useCallback(async (orderId: string, patch: Partial<Order>, notifyClient: boolean): Promise<boolean> => {
     const base = ordersRef.current.find(o => o.id === orderId);
     if (!base) return false;
@@ -2408,6 +2433,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     generateBriefRef.current = generateBriefPdf;
+    notifyClientByChatRef.current = notifyClientByChat;
     applyOrderPatchRef.current = updateOrder;
     submitFeedbackRef.current = submitClientFeedbackBatch;
     setQcRef.current = setQc;
@@ -2445,7 +2471,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles, resyncClientView,
-    generateBriefPdf, publishScripts, resetBrief, saveBriefAsAdmin,
+    generateBriefPdf, publishScripts, resetBrief, reopenBrief, saveBriefAsAdmin,
     notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,

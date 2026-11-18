@@ -7,7 +7,7 @@ import { useStore } from '../../store';
 import { uploadSharedFile } from '../../lib/supabaseClient';
 import type { Order, OrderReference, OrderScript, ScriptChoice, ScriptReview } from '../../types';
 import { AvatarPicker, StylePicker, avatarChosen, type AvatarChoice, type StyleChoice } from './BriefPickers';
-import { allScripts, reviewOf, scriptHash, REVIEW_LABEL } from '../../lib/scripts';
+import { allScripts, reviewOf, scriptHash, REVIEW_LABEL, choiceForSlot, slotKey, videoSlots } from '../../lib/scripts';
 import { AGENCY_STYLE_ID, AGENCY_STYLE_NAME } from '../../lib/styleCatalog';
 
 /** El brief queda fijo para el cliente cuando el proyecto ya está en producción Y él ya lo confirmó.
@@ -102,23 +102,20 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   const { updateOrder, setView, saveBriefAsAdmin, resetBrief } = useStore();
   const locked = !asAdmin && briefLocked(order);
   const scripts = allScripts(order);
-  const scriptMode = scripts.length > 0;
   const agencyScripts = scripts.filter(s => s.source !== 'cliente');
   const ownScripts = scripts.filter(s => s.source === 'cliente');
 
-  // Elección única (proyecto sin guiones)
-  const [single, setSingle] = useState<Choice>({
-    avatar: { avatarId: order.avatarId ?? null, avatarName: order.avatarName ?? null, imageUrl: order.avatarImageUrl ?? null, customText: order.avatarCustomText ?? null, refUrl: order.avatarRefUrl ?? null },
-    style: { styleId: order.editingStyleId ?? null, styleName: order.editingStyleName ?? null },
-  });
-  // Elección por guión/video
-  const [perScript, setPerScript] = useState<Record<string, Choice>>(() => {
+  // Una elección por VIDEO (v1…vN): el avatar de cada uno es obligatorio
+  const total = videoSlots(order);
+  const slotKeys = Array.from({ length: total }, (_, i) => slotKey(i));
+  const [perSlot, setPerSlot] = useState<Record<string, Choice>>(() => {
     const m: Record<string, Choice> = {};
-    for (const c of order.scriptChoices || []) {
-      m[c.scriptId] = {
+    for (let i = 0; i < total; i++) {
+      const c = choiceForSlot(order, i);
+      m[slotKey(i)] = c ? {
         avatar: { avatarId: c.avatarId ?? null, avatarName: c.avatarName ?? null, imageUrl: c.avatarImageUrl ?? null, customText: c.avatarCustomText ?? null, refUrl: c.avatarRefUrl ?? null },
         style: { styleId: c.styleId ?? null, styleName: c.styleName ?? null },
-      };
+      } : emptyChoice();
     }
     return m;
   });
@@ -139,12 +136,13 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
 
   useEffect(() => { setSaved(null); }, [order.id]);
 
-  const choiceOf = (id: string) => perScript[id] || emptyChoice();
-  const setChoice = (id: string, part: Partial<Choice>) => setPerScript(m => ({ ...m, [id]: { ...(m[id] || emptyChoice()), ...part } }));
+  const choiceOf = (key: string) => perSlot[key] || emptyChoice();
+  const setChoice = (key: string, part: Partial<Choice>) => setPerSlot(m => ({ ...m, [key]: { ...(m[key] || emptyChoice()), ...part } }));
 
   const refUrlValid = /^https?:\/\/\S+\.\S+/.test(refUrl.trim());
   // Solo el avatar es obligatorio; estilo, referencias y notas son opcionales
-  const avatarsDone = scriptMode ? scripts.every(s => avatarChosen(choiceOf(s.id).avatar)) : avatarChosen(single.avatar);
+  const chosenCount = slotKeys.filter(k => avatarChosen(choiceOf(k).avatar)).length;
+  const avatarsDone = chosenCount === total;
   const complete = avatarsDone;
 
   const addRef = () => {
@@ -159,7 +157,6 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   const addOwnScript = (s: OrderScript) => updateOrder(order.id, { clientScripts: [...(order.clientScripts || []), s] });
   const removeOwnScript = (id: string) => {
     updateOrder(order.id, { clientScripts: (order.clientScripts || []).filter(s => s.id !== id), scriptReviews: (order.scriptReviews || []).filter(r => r.scriptId !== id) });
-    setPerScript(m => { const n = { ...m }; delete n[id]; return n; });
   };
   const submitOwnText = () => {
     if (!ownText.trim()) return;
@@ -184,28 +181,27 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       clientNotes: notes.trim() || null,
       briefConfirmedAt: confirm ? new Date().toISOString() : order.briefConfirmedAt ?? null,
     };
-    if (scriptMode) {
-      const choices: ScriptChoice[] = scripts.map(s => {
-        const c = choiceOf(s.id);
-        const st = withAgencyStyle(c.style);
-        return {
-          scriptId: s.id, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
-          avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
-          styleId: st.styleId ?? null, styleName: st.styleName ?? null,
-        };
-      });
-      return { ...base, scriptChoices: choices };
-    }
-    const st = withAgencyStyle(single.style);
+    const choices: ScriptChoice[] = slotKeys.map(k => {
+      const c = choiceOf(k);
+      const st = withAgencyStyle(c.style);
+      return {
+        scriptId: k, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
+        avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
+        styleId: st.styleId ?? null, styleName: st.styleName ?? null,
+      };
+    });
+    // Los campos "únicos" antiguos reflejan el video 1 (para pantallas y datos que aún los leen)
+    const first = choices[0];
     return {
       ...base,
-      avatarId: single.avatar.avatarId ?? null,
-      avatarName: single.avatar.avatarName || single.avatar.customText || null,
-      avatarImageUrl: single.avatar.imageUrl ?? null,
-      avatarCustomText: single.avatar.customText ?? null,
-      avatarRefUrl: single.avatar.refUrl ?? null,
-      editingStyleId: st.styleId ?? null,
-      editingStyleName: st.styleName ?? null,
+      scriptChoices: choices,
+      avatarId: first.avatarId ?? null,
+      avatarName: first.avatarName || first.avatarCustomText || null,
+      avatarImageUrl: first.avatarImageUrl ?? null,
+      avatarCustomText: first.avatarCustomText ?? null,
+      avatarRefUrl: first.avatarRefUrl ?? null,
+      editingStyleId: first.styleId ?? null,
+      editingStyleName: first.styleName ?? null,
     };
   };
 
@@ -225,7 +221,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
   const scriptsPublished = Boolean(order.scriptsPublishedAt);
   const waitingScripts = Boolean(order.scriptsService) && agencyScripts.length === 0;
   const steps = [
-    { label: 'Avatar', ok: avatarsDone, required: true },
+    { label: `Avatares ${chosenCount}/${total}`, ok: avatarsDone, required: true },
     { label: 'Estilo', ok: true, required: false },
     { label: 'Referencias', ok: refs.length > 0, required: false },
   ];
@@ -343,43 +339,46 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
               </label>
             )}
             {ownErr && <p className="text-[11px] text-red-400">{ownErr}</p>}
-            <p className="text-[11px] text-muted-2">Cada guión corresponde a un video: abajo eliges el avatar y el estilo de cada uno.</p>
+            <p className="text-[11px] text-muted-2">El guión 1 va con el video 1, el 2 con el video 2… Abajo eliges el avatar de cada video. Puedes subir todos tus guiones en un solo PDF.</p>
           </div>
         </section>
 
-        {/* 2. Avatar (obligatorio) */}
+        {/* 2. Avatar de CADA video (obligatorio) */}
         <section className="space-y-3">
-          <SectionTitle n={2} icon={UserCircle2} title={scriptMode ? 'Avatar de cada guión' : 'Elige el avatar'} badge="obligatorio" hint="Elige uno de la galería SENDA, o describe o sube el tuyo." />
-          {scriptMode ? (
-            <div className="space-y-2.5">
-              {scripts.map((s, i) => (
-                <div key={s.id} className="grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center">
-                  <p className="text-sm font-semibold flex items-center gap-2"><span className="font-tech text-[11px] bg-surface-3 border border-line rounded-md px-2 py-1 text-accent">GUIÓN {i + 1}</span><span className="truncate text-muted text-xs">{s.title}</span></p>
-                  <AvatarPicker compact value={choiceOf(s.id).avatar} onChange={a => setChoice(s.id, { avatar: a })} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <AvatarPicker value={single.avatar} onChange={a => setSingle(c => ({ ...c, avatar: a }))} />
+          <SectionTitle n={2} icon={UserCircle2} title={total > 1 ? `Avatar de cada video (${total})` : 'Elige el avatar'} badge="obligatorio"
+            hint={total > 1 ? `Tu proyecto tiene ${total} videos: elige un avatar para cada uno. Sin los ${total} avatares no se puede confirmar el brief.` : 'Elige uno de la galería SENDA, o describe o sube el tuyo.'} />
+          {total > 1 && (
+            <p className={`text-xs font-semibold flex items-center gap-1.5 ${avatarsDone ? 'text-mint' : 'text-amber'}`}>
+              {avatarsDone ? <CheckCircle2 size={13} /> : <span className="w-2.5 h-2.5 rounded-full border border-current" />} {chosenCount} de {total} avatares elegidos
+            </p>
           )}
+          <div className="space-y-2.5">
+            {slotKeys.map((k, i) => (
+              <div key={k} className={total > 1 ? 'grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center' : ''}>
+                {total > 1 && (
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <span className="font-tech text-[11px] bg-surface-3 border border-line rounded-md px-2 py-1 text-accent">VIDEO {i + 1}</span>
+                    {scripts[i] && <span className="truncate text-muted text-xs">{scripts[i].title}</span>}
+                  </p>
+                )}
+                <AvatarPicker compact={total > 1} value={choiceOf(k).avatar} onChange={a => setChoice(k, { avatar: a })} />
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* 3. Estilo (opcional o a recomendación de SENDA) */}
         <section className="space-y-3">
-          <SectionTitle n={3} icon={Palette} title={scriptMode ? 'Estilo de edición de cada video' : 'Estilo de edición'} badge="opcional"
+          <SectionTitle n={3} icon={Palette} title={total > 1 ? 'Estilo de edición de cada video' : 'Estilo de edición'} badge="opcional"
             hint="Elígelo tú o déjalo a recomendación de SENDA. Cada estilo es una categoría: ábrela para ver sus videos." />
-          {scriptMode ? (
-            <div className="space-y-2.5">
-              {scripts.map((s, i) => (
-                <div key={s.id} className="grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center">
-                  <p className="text-sm font-semibold flex items-center gap-2"><span className="font-tech text-[11px] bg-surface-3 border border-line rounded-md px-2 py-1 text-accent">VIDEO {i + 1}</span></p>
-                  <StylePicker compact value={choiceOf(s.id).style} onChange={st => setChoice(s.id, { style: st })} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <StylePicker value={single.style} onChange={st => setSingle(c => ({ ...c, style: st }))} />
-          )}
+          <div className="space-y-2.5">
+            {slotKeys.map((k, i) => (
+              <div key={k} className={total > 1 ? 'grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center' : ''}>
+                {total > 1 && <p className="text-sm font-semibold"><span className="font-tech text-[11px] bg-surface-3 border border-line rounded-md px-2 py-1 text-accent">VIDEO {i + 1}</span></p>}
+                <StylePicker compact={total > 1} value={choiceOf(k).style} onChange={st => setChoice(k, { style: st })} />
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* 4. Referencias (opcional) */}
@@ -423,7 +422,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
               : saved === 'draft' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Borrador guardado</span>
               : saved === 'admin' ? <span className="text-mint flex items-center gap-1.5"><CheckCircle2 size={14} /> Guardado · PDF actualizado</span>
               : order.briefConfirmedAt ? <span className="text-muted-2">Confirmado el {order.briefConfirmedAt.slice(0, 10)} · puedes seguir ajustándolo</span>
-              : <span className="text-muted-2">{complete ? 'Todo listo para confirmar' : scriptMode ? 'Falta elegir el avatar de cada guión (lo demás es opcional)' : 'Falta elegir el avatar (lo demás es opcional)'}</span>}
+              : <span className="text-muted-2">{complete ? 'Todo listo para confirmar' : total > 1 ? `Faltan avatares: ${chosenCount} de ${total} elegidos (lo demás es opcional)` : 'Falta elegir el avatar (lo demás es opcional)'}</span>}
           </p>
           {asAdmin ? (
             <div className="flex gap-2 flex-wrap">

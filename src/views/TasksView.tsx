@@ -25,7 +25,7 @@ import { TimeField } from '../components/TimeField';
 import { MediaIdentity } from '../components/MediaIdentity';
 import { ClientMirror } from '../components/ClientMirror';
 import { findAvatar } from '../lib/avatarGallery';
-import { allScripts } from '../lib/scripts';
+import { allScripts, choiceForSlot } from '../lib/scripts';
 import { findStyle } from '../lib/styleCatalog';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
@@ -334,7 +334,8 @@ function VideoDetail({
   const allClipsApproved = video.clips.length > 0 && video.clips.every(c => c.status === 'approved');
   const pendingClipsCount = video.clips.filter(c => c.status !== 'approved').length;
   // Carpeta de Drive del proyecto (si el admin la vinculó); si no, la carpeta general
-  const { orders: allOrders, clientCatalog } = useStore();
+  const { orders: allOrders, clientCatalog, generateBriefPdf } = useStore();
+  const [generatingBrief, setGeneratingBrief] = useState(false);
   const projectDriveUrl = findOrderForVideo(video, brandName, allOrders)?.driveFolderUrl || getGoogleDriveFolderUrl();
   const qcOptions: QcStatus[] = ['sin_iniciar', 'pendiente', 'revision', 'correcciones', 'aprobado_senda', 'aprobado_cliente'];
 
@@ -477,6 +478,12 @@ function VideoDetail({
   // --- Contexto del video: pedido, fecha real, videos hermanos, pago y paso actual ---
   const { brands: allBrands, financeSettings, deleteClip, enableExtraClientFeedbackRound, setSelectedVideo: openVideo } = useStore();
   const order = findOrderForVideo(video, brandName, allOrders);
+  const makeBriefPdf = async () => {
+    if (!order) return;
+    setGeneratingBrief(true);
+    await generateBriefPdf(order.id);
+    setGeneratingBrief(false);
+  };
   const deadline = deadlineMs(order?.deliveryDate || video.date, order?.deliveryTime);
   const siblings = (allBrands.find(b => b.videos.some(x => x.id === video.id))?.videos || [])
     .slice()
@@ -1275,7 +1282,23 @@ function VideoDetail({
                     </button>
                   </>
                 )}
-                <DownloadButton url={video.briefFileUrl || order?.briefFileUrl} fileName={video.briefFileName || order?.briefFileName} label="Archivo" />
+                {(() => {
+                  const briefUrl = video.briefFileUrl || order?.briefFileUrl;
+                  if (briefUrl) {
+                    return <DownloadButton url={briefUrl} fileName={video.briefFileName || order?.briefFileName} label="Descargar brief (PDF)"
+                      className="!h-9 !px-3.5 !text-xs !font-semibold !bg-accent !text-on-accent !border-accent hover:!bg-accent-strong hover:!text-on-accent" />;
+                  }
+                  // Aún no hay PDF: quien lo necesite lo genera al instante con los datos del brief del cliente
+                  if (order?.briefConfirmedAt) {
+                    return (
+                      <button type="button" disabled={generatingBrief} onClick={() => { void makeBriefPdf(); }}
+                        className="h-9 px-3.5 rounded-lg bg-accent text-on-accent text-xs font-semibold flex items-center gap-1.5 hover:bg-accent-strong disabled:opacity-60">
+                        {generatingBrief ? <><Loader2 size={13} className="animate-spin" /> Generando…</> : <><Download size={13} /> Generar y descargar brief (PDF)</>}
+                      </button>
+                    );
+                  }
+                  return <span className="text-[11px] text-muted-2 bg-surface-3 border border-line rounded-lg px-2.5 py-2">El cliente aún no confirma el brief</span>;
+                })()}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1283,14 +1306,14 @@ function VideoDetail({
                 // Con servicio de guiones: el guión N, su avatar y su estilo son los del video N
                 const idx = (video.videoNumber || 1) - 1;
                 const sc = order ? allScripts(order)[idx] : undefined;
-                const ch = sc ? (order?.scriptChoices || []).find(c => c.scriptId === sc.id) : undefined;
-                const avatarId = sc ? ch?.avatarId : order?.avatarId;
-                const av = findAvatar(avatarId, clientCatalog.avatars, sc ? ch?.avatarImageUrl : order?.avatarImageUrl, sc ? ch?.avatarName : order?.avatarName);
-                const customText = sc ? ch?.avatarCustomText : order?.avatarCustomText;
-                const refUrl = sc ? ch?.avatarRefUrl : order?.avatarRefUrl;
-                const avName = sc ? ch?.avatarName : order?.avatarName;
-                const styleName = sc ? ch?.styleName : order?.editingStyleName;
-                const styleDesc = findStyle(sc ? ch?.styleId : order?.editingStyleId, clientCatalog.styles)?.description;
+                const ch = order ? choiceForSlot(order, idx) : null;
+                const avatarId = ch?.avatarId;
+                const av = findAvatar(avatarId, clientCatalog.avatars, ch?.avatarImageUrl, ch?.avatarName);
+                const customText = ch?.avatarCustomText;
+                const refUrl = ch?.avatarRefUrl;
+                const avName = ch?.avatarName;
+                const styleName = ch?.styleName;
+                const styleDesc = findStyle(ch?.styleId, clientCatalog.styles)?.description;
                 return (
                   <>
                     {sc && (

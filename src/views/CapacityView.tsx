@@ -1,3 +1,4 @@
+import { briefReadiness } from '../lib/scripts';
 import { setNavIntent } from '../lib/navIntent';
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
@@ -410,7 +411,8 @@ export function CapacityView() {
     // Rol único: una sola asignación deja a la persona a cargo del video completo
     void chosenEditorId;
     if (chosenClipperId && chosenClipperId !== order.clipperId) {
-      await assignOrderClipper(order.id, chosenClipperId);
+      const ok = await assignOrderClipper(order.id, chosenClipperId);
+      if (!ok) { window.alert(`No se pudo asignar: ${briefReadiness(order).reason} Se necesita el brief confirmado con un avatar por cada video.`); return; }
     }
     setReassignedToastId(order.id);
     setTimeout(() => {
