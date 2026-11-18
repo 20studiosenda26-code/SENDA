@@ -288,6 +288,8 @@ export interface Order {
   scriptsPublishedAt?: string | null;
   scriptsPdfName?: string | null;
   scriptsPdfUrl?: string | null;
+  /** Última vez que se reasignó (el pedido sigue vigilado en alertas) */
+  lastReassignedAt?: string | null;
   /** Elección por guión/video (guión N ↔ video N): avatar y estilo de edición */
   scriptChoices?: ScriptChoice[];
   /** Revisión del cliente de cada guión de SENDA: aprobar, rechazar o dejar feedback */

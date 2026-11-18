@@ -25,6 +25,7 @@ import { TimeField } from '../components/TimeField';
 import { MediaIdentity } from '../components/MediaIdentity';
 import { ClientMirror } from '../components/ClientMirror';
 import { findAvatar } from '../lib/avatarGallery';
+import { ReassignModal } from '../components/tasks/ReassignModal';
 import { allScripts, choiceForSlot } from '../lib/scripts';
 import { findStyle } from '../lib/styleCatalog';
 import { useDriveVideo } from '../lib/useDriveVideo';
@@ -32,8 +33,7 @@ import { isAssignedTo, TEAM_ROLE_SHORT } from '../lib/roles';
 import { findOrderForVideo, fmtMoney, unitEconomics, videoEarned } from '../lib/economics';
 import { DriveFolderField } from '../components/DriveFolderField';
 import { ClientAccountField } from '../components/ClientAccountField';
-import { WorkerPicker } from '../components/tasks/WorkerPicker';
-import { countdownLabel, deadlineMs, fmtDate, Modal } from '../components/home/home-bits';
+import { countdownLabel, deadlineMs, fmtDate } from '../components/home/home-bits';
 import { adminTurn, WORKER_STEP_TEXT, workerStep } from '../lib/videoFlow';
 
 /** Nombre(s) del responsable: uno solo si la misma persona hace clips y edición. */
@@ -1885,12 +1885,10 @@ export function TasksBoard({ scope = 'activos', search = '', person = 'todos', e
   /** Dentro de la pantalla de Tareas del admin (sin márgenes propios) */
   embedded?: boolean;
 }) {
-  const { brands, orders, workers, setSelectedVideo, deleteBrandProject, assignOrderClipper } = useStore();
+  const { brands, orders, workers, setSelectedVideo, deleteBrandProject } = useStore();
   const [expandedBrandId, setExpandedBrandId] = useState<string | null>(null);
   const [confirmDeleteBrandId, setConfirmDeleteBrandId] = useState<string | null>(null);
   const [reassign, setReassign] = useState<{ orderId: string; brand: string; current: string | null } | null>(null);
-  const [reassignTo, setReassignTo] = useState<string | null>(null);
-  const [reassigning, setReassigning] = useState(false);
 
   const brandGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1908,18 +1906,6 @@ export function TasksBoard({ scope = 'activos', search = '', person = 'todos', e
       .filter(g => person === 'todos' || g.videos.some(v => v.clipperId === person || v.editorId === person))
       .sort((a, b) => (Number.isFinite(a.dl) ? a.dl : Infinity) - (Number.isFinite(b.dl) ? b.dl : Infinity));
   }, [brands, orders, scope, search, person]);
-
-  const doReassign = async () => {
-    if (!reassign || !reassignTo) return;
-    setReassigning(true);
-    try {
-      await assignOrderClipper(reassign.orderId, reassignTo);
-      setReassign(null);
-      setReassignTo(null);
-    } finally {
-      setReassigning(false);
-    }
-  };
 
   return (
     <div className={embedded ? 'space-y-3' : 'p-6 max-w-6xl mx-auto space-y-3'}>
@@ -1970,7 +1956,7 @@ export function TasksBoard({ scope = 'activos', search = '', person = 'todos', e
                   {scope === 'activos' && linkedOrder && (
                     <button
                       type="button"
-                      onClick={() => { setReassign({ orderId: linkedOrder.id, brand: brand.name, current: responsibleId }); setReassignTo(null); }}
+                      onClick={() => { setReassign({ orderId: linkedOrder.id, brand: brand.name, current: responsibleId }); }}
                       className="text-xs font-medium text-accent border border-accent/30 rounded-lg px-2.5 py-1.5 hover:bg-accent/10 transition-colors"
                     >
                       Cambiar responsable
@@ -2037,23 +2023,10 @@ export function TasksBoard({ scope = 'activos', search = '', person = 'todos', e
         })
       )}
 
-      {reassign && (
-        <Modal title={`Cambiar responsable · ${reassign.brand}`} onClose={() => setReassign(null)} icon={<User size={18} className="text-accent" />}>
-          <p className="text-xs text-muted">La nueva persona recibe los videos que aún no están aprobados, con su avance actual (imagen, clips y finales se conservan), y se le notifica. Los videos ya aprobados siguen pagándose a quien los hizo.</p>
-          <WorkerPicker selected={reassignTo} onSelect={setReassignTo} excludeId={reassign.current} />
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button type="button" onClick={() => setReassign(null)} className="text-sm text-muted hover:text-text px-3 py-2">Cancelar</button>
-            <button
-              type="button"
-              onClick={() => void doReassign()}
-              disabled={!reassignTo || reassignTo === reassign.current || reassigning}
-              className="inline-flex items-center gap-2 bg-accent text-on-accent rounded-lg px-4 py-2 text-sm font-semibold hover:bg-accent-strong disabled:opacity-50 transition-colors"
-            >
-              {reassigning ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Reasignar
-            </button>
-          </div>
-        </Modal>
-      )}
+      {reassign && (() => {
+        const target = orders.find(o => o.id === reassign.orderId);
+        return target ? <ReassignModal order={target} onClose={() => setReassign(null)} /> : null;
+      })()}
     </div>
   );
 }

@@ -37,19 +37,36 @@ export function buildWorkUnits(orders: Order[], brands: Brand[]): WorkUnit[] {
     const own = videos.filter(v => v.orderId === o.id || (o.boardVideoId && v.id === o.boardVideoId));
     own.forEach(v => claimed.add(v.id));
     const count = Math.max(1, o.videoCount || 1);
-    const clipRemaining = own.length > 0 ? own.filter(needsClipping).length : count;
-    const editRemaining = own.length > 0 ? own.filter(needsEditing).length : count;
-    if (clipRemaining === 0 && editRemaining === 0) continue;
-    units.push({
-      key: o.id,
-      brand: o.brand,
-      orderId: o.id,
-      deliveryDate: o.deliveryDate || todayIso(),
-      complexity: orderComplexity(o),
-      clipperId: o.clipperId || null,
-      editorId: o.editorId || null,
-      clipRemaining,
-      editRemaining,
+    if (own.length === 0) {
+      // Pedido aún sin videos en el tablero: toda la carga es de quien lo tiene asignado
+      units.push({
+        key: o.id, brand: o.brand, orderId: o.id, deliveryDate: o.deliveryDate || todayIso(), complexity: orderComplexity(o),
+        clipperId: o.clipperId || null, editorId: o.editorId || null, clipRemaining: count, editRemaining: count,
+      });
+      continue;
+    }
+    // Con videos: cada persona carga SOLO con los suyos (un pedido puede estar repartido entre varias)
+    const byOwner = new Map<string, Video[]>();
+    for (const v of own) {
+      const owner = v.clipperId || v.editorId || o.clipperId || '';
+      byOwner.set(owner, [...(byOwner.get(owner) || []), v]);
+    }
+    const multi = byOwner.size > 1;
+    byOwner.forEach((vs, owner) => {
+      const clipRemaining = vs.filter(needsClipping).length;
+      const editRemaining = vs.filter(needsEditing).length;
+      if (clipRemaining === 0 && editRemaining === 0) return;
+      units.push({
+        key: multi ? `${o.id}::${owner || 'sin'}` : o.id,
+        brand: o.brand,
+        orderId: o.id,
+        deliveryDate: o.deliveryDate || todayIso(),
+        complexity: orderComplexity(o),
+        clipperId: owner || null,
+        editorId: owner || null,
+        clipRemaining,
+        editRemaining,
+      });
     });
   }
 
