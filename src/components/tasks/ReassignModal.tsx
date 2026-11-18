@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Clock, Lock, Loader2, ShieldAlert, Timer, X } from 'lucide-react';
 import { useStore } from '../../store';
-import { buildSlots, currentAllocation, movableCount } from '../../lib/assignment';
+import { buildSlots, movableCount } from '../../lib/assignment';
 import { briefReadiness } from '../../lib/scripts';
-import { VideoAllocator, allocToList, allocTotal, type AllocMap } from './VideoAllocator';
+import { VideoAllocator, initialOwners, missingCount, type Owners } from './VideoAllocator';
 import type { Order } from '../../types';
 
 export interface ReassignAlert {
@@ -36,7 +36,7 @@ export function ReassignModal({ order, alert, onClose }: { order: Order; alert?:
   const movable = movableCount(slots);
 
   // Empieza con el reparto actual, para mover solo lo necesario
-  const [alloc, setAlloc] = useState<AllocMap>(() => Object.fromEntries(currentAllocation(slots).map(a => [a.workerId, a.count])));
+  const [owners, setOwners] = useState<Owners>(() => initialOwners(slots, true));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -49,12 +49,12 @@ export function ReassignModal({ order, alert, onClose }: { order: Order; alert?:
   const firstTime = !order.clipperId;
   const ready = briefReadiness(order);
   const blocked = firstTime && !ready.ready;
-  const can = allocTotal(alloc) === movable && movable > 0 && !blocked;
+  const can = missingCount(slots, owners) === 0 && movable > 0 && !blocked;
   const nameOf = (id: string | null) => (id ? workers.find(w => w.id === id)?.name || '—' : 'Sin asignar');
 
   const confirm = async () => {
     setBusy(true);
-    const ok = await assignOrderVideos(order.id, allocToList(alloc));
+    const ok = await assignOrderVideos(order.id, [], owners);
     setBusy(false);
     if (ok) {
       setMsg({ ok: true, text: 'Listo: reparto guardado y el equipo ya recibió su aviso.' });
@@ -116,7 +116,7 @@ export function ReassignModal({ order, alert, onClose }: { order: Order; alert?:
                 <p className="text-xs text-muted mt-1">No hay nada para reasignar.</p>
               </div>
             ) : (
-              <VideoAllocator slots={slots} alloc={alloc} onChange={setAlloc} />
+              <VideoAllocator slots={slots} owners={owners} onChange={setOwners} />
             )}
           </div>
         </div>

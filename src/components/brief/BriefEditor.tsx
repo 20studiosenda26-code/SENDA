@@ -100,7 +100,7 @@ function ReviewBar({ order, script, readOnly, onSave }: { order: Order; script: 
 
 /** Brief del proyecto. Lo usa el cliente (Mis proyectos) y el admin al "entrar como cliente" (asAdmin). */
 export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?: boolean; onDone?: () => void }) {
-  const { updateOrder, setView, saveBriefAsAdmin, resetBrief } = useStore();
+  const { updateOrder, setView, saveBriefAsAdmin, resetBrief, generateBriefPdf } = useStore();
   const locked = !asAdmin && briefLocked(order);
   const scripts = allScripts(order);
   const agencyScripts = scripts.filter(s => s.source !== 'cliente');
@@ -116,7 +116,7 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       const c = choiceForSlot(order, i);
       m[slotKey(i)] = c ? {
         avatar: { avatarId: c.avatarId ?? null, avatarName: c.avatarName ?? null, imageUrl: c.avatarImageUrl ?? null, customText: c.avatarCustomText ?? null, refUrl: c.avatarRefUrl ?? null },
-        style: { styleId: c.styleId ?? null, styleName: c.styleName ?? null },
+        style: { styleId: c.styleId ?? null, styleName: c.styleName ?? null, by: c.styleBy },
       } : emptyChoice();
     }
     return m;
@@ -177,26 +177,19 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
     } finally { setOwnUploading(false); }
   };
 
-  const buildPatch = (confirm: boolean): Partial<Order> => {
-    const base: Partial<Order> = {
-      references: refs,
-      clientNotes: notes.trim() || null,
-      briefConfirmedAt: confirm ? new Date().toISOString() : order.briefConfirmedAt ?? null,
+  const choicesFrom = (map: Record<string, Choice>): ScriptChoice[] => slotKeys.map(k => {
+    const c = map[k] || emptyChoice();
+    const st = withAgencyStyle(c.style);
+    return {
+      scriptId: k, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
+      avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
+      styleId: st.styleId ?? null, styleName: st.styleName ?? null, styleBy: st.styleId === AGENCY_STYLE_ID ? undefined : st.by,
     };
-    const choices: ScriptChoice[] = slotKeys.map(k => {
-      const c = choiceOf(k);
-      const st = withAgencyStyle(c.style);
-      return {
-        scriptId: k, avatarId: c.avatar.avatarId ?? null, avatarName: c.avatar.avatarName ?? null, avatarImageUrl: c.avatar.imageUrl ?? null,
-        avatarCustomText: c.avatar.customText ?? null, avatarRefUrl: c.avatar.refUrl ?? null,
-        styleId: st.styleId ?? null, styleName: st.styleName ?? null,
-      };
-    });
-    // Los campos "únicos" antiguos reflejan el video 1 (para pantallas y datos que aún los leen)
+  });
+  // Los campos "únicos" antiguos reflejan el video 1 (para pantallas y datos que aún los leen)
+  const legacyFrom = (choices: ScriptChoice[]): Partial<Order> => {
     const first = choices[0];
     return {
-      ...base,
-      scriptChoices: choices,
       avatarId: first.avatarId ?? null,
       avatarName: first.avatarName || first.avatarCustomText || null,
       avatarImageUrl: first.avatarImageUrl ?? null,
@@ -206,6 +199,51 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
       editingStyleName: first.styleName ?? null,
     };
   };
+
+  const buildPatch = (confirm: boolean): Partial<Order> => {
+    const choices = choicesFrom(perSlot);
+    return {
+      references: refs,
+      clientNotes: notes.trim() || null,
+      briefConfirmedAt: confirm ? new Date().toISOString() : order.briefConfirmedAt ?? null,
+      scriptChoices: choices,
+      ...legacyFrom(choices),
+    };
+  };
+
+  // Admin: elige el estilo cuando el cliente lo dejó "a recomendación de SENDA". Se guarda al instante,
+  // el cliente lo ve en su brief y NO se le manda ninguna notificación.
+  const [styleSaved, setStyleSaved] = useState<string | null>(null);
+  const adminPickStyle = (key: string, st: StyleChoice) => {
+    const chosen: StyleChoice = st.styleId && st.styleId !== AGENCY_STYLE_ID ? { ...st, by: 'senda' } : st;
+    const next = { ...perSlot, [key]: { ...(perSlot[key] || emptyChoice()), style: chosen } };
+    setPerSlot(next);
+    const choices = choicesFrom(next);
+    const patch: Partial<Order> = { scriptChoices: choices, ...legacyFrom(choices) };
+    updateOrder(order.id, patch);
+    // El PDF del brief se actualiza para que el Clipper lo tenga con el estilo definitivo
+    if (order.briefFileUrl || order.briefConfirmedAt) void generateBriefPdf(order.id, patch);
+    setStyleSaved(`Estilo guardado en el video ${slotKeys.indexOf(key) + 1}: el cliente ya lo ve y el brief PDF se actualizó.`);
+    setTimeout(() => setStyleSaved(null), 4500);
+  };
+
+  // Si SENDA eligió un estilo mientras el cliente tiene el brief abierto, se refleja sin que lo pise al guardar
+  const choicesSig = JSON.stringify((order.scriptChoices || []).map(c => [c.scriptId, c.styleId, c.styleBy]));
+  useEffect(() => {
+    if (asAdmin) return;
+    setPerSlot(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const c of order.scriptChoices || []) {
+        if (c.styleBy === 'senda' && next[c.scriptId] && next[c.scriptId].style.styleId !== c.styleId) {
+          next[c.scriptId] = { ...next[c.scriptId], style: { styleId: c.styleId ?? null, styleName: c.styleName ?? null, by: 'senda' } };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choicesSig, asAdmin]);
 
   const saveAsClient = (confirm: boolean) => {
     updateOrder(order.id, buildPatch(confirm));
@@ -382,11 +420,13 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
         <section className="space-y-3">
           <SectionTitle n={3} icon={Palette} title={total > 1 ? 'Estilo de edición de cada video' : 'Estilo de edición'} badge="opcional"
             hint="Elígelo tú o déjalo a recomendación de SENDA. Cada estilo es una categoría: ábrela para ver sus videos." />
+          {asAdmin && styleSaved && <p className="text-xs text-mint bg-mint-dim/40 border border-mint/30 rounded-lg px-3 py-2 flex items-center gap-1.5 animate-fadeIn"><CheckCircle2 size={13} /> {styleSaved}</p>}
           <div className="space-y-2.5">
             {slotKeys.map((k, i) => (
               <div key={k} className={total > 1 ? 'grid grid-cols-1 md:grid-cols-[170px_1fr] gap-2.5 items-center' : ''}>
                 {total > 1 && <p className="text-sm font-semibold"><span className="font-tech text-[11px] bg-surface-3 border border-line rounded-md px-2 py-1 text-accent">VIDEO {i + 1}</span></p>}
-                <StylePicker compact={total > 1} value={choiceOf(k).style} onChange={st => setChoice(k, { style: st })} />
+                <StylePicker compact={total > 1} adminMode={asAdmin} value={choiceOf(k).style}
+                  onChange={st => (asAdmin ? adminPickStyle(k, st) : setChoice(k, { style: st.styleId && st.styleId !== AGENCY_STYLE_ID ? { ...st, by: 'cliente' } : st }))} />
               </div>
             ))}
           </div>

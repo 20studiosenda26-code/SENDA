@@ -254,7 +254,7 @@ interface Store {
   setWorkerCapacity: (workerId: string, capacity: number) => void;
   getWorkerWorkload: (workerId: string) => number;
   /** Reparte los videos del proyecto: a cada persona X videos (o todo el proyecto a una). Devuelve false si no se pudo. */
-  assignOrderVideos: (orderId: string, allocation: Allocation[]) => Promise<boolean>;
+  assignOrderVideos: (orderId: string, allocation: Allocation[], explicitOwners?: (string | null)[]) => Promise<boolean>;
   /** Devuelve false si no se pudo asignar (el brief del cliente aún no está completo) */
   assignOrderTeam: (orderId: string, clipperId: string, editorId: string) => Promise<boolean>;
   assignOrderClipper: (orderId: string, clipperId: string) => Promise<boolean>;
@@ -2050,7 +2050,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [notifyPersonAssigned, upsertBoardVideoForOrder, markLocalWrite]);
 
   // Reparto por video: a cada persona X videos del proyecto (o todo el proyecto a una sola)
-  const assignOrderVideos = useCallback(async (orderId: string, alloc: Allocation[]): Promise<boolean> => {
+  const assignOrderVideos = useCallback(async (orderId: string, alloc: Allocation[], explicitOwners?: (string | null)[]): Promise<boolean> => {
     const order = ordersRef.current.find(o => o.id === orderId);
     if (!order) return false;
     const firstTime = !order.clipperId;
@@ -2059,11 +2059,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const videos = brandsRef.current.flatMap(b => b.videos).filter(v => v.orderId === orderId || v.id === order.boardVideoId);
     const slots = buildSlots(order.videoCount, videos);
     const movable = movableCount(slots);
-    const wanted = alloc.filter(a => a.workerId && a.count > 0);
-    if (movable === 0 || wanted.reduce((s, a) => s + a.count, 0) !== movable) return false;
-    const owners = distribute(slots, wanted);
+    if (movable === 0) return false;
+    let owners: (string | null)[];
+    if (explicitOwners) {
+      // Reparto elegido video por video: el admin decide exactamente qué número va con quién
+      if (explicitOwners.length !== slots.length) return false;
+      owners = slots.map((s, i) => (s.frozen ? s.owner : explicitOwners[i] ?? null));
+    } else {
+      const wanted = alloc.filter(a => a.workerId && a.count > 0);
+      if (wanted.reduce((s, a) => s + a.count, 0) !== movable) return false;
+      owners = distribute(slots, wanted);
+    }
     if (owners.some((o, i) => !slots[i].frozen && !o)) return false;
-    const primary = primaryWorker(owners) || wanted[0].workerId;
+    const primary = primaryWorker(owners) || (owners.find(Boolean) as string | undefined) || '';
+    if (!primary) return false;
     const videoId = upsertBoardVideoForOrder(order, primary, primary, owners);
     const updatedOrder: Order = {
       ...order,

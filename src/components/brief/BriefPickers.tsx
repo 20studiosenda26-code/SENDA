@@ -18,6 +18,7 @@ export interface AvatarChoice {
 export interface StyleChoice {
   styleId?: string | null;
   styleName?: string | null;
+  by?: 'cliente' | 'senda';
 }
 
 export const avatarChosen = (c: AvatarChoice) => Boolean(c.avatarId || c.customText?.trim() || c.refUrl);
@@ -130,7 +131,7 @@ export function AvatarPicker({ value, onChange, compact }: { value: AvatarChoice
 const playable = (url: string) => /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) || url.includes('/storage/v1/object/');
 
 /** Estilo de edición: se elige una categoría o se deja a recomendación de SENDA (por defecto). */
-export function StylePicker({ value, onChange, compact }: { value: StyleChoice; onChange: (v: StyleChoice) => void; compact?: boolean }) {
+export function StylePicker({ value, onChange, compact, adminMode }: { value: StyleChoice; onChange: (v: StyleChoice) => void; compact?: boolean; adminMode?: boolean }) {
   const { clientCatalog } = useStore();
   const styles = allStyles(clientCatalog.styles);
   const [open, setOpen] = useState(false);
@@ -149,10 +150,12 @@ export function StylePicker({ value, onChange, compact }: { value: StyleChoice; 
         </div>
         <div className="flex-1 min-w-0">
           {selected
-            ? <><p className="text-sm font-semibold truncate">{selected.name}</p><p className="text-[11px] text-muted-2 line-clamp-1">{selected.description || 'Estilo de edición SENDA'}</p></>
-            : <><p className="text-sm font-semibold">A recomendación de SENDA</p><p className="text-[11px] text-muted-2 line-clamp-1">Nuestro equipo elige el mejor estilo para este video</p></>}
+            ? <><p className="text-sm font-semibold truncate flex items-center gap-1.5">{selected.name}{value.by === 'senda' && <span className="text-[10px] font-semibold text-mint bg-mint-dim border border-mint/30 rounded-full px-1.5 py-0.5 shrink-0">Elegido por SENDA</span>}</p><p className="text-[11px] text-muted-2 line-clamp-1">{selected.description || 'Estilo de edición SENDA'}</p></>
+            : adminMode
+              ? <><p className="text-sm font-semibold text-amber">Pendiente: el cliente lo dejó a recomendación de SENDA</p><p className="text-[11px] text-muted-2 line-clamp-1">Elige tú el estilo: se guarda al instante y el cliente lo ve</p></>
+              : <><p className="text-sm font-semibold">A recomendación de SENDA</p><p className="text-[11px] text-muted-2 line-clamp-1">Nuestro equipo elige el mejor estilo para este video</p></>}
         </div>
-        {selected && (
+        {selected && !adminMode && (
           <button type="button" onClick={() => onChange({ styleId: AGENCY_STYLE_ID, styleName: AGENCY_STYLE_NAME })}
             className="px-3 py-2 rounded-lg bg-surface-2 border border-line text-muted text-xs font-medium hover:text-text hover:border-mint/40 transition-colors shrink-0 hidden sm:block">
             Que SENDA lo recomiende
@@ -160,7 +163,7 @@ export function StylePicker({ value, onChange, compact }: { value: StyleChoice; 
         )}
         <button type="button" onClick={() => setOpen(true)}
           className="px-3.5 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong transition-colors shrink-0">
-          {selected ? 'Cambiar' : 'Elegir yo el estilo'}
+          {selected ? 'Cambiar' : adminMode ? 'Elegir el estilo' : 'Elegir yo el estilo'}
         </button>
       </div>
 

@@ -329,6 +329,8 @@ export interface ScriptChoice {
   avatarImageUrl?: string | null;
   styleId?: string | null;
   styleName?: string | null;
+  /** Quién eligió el estilo: el cliente o SENDA (cuando el cliente lo dejó a recomendación de la agencia) */
+  styleBy?: 'cliente' | 'senda';
 }
 
 export interface CatalogAvatar {
