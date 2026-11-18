@@ -3,6 +3,7 @@ import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Plus, RefreshC
 import { useStore } from '../../store';
 import type { Order, OrderScript } from '../../types';
 import { BriefEditor } from './BriefEditor';
+import { DownloadFileButton } from '../DownloadFileButton';
 import { reviewOf, REVIEW_LABEL, briefReadiness } from '../../lib/scripts';
 import { AGENCY_STYLE_ID } from '../../lib/styleCatalog';
 
@@ -67,10 +68,14 @@ export function OrderBriefPanel({ order }: { order: Order }) {
             <ShieldCheck size={14} /> Abrir brief como cliente
           </button>
           {order.briefFileUrl ? (
-            <a href={order.briefFileUrl} target="_blank" rel="noreferrer" download={order.briefFileName || undefined}
-              className="px-3.5 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
-              <Download size={14} className="text-accent" /> Descargar brief PDF <ExternalLink size={11} className="text-muted-2" />
-            </a>
+            <>
+              <DownloadFileButton url={order.briefFileUrl} fileName={order.briefFileName} label="Descargar brief PDF"
+                className="px-3.5 py-2 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong" />
+              <a href={order.briefFileUrl} target="_blank" rel="noreferrer"
+                className="px-3.5 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40">
+                <ExternalLink size={13} className="text-accent" /> Ver
+              </a>
+            </>
           ) : null}
           <button type="button" disabled={busy === 'pdf'} onClick={() => void genPdf()}
             className="px-3.5 py-2 rounded-lg bg-surface-2 border border-line text-xs font-medium flex items-center gap-1.5 hover:border-accent/40 disabled:opacity-50">
