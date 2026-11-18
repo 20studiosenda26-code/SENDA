@@ -5,9 +5,10 @@
 // con el nombre {M|H}_{UGC|IG|IGELITE|ESTETICO}_{edad}_{PAIS}_{nombre}_{ID}.jpg y ejecuta este script.
 import { readdirSync, statSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, relative, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('../public/avatars/', import.meta.url).pathname;
-const OUT = new URL('../src/data/avatars.ts', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('../public/avatars/', import.meta.url));
+const OUT = fileURLToPath(new URL('../src/data/avatars.ts', import.meta.url));
 const NAME_RE = /^[MH]_(UGC|IG|IGELITE|ESTETICO)_\d+_[A-Z]{2}_[a-z]+_[MH]\d+\.jpe?g$/i;
 
 const files = [];

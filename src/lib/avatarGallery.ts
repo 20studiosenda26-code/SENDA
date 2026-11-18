@@ -1,6 +1,6 @@
 // Galería de avatares de SENDA. Cada imagen vive en public/avatars/ y TODOS sus datos salen del nombre del archivo:
 //   {GÉNERO}_{CATEGORÍA}_{EDAD}_{PAÍS}_{nombre}_{ID}.jpg   →   M_IGELITE_22_CO_isabella_M32.jpg
-// La lista de archivos está en src/data/avatars.ts (se regenera con scripts/gen-avatars.mjs).
+// La lista de archivos está en src/data/avatars.ts (se regenera con scripts/gen-avatars.mjs); las imágenes están en Supabase Storage.
 import { AVATAR_FILES } from '../data/avatars';
 import type { CatalogAvatar } from '../types';
 
@@ -49,7 +49,12 @@ export const AGE_RANGES: { key: string; label: string; min: number; max: number 
 ];
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const BASE = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
+// Las imágenes viven en el almacenamiento público de Supabase (bucket senda-media, carpeta avatars/):
+// se ven igual en cualquier publicación. Sin Supabase (desarrollo local) se leen de public/avatars/.
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+const BASE = SUPABASE_URL
+  ? `${SUPABASE_URL}/storage/v1/object/public/senda-media/avatars/`
+  : `${(import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')}avatars/`;
 
 export function parseAvatarFile(path: string): GalleryAvatar | null {
   const file = path.split('/').pop() || '';
@@ -65,8 +70,8 @@ export function parseAvatarFile(path: string): GalleryAvatar | null {
     age: Number(age),
     country: cc,
     name,
-    src: `${BASE}avatars/${path}`,
-    thumb: `${BASE}avatars/thumbs/${id.toUpperCase()}.webp`,
+    src: `${BASE}${path}`,
+    thumb: `${BASE}thumbs/${id.toUpperCase()}.webp`,
     alt: `Avatar ${name}, ${age} años, ${countryName(cc)}`,
   };
 }
