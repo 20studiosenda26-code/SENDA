@@ -681,7 +681,7 @@ function VideoDetail({
           )}
 
           {isAdmin && activeFinal && (
-            <ClientMirror video={video} clientId={findOrderForVideo(video, brandName, allOrders)?.clientId || null} />
+            <ClientMirror video={video} currentUrl={activeFinal.fileUrl || null} clientId={findOrderForVideo(video, brandName, allOrders)?.clientId || null} />
           )}
 
           {activeFinal && (

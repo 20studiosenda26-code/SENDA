@@ -415,7 +415,7 @@ function VideoReview({
 
           {delivered && final?.fileUrl && (
             <MediaIdentity
-              label={inCorrection ? `Video ${video.videoNumber || ''} · la versión que ya revisaste` : `Video ${video.videoNumber || ''} entregado`}
+              label={`Video ${video.videoNumber || ''} entregado`}
               url={final.fileUrl}
             />
           )}
