@@ -6,7 +6,9 @@ import { useStore } from '../../store';
 import type { Order, OrderReference, ScriptChoice } from '../../types';
 import { AvatarPicker, StylePicker, avatarChosen, type AvatarChoice, type StyleChoice } from './BriefPickers';
 
-export const briefLocked = (o: Order) => Boolean(o.clipperId);
+/** El brief queda fijo para el cliente cuando el proyecto ya está en producción Y él ya lo confirmó.
+ *  Si entró a producción sin brief confirmado, el cliente todavía puede completarlo. */
+export const briefLocked = (o: Order) => Boolean(o.clipperId) && Boolean(o.briefConfirmedAt);
 
 function SectionTitle({ n, icon: Icon, title, hint }: { n: number; icon: typeof FileText; title: string; hint: string }) {
   return (

@@ -7,3 +7,6 @@ dist
 .env.local
 .env.*.local
 *.local
+
+# Imágenes de avatares: viven en Supabase Storage (scripts/upload-avatars.mjs), no en el repositorio
+public/avatars/
