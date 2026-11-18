@@ -106,7 +106,7 @@ export function VideoAllocator({ slots, owners, onChange }: { slots: Slot[]; own
                     <div className="h-1 flex-1 max-w-[140px] bg-surface-2 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full ${full ? 'bg-amber' : today > 0 ? 'bg-mint' : 'bg-accent/50'}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
                     </div>
-                    <span className={`text-[10px] font-tech ${full ? 'text-amber' : 'text-muted-2'}`}>Hoy {today}/{cap} · {pending} pendientes</span>
+                    <span className={`text-[10px] font-tech ${full ? 'text-amber' : 'text-muted-2'}`}>{today}/{cap} videos al día · {pending} sin terminar</span>
                   </div>
                 </div>
                 <button type="button" onClick={() => allTo(w.id)} title="Todo el proyecto a esta persona"

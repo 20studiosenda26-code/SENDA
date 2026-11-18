@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { supabase, loadShared, saveShared } from '../lib/supabaseClient';
 import {
   UserPlus, X, Users, Shield, AlertCircle, CheckCircle2,
-  ChevronDown, Search, Mail, Copy, Check,
+  ChevronDown, Search, Mail, Copy, Check, Trash2,
 } from 'lucide-react';
 import type { Role } from '../types';
 import type { AuthUser } from '../lib/auth';
@@ -13,7 +13,7 @@ import { normalizeRole, TEAM_ROLE_LABEL, TEAM_ROLE_PLURAL, TEAM_ROLE_SHORT } fro
 
 export function UserManagement() {
   const { session, user: currentUser } = useAuth();
-  const { refreshProfiles } = useStore();
+  const { refreshProfiles, releaseWorkerWork } = useStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [users, setUsers] = useState<AuthUser[]>([]);
@@ -21,6 +21,9 @@ export function UserManagement() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'todos' | Role>('todos');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [toDelete, setToDelete] = useState<AuthUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
@@ -106,6 +109,29 @@ export function UserManagement() {
       setFormError('Error de conexión');
     }
     setLoading(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!toDelete || !supabase) return;
+    setDeleting(true);
+    setDeleteMsg(null);
+    const target = toDelete;
+    const { error } = await supabase.rpc('admin_delete_user', { target: target.id });
+    if (error) {
+      const missing = /admin_delete_user|function|schema cache/i.test(error.message);
+      setDeleteMsg({ ok: false, text: missing
+        ? 'Falta activar el borrado en Supabase: ejecuta el archivo 0007_admin_delete_user.sql en el editor SQL y vuelve a intentarlo.'
+        : `No se pudo borrar: ${error.message}` });
+      setDeleting(false);
+      return;
+    }
+    if (target.role !== 'cliente' && target.role !== 'admin') await releaseWorkerWork(target.id);
+    await refreshProfiles();
+    setUsers(prev => prev.filter(x => x.id !== target.id));
+    setDeleteMsg({ ok: true, text: `"${target.name}" fue borrado.${target.role !== 'cliente' && target.role !== 'admin' ? ' Sus videos sin terminar quedaron sin asignar.' : ''}` });
+    setToDelete(null);
+    setDeleting(false);
+    setTimeout(() => setDeleteMsg(null), 6000);
   };
 
   const counts = useMemo(() => {
@@ -268,6 +294,12 @@ export function UserManagement() {
             </div>
           </div>
 
+          {deleteMsg && (
+            <div className={`flex items-center gap-2 text-xs rounded-lg px-3 py-2 border ${deleteMsg.ok ? 'text-mint bg-mint/10 border-mint/20' : 'text-red-400 bg-red-400/10 border-red-400/20'}`}>
+              {deleteMsg.ok ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />} {deleteMsg.text}
+            </div>
+          )}
+
           {filteredUsers.length === 0 ? (
             <p className="text-sm text-muted text-center py-6">No se encontraron usuarios con ese criterio</p>
           ) : (
@@ -306,10 +338,36 @@ export function UserManagement() {
                   }`}>
                     <Shield size={11} /> {u.role === 'admin' ? 'Admin' : u.role === 'cliente' ? 'Cliente' : TEAM_ROLE_SHORT}
                   </span>
+                  {u.id !== currentUser?.id && (
+                    <button type="button" onClick={() => { setDeleteMsg(null); setToDelete(u); }} title={`Borrar a ${u.name}`} aria-label={`Borrar a ${u.name}`}
+                      className="w-8 h-8 rounded-lg border border-line text-muted-2 hover:text-red-400 hover:border-red-400/40 hover:bg-red-400/10 flex items-center justify-center transition-colors shrink-0">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {toDelete && (
+        <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4" onClick={() => !deleting && setToDelete(null)}>
+          <div className="bg-surface-2 border border-line rounded-2xl p-5 w-full max-w-md space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-red-400">
+              <Trash2 size={18} /> <h4 className="font-display text-base font-semibold">¿Borrar a {toDelete.name}?</h4>
+            </div>
+            <p className="text-sm text-muted">
+              Se elimina su cuenta y ya no podrá entrar. {toDelete.role === 'cliente'
+                ? 'Sus proyectos se conservan.'
+                : toDelete.role === 'admin' ? 'Esta acción no se puede deshacer.' : 'Sus videos sin terminar quedarán sin asignar para que los repartas de nuevo; los ya aprobados conservan su historial de pago.'}
+            </p>
+            <p className="text-xs text-muted-2">Esta acción no se puede deshacer.</p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" disabled={deleting} onClick={() => setToDelete(null)} className="px-3 py-2 rounded-lg bg-surface-3 border border-line text-sm text-muted hover:text-text">Cancelar</button>
+              <button type="button" disabled={deleting} onClick={() => void confirmDelete()} className="px-3 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 disabled:opacity-60">{deleting ? 'Borrando...' : 'Sí, borrar'}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

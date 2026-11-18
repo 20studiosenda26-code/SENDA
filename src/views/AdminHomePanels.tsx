@@ -783,7 +783,7 @@ function LoadBar({ today, cap, load }: { today: number; cap: number; load: Worke
       <div className="h-1.5 flex-1 bg-surface-2 rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all duration-500 ${workerLoadColor(load)}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[10px] font-tech text-muted-2 shrink-0">Hoy {today}/{cap}</span>
+      <span className="text-[10px] font-tech text-muted-2 shrink-0">{today}/{cap} videos</span>
     </div>
   );
 }

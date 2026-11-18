@@ -111,6 +111,9 @@ export function videoPayee(v: Pick<Video, 'clipperId' | 'editorId'>): string | n
 // Etapas del flujo de producción
 // ---------------------------------------------------------------------------
 
+/** Límite de videos por persona y por día (igual para todo el equipo). */
+export const DAILY_VIDEO_LIMIT = 4;
+
 /** El equipo ya terminó su parte (Senda aprobó o el cliente aprobó). */
 export function isTeamDone(v: Video): boolean {
   return v.qc === 'aprobado_senda' || v.qc === 'aprobado_cliente' || v.qc === 'aprobado';

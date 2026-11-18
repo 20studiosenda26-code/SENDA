@@ -128,8 +128,7 @@ export function workerDayLoad(worker: Pick<Worker, 'id' | 'role'>, units: WorkUn
   // Rol único: cada video pendiente ocupa a la persona de principio a fin
   const mine = units.filter(u => u.clipperId === worker.id || u.editorId === worker.id);
   const pick = (u: WorkUnit) => u.editRemaining;
-  const load = spreadLoad(mine, pick);
-  const res: WorkerDayLoad = { todayLoad: Math.ceil(load[todayIso()] || 0), pendingTotal: 0, simple: 0, estandar: 0, alta: 0, brands: [] };
+  const res: WorkerDayLoad = { todayLoad: 0, pendingTotal: 0, simple: 0, estandar: 0, alta: 0, brands: [] };
   for (const u of mine) {
     const n = pick(u);
     if (n <= 0) continue;
@@ -137,5 +136,7 @@ export function workerDayLoad(worker: Pick<Worker, 'id' | 'role'>, units: WorkUn
     res[u.complexity] += n;
     if (!res.brands.includes(u.brand)) res.brands.push(u.brand);
   }
+  // La carga de una persona = TODOS sus videos asignados que aún no termina (cada video cuenta uno, sin importar el proyecto)
+  res.todayLoad = res.pendingTotal;
   return res;
 }

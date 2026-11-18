@@ -1616,13 +1616,7 @@ export function CapacityView() {
                 {clippers.map(w => (
                   <div key={w.id} className="bg-surface-3 border border-line rounded-xl px-3 py-2 flex items-center justify-between">
                     <span className="text-xs font-medium truncate">{w.name}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={getWorkerCapacity(w.id)}
-                      onChange={e => setWorkerCapacity(w.id, Number(e.target.value) || 1)}
-                      className="w-16 bg-surface-2 border border-line rounded-md px-2 py-1 text-xs font-tech text-center outline-none focus:border-accent"
-                    />
+                    <span className="text-xs font-tech text-muted" title="Límite fijo para todo el equipo">{getWorkerCapacity(w.id)} v/día</span>
                   </div>
                 ))}
               </div>

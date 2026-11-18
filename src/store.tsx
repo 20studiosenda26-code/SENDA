@@ -3,7 +3,7 @@ import type { Brand, Clip, Worker, WorkerCustomGoals, NotificationItem, Notifica
 import { INITIAL_BRANDS, INITIAL_WORKERS, INITIAL_NOTIFICATIONS, INITIAL_PAID_HISTORY, INITIAL_CHAT, CONFIG, CALENDAR_EVENTS, CLASSROOM_MODULES, INITIAL_ORDERS } from './data';
 import { uploadSharedFile, saveSharedNow, loadSharedStamps, loadSharedMany, syncGdriveConfig, SENDA_FUNCTION, isGoogleDriveUrl, fetchDriveVideoDuration, loadShared, saveShared, isSupabaseConfigured, supabase, subscribeToTable, getLastLocalWriteAt, markKeyWrittenLocally, setSharedWriteGuard } from './lib/supabaseClient';
 import { useAuth } from './lib/auth';
-import { fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
+import { DAILY_VIDEO_LIMIT, isTeamDone, fmtMoney, normalizeFinanceSettings, PAY_SPLIT, unitEconomics, findOrderForVideo, workerWorkload } from './lib/economics';
 import { TEAM_ROLE_LABEL } from './lib/roles';
 import { applyClientActions, buildClientView, viewFingerprint, clientAckKey, clientInboxKey, clientOwnsTarget, clientViewKey, CLIENT_CATALOG_KEY, newClientActionId } from './lib/clientSync';
 import type { ClientAction, ClientCatalog, ClientProfile, ClientView, OrderScript } from './types';
@@ -38,8 +38,8 @@ const DEFAULT_FINANCE_SETTINGS: FinanceSettings = normalizeFinanceSettings(null)
 
 const DEFAULT_CAPACITY_CONFIG: CapacityProtocolConfig = {
   safetyMarginPct: 15,
-  defaultClipperDailyVideos: 10,
-  defaultEditorDailyVideos: 10,
+  defaultClipperDailyVideos: 4,
+  defaultEditorDailyVideos: 4,
   workdayStartHour: 8,
   workdayEndHour: 20,
   maxNoResponseMinutes: 45,
@@ -179,6 +179,7 @@ interface Store {
   refreshProfiles: () => Promise<void>;
   /** Trae del servidor lo último de videos y pedidos (se usa al abrir Tareas e Inicio) */
   refreshAssignments: () => Promise<void>;
+  releaseWorkerWork: (workerId: string) => Promise<void>;
   /** Vuelve a copiar al visor de cada cliente lo que se le ha publicado */
   resyncClientView: () => void;
   /** Genera el PDF del brief (plantilla SENDA), lo sube y lo deja como brief del proyecto */
@@ -678,9 +679,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase.from('profiles').select('*');
     if (!data) return;
     const clipperEditor = data.filter((p: Record<string, unknown>) => p.role === 'clipper' || p.role === 'editor');
-    if (clipperEditor.length > 0) {
-      setWorkers(clipperEditor.map(workerFromProfileRow));
-    }
+    setWorkers(clipperEditor.map(workerFromProfileRow));
     setClientProfiles(
       data
         .filter((p: Record<string, unknown>) => p.role === 'cliente')
@@ -1912,14 +1911,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [addOrder]);
 
-  const getWorkerCapacity = useCallback((workerId: string): number => {
-    const w = workersRef.current.find(x => x.id === workerId);
-    return workerCapacities[workerId] ?? w?.dailyCapacity ?? capacityConfig.defaultClipperDailyVideos;
-  }, [workerCapacities, capacityConfig.defaultClipperDailyVideos, capacityConfig.defaultEditorDailyVideos]);
+  // Todos tienen el mismo límite: 4 videos por día (ya no depende de valores guardados antes)
+  const getWorkerCapacity = useCallback((workerId: string): number => (workerId ? DAILY_VIDEO_LIMIT : DAILY_VIDEO_LIMIT), []);
 
-  const setWorkerCapacity = useCallback((workerId: string, capacity: number) => {
-    setWorkerCapacities(prev => ({ ...prev, [workerId]: Math.max(1, Math.round(capacity) || 1) }));
-  }, []);
+  const setWorkerCapacity = useCallback((workerId: string, capacity: number) => { void workerId; void capacity; /* límite fijo de 4 videos/día */ }, []);
 
   const getWorkerWorkload = useCallback((workerId: string): number => {
     const w = workersRef.current.find(x => x.id === workerId);
@@ -2290,8 +2285,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const next: CapacityProtocolConfig = {
         ...merged,
         safetyMarginPct: clampInt(merged.safetyMarginPct, 0, 50),
-        defaultClipperDailyVideos: clampInt(merged.defaultClipperDailyVideos, 1, 200),
-        defaultEditorDailyVideos: clampInt(merged.defaultEditorDailyVideos, 1, 200),
+        defaultClipperDailyVideos: DAILY_VIDEO_LIMIT,
+        defaultEditorDailyVideos: DAILY_VIDEO_LIMIT,
         workdayStartHour: start,
         workdayEndHour: clampInt(merged.workdayEndHour, start + 1, 24),
         urgentThresholdHours: clampInt(merged.urgentThresholdHours, 1, 72),
@@ -2486,6 +2481,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setTimeout(() => { applyingRemoteRef.current = false; }, 80);
     }
   }, []);
+  /** Al borrar a una persona: sus videos sin terminar quedan sin asignar (los aprobados conservan su nombre para el historial de pagos). */
+  const releaseWorkerWork = useCallback(async (workerId: string) => {
+    const nb = brandsRef.current.map(b => ({
+      ...b,
+      videos: b.videos.map(v => {
+        if (isTeamDone(v) || v.paid50) return v;
+        const c = v.clipperId === workerId; const e = v.editorId === workerId;
+        if (!c && !e) return v;
+        return { ...v, clipperId: c ? '' : v.clipperId, clipperName: c ? 'Sin asignar' : v.clipperName, editorId: e ? '' : v.editorId, editorName: e ? 'Sin asignar' : v.editorName };
+      }),
+    }));
+    const no = ordersRef.current.map(o => {
+      const touched = o.clipperId === workerId || o.editorId === workerId || (o.assignedWorkerIds || []).includes(workerId);
+      if (!touched) return o;
+      const owners = nb.flatMap(b => b.videos).filter(v => v.orderId === o.id && v.clipperId).map(v => v.clipperId);
+      const primary = owners[0] || null;
+      return { ...o, clipperId: primary, editorId: primary, assignedWorkerIds: Array.from(new Set(owners)) };
+    });
+    markLocalWrite();
+    brandsRef.current = nb; ordersRef.current = no;
+    setBrands(nb); setOrders(no); saveState('brands', nb); saveState('orders', no);
+    if (isSupabaseConfigured) { await saveSharedNow('orders', no); await saveSharedNow('brands', nb); }
+  }, [markLocalWrite]);
   const generateBriefRef = useRef<(orderId: string, overrides?: Partial<Order>) => Promise<boolean>>(async () => false);
   const notifyClientByChatRef = useRef<(clientId: string | null | undefined, text: string) => Promise<void>>(async () => {});
   const submitFeedbackRef = useRef<(videoId: string, items: { time: number; text: string }[]) => void>(() => {});
@@ -2611,7 +2629,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const store: Store = {
     role, theme, toggleTheme, view, setView,
     brands, workers: workersWithOnline, registeredUsersCount, refreshProfiles: loadWorkersFromProfiles, resyncClientView,
-    generateBriefPdf, publishScripts, resetBrief, reopenBrief, saveBriefAsAdmin, refreshAssignments,
+    generateBriefPdf, publishScripts, resetBrief, reopenBrief, saveBriefAsAdmin, refreshAssignments, releaseWorkerWork,
     notifications, deleteNotification, clearNotifications, emailLog,
     chat, paidHistory, config,
     currentWorkerId, setCurrentWorkerId,

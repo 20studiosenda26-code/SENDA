@@ -208,8 +208,11 @@ export function SettingsPanel() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <NumberField label="Margen de seguridad" suffix="%" min={0} max={50} value={cap.safetyMarginPct}
                 onChange={n => setCap(c => ({ ...c, safetyMarginPct: n }))} hint="Reserva para imprevistos y correcciones." />
-              <NumberField label="Capacidad base por persona" suffix="videos/día" min={1} value={cap.defaultClipperDailyVideos}
-                onChange={n => setCap(c => ({ ...c, defaultClipperDailyVideos: n, defaultEditorDailyVideos: n }))} hint="Videos completos al día para quien no tenga capacidad propia." />
+              <div className="bg-surface-3 border border-line rounded-xl p-3">
+                <p className="text-xs text-muted mb-1">Capacidad por persona</p>
+                <p className="font-tech text-xl font-bold text-accent">4 <span className="text-xs text-muted-2 font-normal">videos/día</span></p>
+                <p className="text-[11px] text-muted-2 mt-1">Límite fijo igual para todo el equipo.</p>
+              </div>
               <NumberField label="Alerta de urgencia" suffix="horas" min={1} max={72} value={cap.urgentThresholdHours}
                 onChange={n => setCap(c => ({ ...c, urgentThresholdHours: n }))} hint="Horas antes de la entrega para marcar urgente." />
               <NumberField label="Inicio de jornada" suffix="h" min={0} max={22} value={cap.workdayStartHour}
