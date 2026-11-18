@@ -15,8 +15,8 @@ import {
 import { TasksBoard } from "./TasksView";
 import { DriveFolderField } from "../components/DriveFolderField";
 import { ClientAccountField } from "../components/ClientAccountField";
-import { VideoAllocator, allocToList, allocTotal, type AllocMap } from "../components/tasks/VideoAllocator";
-import { buildSlots, movableCount } from "../lib/assignment";
+import { VideoAllocator, initialOwners, missingCount, type Owners } from "../components/tasks/VideoAllocator";
+import { buildSlots } from "../lib/assignment";
 import { GlowCard } from "../components/ui/spotlight-card";
 import { CountTicker } from "../components/ui/number-ticker";
 import { initialsOf } from "../components/ui/avatar-stack";
@@ -170,20 +170,21 @@ function AssignWorkspace({ search }: { search: string }) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = list.find(o => o.id === selectedId) || list[0] || null;
-  const [alloc, setAlloc] = useState<AllocMap>({});
+  const [pickedOwners, setPickedOwners] = useState<Owners | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  useEffect(() => { setAlloc({}); setConfirmDelete(false); }, [selected?.id]);
+  useEffect(() => { setPickedOwners(null); setConfirmDelete(false); }, [selected?.id]);
   const slots = useMemo(() => selected ? buildSlots(selected.videoCount, brands.flatMap(b => b.videos).filter(v => v.orderId === selected.id || v.id === selected.boardVideoId)) : [], [selected, brands]);
-  const movable = movableCount(slots);
+  const owners: Owners = pickedOwners ?? initialOwners(slots, false);
+  const pending = missingCount(slots, owners);
 
   const assign = async () => {
-    if (!selected || allocTotal(alloc) !== movable) return;
+    if (!selected || pending > 0) return;
     setAssigning(true);
     try {
-      const ok = await assignOrderVideos(selected.id, allocToList(alloc));
+      const ok = await assignOrderVideos(selected.id, [], owners);
       setDone(ok ? `"${selected.brand}" asignado y notificado. Ya está en En producción.` : `No se pudo asignar "${selected.brand}": ${briefReadiness(selected).reason}`);
       setTimeout(() => setDone(null), 6000);
     } finally {
@@ -307,18 +308,18 @@ function AssignWorkspace({ search }: { search: string }) {
                 Todavía no se puede asignar. {briefReadiness(selected).reason} Se necesita el brief confirmado con un avatar por cada video; si falta algo, avísale al cliente desde Clientes → Brief y guiones.
               </p>
             )}
-            <VideoAllocator slots={slots} alloc={alloc} onChange={setAlloc} />
+            <VideoAllocator slots={slots} owners={owners} onChange={setPickedOwners} />
             <div className="flex items-center gap-3 pt-3 flex-wrap">
               <LiquidMetalButton
                 onClick={assign}
-                disabled={allocTotal(alloc) !== movable || !briefReadiness(selected).ready}
+                disabled={pending > 0 || !briefReadiness(selected).ready}
                 loading={assigning}
                 label="Asignar proyecto"
                 loadingLabel="Asignando..."
                 icon={CheckCircle2}
                 variant="cyan"
               />
-              {allocTotal(alloc) !== movable && briefReadiness(selected).ready && <span className="text-xs text-muted-2">Reparte los {movable} videos entre las personas para asignar.</span>}
+              {pending > 0 && briefReadiness(selected).ready && <span className="text-xs text-muted-2">Faltan {pending} video{pending === 1 ? '' : 's'} por asignar: marca su número en la persona que lo hará.</span>}
             </div>
           </div>
         </GlowCard>
