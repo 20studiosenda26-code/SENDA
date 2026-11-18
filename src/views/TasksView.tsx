@@ -126,6 +126,17 @@ export function TasksView() {
       .filter(group => group.videos.length > 0);
   }, [brands, orders, currentWorkerId]);
 
+  // Un video que no es tuyo no se abre (por si llega desde un aviso o un enlace)
+  if (selectedVideo && role !== 'admin' && !isAssignedTo(selectedVideo, currentWorkerId)) {
+    return (
+      <div className="p-6 max-w-xl mx-auto text-center space-y-3 animate-fadeIn">
+        <p className="font-display text-xl font-bold">Este video no está asignado a ti</p>
+        <p className="text-sm text-muted">Solo puedes trabajar los videos que te asignó el administrador.</p>
+        <button type="button" onClick={() => setSelectedVideo(null)} className="px-4 py-2 rounded-xl bg-accent text-on-accent text-sm font-semibold hover:bg-accent-strong">Volver a mis videos</button>
+      </div>
+    );
+  }
+
   if (selectedVideo) {
     const parentBrand = brands.find(b => b.videos.some(v => v.id === selectedVideo.id));
     return (
@@ -476,7 +487,7 @@ function VideoDetail({
   };
 
   // --- Contexto del video: pedido, fecha real, videos hermanos, pago y paso actual ---
-  const { brands: allBrands, financeSettings, deleteClip, enableExtraClientFeedbackRound, setSelectedVideo: openVideo } = useStore();
+  const { brands: allBrands, financeSettings, deleteClip, enableExtraClientFeedbackRound, setSelectedVideo: openVideo, currentWorkerId: meId } = useStore();
   const order = findOrderForVideo(video, brandName, allOrders);
   const makeBriefPdf = async () => {
     if (!order) return;
@@ -485,7 +496,9 @@ function VideoDetail({
     setGeneratingBrief(false);
   };
   const deadline = deadlineMs(order?.deliveryDate || video.date, order?.deliveryTime);
+  // El equipo solo ve (y abre) los videos que le asignaron; el admin ve todo el proyecto
   const siblings = (allBrands.find(b => b.videos.some(x => x.id === video.id))?.videos || [])
+    .filter(x => role === 'admin' || isAssignedTo(x, meId))
     .slice()
     .sort((a, b) => (a.videoNumber || 0) - (b.videoNumber || 0));
   const creatorPay = unitEconomics(video, order, financeSettings).creatorPay;

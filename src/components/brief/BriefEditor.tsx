@@ -9,6 +9,7 @@ import type { Order, OrderReference, OrderScript, ScriptChoice, ScriptReview } f
 import { AvatarPicker, StylePicker, avatarChosen, type AvatarChoice, type StyleChoice } from './BriefPickers';
 import { allScripts, reviewOf, scriptHash, REVIEW_LABEL, choiceForSlot, slotKey, videoSlots } from '../../lib/scripts';
 import { AGENCY_STYLE_ID, AGENCY_STYLE_NAME } from '../../lib/styleCatalog';
+import { DownloadFileButton } from '../DownloadFileButton';
 
 /** El brief queda fijo para el cliente cuando el proyecto ya está en producción Y él ya lo confirmó.
  *  Si entró a producción sin brief confirmado, el cliente todavía puede completarlo. */
@@ -235,10 +236,8 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {order.briefFileUrl && (
-            <a href={order.briefFileUrl} target="_blank" rel="noreferrer" download={order.briefFileName || undefined}
-              className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-accent-dim text-accent border border-accent/30 flex items-center gap-1 hover:bg-accent/20">
-              <Download size={11} /> Brief en PDF
-            </a>
+            <DownloadFileButton url={order.briefFileUrl} fileName={order.briefFileName} label="Brief en PDF"
+              className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-accent-dim text-accent border border-accent/30 hover:bg-accent/20" />
           )}
           {steps.map(st => (
             <span key={st.label} className={`text-[10px] font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${st.ok && (st.required || st.label === 'Referencias') ? 'bg-mint-dim text-mint' : 'bg-surface-3 text-muted-2'}`}>
@@ -276,10 +275,8 @@ export function BriefEditor({ order, asAdmin, onDone }: { order: Order; asAdmin?
           {agencyScripts.length > 0 && (
             <>
               {order.scriptsPdfUrl && (
-                <a href={order.scriptsPdfUrl} target="_blank" rel="noreferrer" download={order.scriptsPdfName || undefined}
-                  className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-accent text-on-accent hover:bg-accent-strong">
-                  <Download size={14} /> Descargar guiones en PDF
-                </a>
+                <DownloadFileButton url={order.scriptsPdfUrl} fileName={order.scriptsPdfName} label="Descargar guiones en PDF"
+                  className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-accent text-on-accent hover:bg-accent-strong" icon={<Download size={14} />} />
               )}
               <div className="space-y-2.5">
                 {agencyScripts.map((s, i) => (
