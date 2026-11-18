@@ -71,7 +71,7 @@ function formatHour(h: number): string {
 export function CapacityView() {
   const {
     workers, orders, brands, capacityConfig, updateCapacityConfig,
-    getWorkerCapacity, setWorkerCapacity, setView,
+    getWorkerCapacity, setView,
   } = useStore();
 
   const [screen, setScreen] = useState<ActiveScreen>('dashboard');
