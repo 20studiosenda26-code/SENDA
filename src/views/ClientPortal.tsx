@@ -7,6 +7,7 @@ import { findOrderForVideo } from '../lib/economics';
 import { fmtDate } from '../components/home/home-bits';
 import { CorrectionTimeline, fmtTime } from '../components/CorrectionTimeline';
 import { TimeField } from '../components/TimeField';
+import { MediaIdentity } from '../components/MediaIdentity';
 import { useDriveVideo } from '../lib/useDriveVideo';
 import {
   ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock, Film, FolderOpen, Lock, Maximize2,
@@ -411,6 +412,13 @@ function VideoReview({
               />
             )}
           </div>
+
+          {delivered && final?.fileUrl && (
+            <MediaIdentity
+              label={inCorrection ? `Video ${video.videoNumber || ''} · la versión que ya revisaste` : `Video ${video.videoNumber || ''} entregado`}
+              url={final.fileUrl}
+            />
+          )}
 
           {delivered && (
             <div className="bg-surface-3/60 border border-line rounded-xl p-3.5 space-y-2">

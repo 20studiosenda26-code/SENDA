@@ -186,6 +186,26 @@ export function getGoogleDriveStreamCandidates(url?: string | null): string[] {
   return list;
 }
 
+const nameCache = new Map<string, string | null>();
+
+/** Nombre real del archivo en Drive (usa la clave de API de Ajustes). Sirve para comprobar qué video se está viendo. */
+export async function fetchDriveFileName(url?: string | null): Promise<string | null> {
+  const id = extractGoogleDriveId(url);
+  const apiKey = getGoogleDriveApiKey();
+  if (!id || !apiKey) return null;
+  if (nameCache.has(id)) return nameCache.get(id)!;
+  try {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=name&key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok) { nameCache.set(id, null); return null; }
+    const data = await res.json() as { name?: string };
+    const name = data.name || null;
+    nameCache.set(id, name);
+    return name;
+  } catch {
+    return null;
+  }
+}
+
 export function getGoogleDriveDownloadUrl(url?: string | null): string | null {
   const id = extractGoogleDriveId(url);
   if (!id) return null;
