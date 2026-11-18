@@ -13,7 +13,7 @@ export function WorkerPicker({ selected, onSelect, excludeId }: {
   /** Persona actual (al reasignar), para marcarla */
   excludeId?: string | null;
 }) {
-  const { workers, orders, brands, getWorkerCapacity, setWorkerCapacity } = useStore();
+  const { workers, orders, brands, getWorkerCapacity } = useStore();
 
   const rows = useMemo(() => {
     const units = buildWorkUnits(orders, brands);
@@ -67,19 +67,10 @@ export function WorkerPicker({ selected, onSelect, excludeId }: {
                 <div className="h-1 flex-1 max-w-[140px] bg-surface-2 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full ${full ? 'bg-amber' : today > 0 ? 'bg-mint' : 'bg-accent/50'}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
                 </div>
-                <span className={`text-[10px] font-tech ${full ? 'text-amber' : 'text-muted-2'}`}>Hoy {today}/{cap} · {pending} pendientes</span>
+                <span className={`text-[10px] font-tech ${full ? 'text-amber' : 'text-muted-2'}`}>{today}/{cap} videos al día · {pending} sin terminar</span>
               </div>
             </div>
-            <label className="flex items-center gap-1 text-[10px] text-muted-2 shrink-0" onClick={e => e.stopPropagation()} title="Capacidad diaria (videos completos por día)">
-              Cap.
-              <input
-                type="number"
-                min={1}
-                value={cap}
-                onChange={e => setWorkerCapacity(w.id, Number(e.target.value))}
-                className="w-11 bg-surface-2 border border-line rounded-md px-1 py-0.5 text-[11px] text-center text-text outline-none focus:border-accent"
-              />
-            </label>
+            <span className="text-[10px] text-muted-2 shrink-0" title="Límite fijo: 4 videos por día">Máx. {cap}/día</span>
           </div>
         );
       })}

@@ -6,7 +6,7 @@ import { ClientPortal } from './ClientPortal';
 import { ClientAccountField } from '../components/ClientAccountField';
 import { DriveFolderField } from '../components/DriveFolderField';
 import { OrderBriefPanel } from '../components/brief/OrderBriefPanel';
-import { addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
+import { DAILY_VIDEO_LIMIT, addDaysIso, fmtMoney, todayIso, unitEconomics } from '../lib/economics';
 import { AttentionTile, fmtDate } from '../components/home/home-bits';
 import { GlowCard } from '../components/ui/spotlight-card';
 import NumberTicker, { CountTicker } from '../components/ui/number-ticker';
@@ -248,7 +248,7 @@ function NewOrderForm({ onOpenFile, prefill }: { onOpenFile: (brand: string) => 
     const ratio = last ? Math.min(1, last.videos / dailyLimit) : 0.5;
     const start = Math.min(capacityConfig.workdayEndHour - 2, Math.max(capacityConfig.workdayStartHour + 1, capacityConfig.workdayStartHour + Math.max(1.5, ratio * (workHours - 2))));
     const finalDate = last?.date || target;
-    const perPerson = Math.max(1, capacityConfig.defaultClipperDailyVideos || 4);
+    const perPerson = DAILY_VIDEO_LIMIT;
     return {
       dailyLimit, freeOnTarget, fits, priority, reason, batches,
       eta: `${finalDate === todayIso() ? 'Hoy' : fmtDate(finalDate)} entre ${formatHour(start)} y ${formatHour(Math.min(capacityConfig.workdayEndHour, start + 2))}`,
