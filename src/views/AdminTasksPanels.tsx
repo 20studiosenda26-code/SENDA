@@ -13,6 +13,7 @@ import {
   Link2, ListChecks, Palette, Search, StickyNote, Trash2, User, UserPlus, X,
 } from "lucide-react";
 import { TasksBoard } from "./TasksView";
+import { ReassignModal } from "../components/tasks/ReassignModal";
 import { DriveFolderField } from "../components/DriveFolderField";
 import { ClientAccountField } from "../components/ClientAccountField";
 import { VideoAllocator, initialOwners, missingCount, type Owners } from "../components/tasks/VideoAllocator";
@@ -43,6 +44,9 @@ export function AdminTasksRoot() {
   const videos = useMemo(() => flattenVideos(brands), [brands]);
   const toAssign = useMemo(() => orders.filter(o => !o.clipperId && o.status !== "finalizado"), [orders]);
   const activeVideos = videos.filter(v => v.qc !== "aprobado_cliente");
+  // Pedidos con responsable pero sin videos en el tablero: el cliente los ve, así que el admin también debe verlos
+  const orphans = useMemo(() => orders.filter(o => o.status !== "finalizado" && o.clipperId
+    && !videos.some(v => v.orderId === o.id || v.id === o.boardVideoId) && !brands.some(b => b.id === `brand-${o.id}` && b.videos.length > 0)), [orders, videos, brands]);
   const myTurn = activeVideos.filter(v => adminTurn(v));
   const late = activeVideos.filter(v => {
     const o = findOrderForVideo(v, v.brandName, orders);
@@ -53,7 +57,7 @@ export function AdminTasksRoot() {
 
   const tabs: { key: Tab; label: string; count: number; icon: ReactNode }[] = [
     { key: "asignar", label: "Por asignar", count: toAssign.length, icon: <UserPlus size={15} /> },
-    { key: "produccion", label: "En producción", count: activeVideos.length, icon: <Clapperboard size={15} /> },
+    { key: "produccion", label: "En producción", count: activeVideos.length + orphans.length, icon: <Clapperboard size={15} /> },
     { key: "finalizados", label: "Finalizados", count: finishedProjects, icon: <FolderCheck size={15} /> },
   ];
 
@@ -132,11 +136,44 @@ export function AdminTasksRoot() {
       </div>
 
       {tab === "asignar" && <AssignWorkspace search={search} />}
+      {tab === "produccion" && orphans.length > 0 && <OrphanOrders orders={orphans} />}
       {tab === "produccion" && view === "etapas" && (
         <ProductionKanban search={search} person={person} onlyMine={onlyMine} setOnlyMine={setOnlyMine} />
       )}
       {tab === "produccion" && view === "proyectos" && <TasksBoard scope="activos" search={search} person={person} embedded />}
       {tab === "finalizados" && <TasksBoard scope="finalizados" search={search} embedded />}
+    </div>
+  );
+}
+
+/** Pedidos activos con responsable que todavía no tienen videos en el tablero (nunca deben quedar fuera de vista). */
+function OrphanOrders({ orders }: { orders: Order[] }) {
+  const { workers, updateOrder } = useStore();
+  const [reassign, setReassign] = useState<Order | null>(null);
+  return (
+    <div className="bg-amber-dim/30 border border-amber/30 rounded-xl p-3.5 space-y-2.5">
+      <p className="text-sm font-semibold text-amber">Proyectos activos sin videos en el tablero ({orders.length})</p>
+      <p className="text-[11px] text-muted-2">El cliente los ve, pero aún no tienen videos creados. Reparte sus videos o devuélvelos a Por asignar.</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+        {orders.map(o => {
+          const dl = deadlineMs(o.deliveryDate, o.deliveryTime);
+          const isLate = Number.isFinite(dl) && dl < Date.now();
+          const who = workers.find(w => w.id === o.clipperId)?.name || "Sin nombre";
+          return (
+            <div key={o.id} className="bg-surface-2 border border-line rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate">{o.brand} <span className="text-muted-2 font-normal">· {o.videoCount} video{o.videoCount === 1 ? "" : "s"}</span></p>
+                <p className={`text-[11px] ${isLate ? "text-red-400 font-semibold" : "text-muted-2"}`}>{countdownLabel(dl)} · Responsable: {who}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button type="button" onClick={() => setReassign(o)} className="px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:bg-accent-strong">Repartir videos</button>
+                <button type="button" onClick={() => updateOrder(o.id, { clipperId: null, editorId: null, assignedWorkerIds: [] })} className="px-3 py-1.5 rounded-lg bg-surface-3 border border-line text-xs text-muted hover:text-text">Volver a Por asignar</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {reassign && <ReassignModal order={reassign} onClose={() => setReassign(null)} />}
     </div>
   );
 }
